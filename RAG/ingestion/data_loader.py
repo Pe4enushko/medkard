@@ -38,7 +38,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 TABLE_ROW_CHUNK_SIZE: int = 6   # max rows per table chunk yielded to the pipeline
 TEXT_CHUNK_SIZE: int = 800      # characters per text chunk
 TEXT_CHUNK_OVERLAP: int = 200   # character overlap between consecutive text chunks
-PDFS_DIR: Path = Path("pdfs")
+PDFS_DIR: Path = Path("../pdfs")
 MANIFEST_PATH: Path = Path("manifest.csv")
 PDF_EXTENSION: str = ".pdf"
 # ─────────────────────────────────────────────────────────────────────────────

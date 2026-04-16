@@ -44,7 +44,7 @@ def _get_client() -> instructor.AsyncInstructor:
     global _client
     if _client is None:
         base_url = os.environ.get("OPENAI_BASE_URL")
-        _client = instructor.from_async_openai(
+        _client = instructor.from_openai(
             AsyncOpenAI(base_url=base_url) if base_url else AsyncOpenAI(),
             mode=instructor.Mode.JSON,
         )
