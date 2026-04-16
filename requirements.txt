@@ -9,6 +9,7 @@ sentence-transformers
 # PDF ingestion
 pymupdf
 tabula-py
+langchain-text-splitters
 
 # Vector store (asyncpg path)
 asyncpg

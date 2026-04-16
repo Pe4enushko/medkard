@@ -16,6 +16,8 @@ Chunk shape:
             "page": int,               # 0-based page index
             "section": str | None,     # TOC section title covering this page
             "content_type": "text" | "table",
+            # text-only:
+            "chunk_index": int,        # ordinal of this text split within the page
             # table-only:
             "table_index": int,        # ordinal of the table on the page
             "chunk_index": int,        # ordinal of this row-batch within the table
@@ -30,13 +32,21 @@ from typing import Generator, Iterator
 
 import fitz  # pymupdf
 import tabula
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # ── Configurable ─────────────────────────────────────────────────────────────
 TABLE_ROW_CHUNK_SIZE: int = 6   # max rows per table chunk yielded to the pipeline
+TEXT_CHUNK_SIZE: int = 800      # characters per text chunk
+TEXT_CHUNK_OVERLAP: int = 200   # character overlap between consecutive text chunks
 PDFS_DIR: Path = Path("pdfs")
 MANIFEST_PATH: Path = Path("manifest.csv")
 PDF_EXTENSION: str = ".pdf"
 # ─────────────────────────────────────────────────────────────────────────────
+
+_text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=TEXT_CHUNK_SIZE,
+    chunk_overlap=TEXT_CHUNK_OVERLAP,
+)
 
 
 def _section_for_page(sorted_toc: list[tuple[str, int]], page_idx: int) -> str | None:
@@ -110,16 +120,25 @@ class PDFContentReader:
                 key=lambda x: x[1],
             )
 
+        # Pages strictly before the first content section (title page, printed TOC,
+        # etc.) are skipped entirely — they are not useful for retrieval.
+        first_content_page: int = sorted_toc[0][1] if sorted_toc else 0
+
         # ── Detect table bounding boxes per page ──────────────────────
         # Stored as {page_idx: [(x0, y0, x1, y1), ...]}
         table_pages: dict[int, list[tuple]] = {}
         for page_idx in range(len(doc)):
+            if page_idx < first_content_page:
+                continue
             found = doc[page_idx].find_tables()
             if found.tables:
                 table_pages[page_idx] = [t.bbox for t in found.tables]
 
         # ── Text chunks ───────────────────────────────────────────────
         for page_idx in range(len(doc)):
+            if page_idx < first_content_page:
+                continue
+
             page = doc[page_idx]
             section = _section_for_page(sorted_toc, page_idx)
             base_meta = {
@@ -139,8 +158,16 @@ class PDFContentReader:
                     parts.append(fragment)
 
             page_text = "\n".join(parts).strip()
-            if page_text:
-                yield {"type": "text", "content": page_text, "metadata": base_meta}
+            if not page_text:
+                continue
+
+            sub_chunks = _text_splitter.split_text(page_text)
+            for chunk_idx, sub_chunk in enumerate(sub_chunks):
+                yield {
+                    "type": "text",
+                    "content": sub_chunk,
+                    "metadata": {**base_meta, "chunk_index": chunk_idx},
+                }
 
         # ── Table chunks ──────────────────────────────────────────────
         for page_idx, bboxes in table_pages.items():
