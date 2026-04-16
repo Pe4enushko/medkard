@@ -1,0 +1,32 @@
+# LLM / embeddings
+openai
+instructor
+pydantic
+
+# Sentence-transformers (optional: only needed when EMBEDDING_PROVIDER=st)
+sentence-transformers
+
+# PDF ingestion
+pymupdf
+tabula-py
+
+# Vector store (asyncpg path)
+asyncpg
+pgvector
+
+# Storage (psycopg3 path)
+psycopg[binary]
+psycopg-pool
+
+# NLP / BM25
+natasha
+rank-bm25
+numpy
+
+# Utilities
+python-dotenv
+
+# Tests
+pytest
+pytest-asyncio
+pytest_asyncio

@@ -25,15 +25,14 @@ import asyncpg
 import numpy as np
 from dotenv import load_dotenv
 from natasha import Doc, Segmenter
-from openai import AsyncOpenAI
 from pgvector.asyncpg import register_vector
 from rank_bm25 import BM25Okapi
+
+from RAG.retrieval.embeddings import EMBEDDING_DIM, EMBEDDING_MODEL, embed  # noqa: F401
 
 load_dotenv()
 
 # ── Configurable ──────────────────────────────────────────────────────────────
-EMBEDDING_DIM: int = int(os.environ.get("EMBEDDING_DIM", "1024"))
-EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-4B")
 # How many vector-search candidates to fetch before BM25 reranking.
 # Actual returned results = top_k;  candidates fetched = top_k * CANDIDATES_FACTOR.
 CANDIDATES_FACTOR: int = 5
@@ -50,7 +49,6 @@ _EMBEDDING_COL: dict[QueryType, str] = {
 }
 
 _pool: asyncpg.Pool | None = None
-_embed_client: AsyncOpenAI | None = None
 _segmenter: Segmenter = Segmenter()
 
 
@@ -88,27 +86,6 @@ async def close_pool() -> None:
     if _pool is not None:
         await _pool.close()
         _pool = None
-
-
-# ── Embeddings ────────────────────────────────────────────────────────────────
-
-def _get_embed_client() -> AsyncOpenAI:
-    global _embed_client
-    if _embed_client is None:
-        base_url = os.environ.get("EMBEDDING_BASE_URL")
-        _embed_client = AsyncOpenAI(base_url=base_url) if base_url else AsyncOpenAI()
-    return _embed_client
-
-
-async def embed(text: str, model: str = EMBEDDING_MODEL) -> list[float]:
-    """Generate an embedding vector for *text* using the configured embedding model."""
-    client = _get_embed_client()
-    response = await client.embeddings.create(
-        model=model,
-        input=text,
-        dimensions=EMBEDDING_DIM,
-    )
-    return response.data[0].embedding
 
 
 # ── Vector search ─────────────────────────────────────────────────────────────
