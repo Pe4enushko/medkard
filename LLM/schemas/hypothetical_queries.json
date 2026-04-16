@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "properties": {
+    "fact_query": {
+      "type": "string",
+      "description": "Factual 'what' question answered by this chunk"
+    },
+    "procedural_query": {
+      "type": "string",
+      "description": "Procedural 'how' question answered by this chunk"
+    },
+    "constraint_query": {
+      "type": "string",
+      "description": "Constraint question about prohibitions or contraindications in this chunk"
+    }
+  },
+  "required": ["fact_query", "procedural_query", "constraint_query"],
+  "additionalProperties": false
+}
