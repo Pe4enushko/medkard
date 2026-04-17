@@ -93,14 +93,17 @@ class FastEmbedAdapter(EmbeddingAdapter):
     _model = None  # lazy-initialised TextEmbedding
     def __init__(self):
         super().__init__()
-        TextEmbedding.add_custom_model(
-                model="onnx-community/Qwen3-Embedding-0.6B-ONNX",
-                sources=ModelSource(hf="onnx-community/Qwen3-Embedding-0.6B-ONNX"),
-                pooling="mean",
-                normalization=True,
-                # Для Qwen3-0.6B размер эмбеддинга 1536 (проверьте в config.json на HF)
-                dim=1024, 
-                description="Qwen3 Embedding 0.6B ONNX version")
+        try:
+            TextEmbedding.add_custom_model(
+                    model="onnx-community/Qwen3-Embedding-0.6B-ONNX",
+                    sources=ModelSource(hf="onnx-community/Qwen3-Embedding-0.6B-ONNX"),
+                    pooling="mean",
+                    normalization=True,
+                    # Для Qwen3-0.6B размер эмбеддинга 1536 (проверьте в config.json на HF)
+                    dim=1024, 
+                    description="Qwen3 Embedding 0.6B ONNX version")
+        except:
+            pass  # модель уже добавлена, можно игнорировать ошибку
 
     def _get_model(self):
         if self._model is None:
