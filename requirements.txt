@@ -8,6 +8,9 @@ sentence-transformers
 sentence-transformers[onnx-gpu]
 optimum
 
+# FastEmbed (optional: only needed when EMBEDDING_PROVIDER=fastembed)
+fastembed
+
 # PDF ingestion
 pymupdf
 tabula-py
