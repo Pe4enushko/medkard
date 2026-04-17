@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["flag", "issue"],
+    "additionalProperties": false,
+    "properties": {
+      "flag": {
+        "type": "string",
+        "description": "flag_code from the rule that was violated"
+      },
+      "issue": {
+        "type": "string",
+        "description": "Short explanation in Russian (1-2 sentences) of why the rule is violated"
+      }
+    }
+  }
+}

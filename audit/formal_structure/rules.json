@@ -1,0 +1,255 @@
+[
+  {
+    "rule_id": "visit_meta_required",
+    "source": "274n",
+    "rule_type": "required_field",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["visit_date", "specialty", "patient_age", "patient_sex", "service_name"],
+    "expectation": "В записи должны быть идентифицируемы дата приёма, специальность, возраст, пол пациента и услуга/тип визита.",
+    "flag_code": "MISSING_VISIT_METADATA",
+    "severity": "critical"
+  },
+  {
+    "rule_id": "primary_core_sections_required",
+    "source": "274n",
+    "rule_type": "required_field",
+    "applies_to": {
+      "visit_types": ["primary"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["complaints", "anamnesis", "objective_exam", "diagnosis", "recommendations"],
+    "expectation": "Для первичного амбулаторного приёма должны быть отражены жалобы, анамнез, объективный осмотр, диагноз и итоговая тактика/рекомендации.",
+    "flag_code": "PRIMARY_MISSING_CORE_SECTION",
+    "severity": "critical"
+  },
+  {
+    "rule_id": "repeat_core_sections_required",
+    "source": "274n",
+    "rule_type": "required_field",
+    "applies_to": {
+      "visit_types": ["repeat"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["objective_exam", "diagnosis", "recommendations"],
+    "expectation": "Для повторного приёма должны быть отражены текущий статус пациента, объективный осмотр, диагноз/оценка состояния и дальнейшая тактика.",
+    "flag_code": "REPEAT_MISSING_CORE_SECTION",
+    "severity": "critical"
+  },
+  {
+    "rule_id": "repeat_needs_context_or_dynamics",
+    "source": "203n",
+    "rule_type": "conditional_required",
+    "applies_to": {
+      "visit_types": ["repeat"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["dynamics", "clinical_context"],
+    "expectation": "Для повторного приёма должна быть отражена динамика заболевания, эффект лечения или иной клинический контекст повторного визита.",
+    "flag_code": "REPEAT_MISSING_DYNAMICS",
+    "severity": "major"
+  },
+  {
+    "rule_id": "diagnosis_required",
+    "source": "274n",
+    "rule_type": "required_field",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["diagnosis"],
+    "expectation": "В записи должен быть указан хотя бы один диагноз или заключение по результату осмотра.",
+    "flag_code": "MISSING_DIAGNOSIS",
+    "severity": "critical"
+  },
+  {
+    "rule_id": "diagnosis_should_be_supported",
+    "source": "203n",
+    "rule_type": "diagnosis_check",
+    "applies_to": {
+      "visit_types": ["primary", "repeat"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["complaints", "anamnesis", "objective_exam", "diagnosis"],
+    "expectation": "Диагноз должен быть логически поддержан жалобами, анамнезом и/или данными объективного осмотра.",
+    "flag_code": "DX_NOT_SUPPORTED_BY_RECORD",
+    "severity": "major"
+  },
+  {
+    "rule_id": "management_should_follow_diagnosis",
+    "source": "203n",
+    "rule_type": "consistency",
+    "applies_to": {
+      "visit_types": ["primary", "repeat"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["diagnosis", "recommendations", "treatment_plan", "investigation_plan"],
+    "expectation": "Назначения, обследования и рекомендации должны быть логически связаны с отражённым диагнозом и состоянием пациента.",
+    "flag_code": "MANAGEMENT_NOT_SUPPORTED",
+    "severity": "major"
+  },
+  {
+    "rule_id": "objective_exam_required",
+    "source": "203n",
+    "rule_type": "required_field",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["objective_exam"],
+    "expectation": "В записи должен быть отражён факт объективного осмотра пациента.",
+    "flag_code": "MISSING_OBJECTIVE_EXAM",
+    "severity": "critical"
+  },
+  {
+    "rule_id": "plan_vs_result_separation",
+    "source": "274n",
+    "rule_type": "structure_defect",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["investigation_plan", "results"],
+    "expectation": "План обследования не должен содержать готовые результаты исследования, а результаты не должны быть записаны как план.",
+    "flag_code": "PLAN_RESULT_MIXED",
+    "severity": "major"
+  },
+  {
+    "rule_id": "placeholder_values_are_defect",
+    "source": "274n",
+    "rule_type": "structure_defect",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["any_field"],
+    "expectation": "Пустые placeholder-значения, технический мусор и неинформативные заглушки считаются дефектом оформления записи.",
+    "flag_code": "PLACEHOLDER_VALUE_DETECTED",
+    "severity": "major"
+  },
+  {
+    "rule_id": "duplicate_semantic_blocks_are_defect",
+    "source": "274n",
+    "rule_type": "structure_defect",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["any_field"],
+    "expectation": "Дублирование смысловых блоков или неоднократное заполнение одного и того же реквизита с конфликтом значений считается дефектом структуры.",
+    "flag_code": "DUPLICATE_SEMANTIC_BLOCK",
+    "severity": "minor"
+  },
+  {
+    "rule_id": "service_specialty_visit_alignment",
+    "source": "274n",
+    "rule_type": "consistency",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["service_name", "specialty", "visit_type"],
+    "expectation": "Услуга, специальность и тип визита должны быть согласованы друг с другом.",
+    "flag_code": "SERVICE_VISIT_MISMATCH",
+    "severity": "major"
+  },
+  {
+    "rule_id": "followup_needed_for_nontrivial_case",
+    "source": "203n",
+    "rule_type": "followup_check",
+    "applies_to": {
+      "visit_types": ["primary", "repeat"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["follow_up", "state", "diagnosis", "recommendations"],
+    "condition": "Если состояние описано как средней тяжести, есть осложнение, активный инфекционный процесс, бронхообструкция, отит или иная клинически значимая ситуация.",
+    "expectation": "В таких случаях в записи ожидается указание на повторный осмотр, наблюдение или контроль.",
+    "flag_code": "MISSING_FOLLOWUP_FOR_ACTIVE_CASE",
+    "severity": "major"
+  },
+  {
+    "rule_id": "prophylactic_absence_of_complaints_allowed",
+    "source": "211n",
+    "rule_type": "prophylactic_exception",
+    "applies_to": {
+      "visit_types": ["prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["complaints"],
+    "expectation": "Для профилактического осмотра отсутствие жалоб или формулировка 'жалоб нет' допустимы и не считаются дефектом.",
+    "flag_code": "ALLOW_NO_COMPLAINTS_IN_PROPHYLACTIC",
+    "severity": "minor"
+  },
+  {
+    "rule_id": "prophylactic_absence_of_dynamics_allowed",
+    "source": "211n",
+    "rule_type": "prophylactic_exception",
+    "applies_to": {
+      "visit_types": ["prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["dynamics", "clinical_context"],
+    "expectation": "Для профилактического осмотра отсутствие динамики заболевания допустимо, если цель визита профилактическая или административная.",
+    "flag_code": "ALLOW_NO_DYNAMICS_IN_PROPHYLACTIC",
+    "severity": "minor"
+  },
+  {
+    "rule_id": "prophylactic_no_treatment_allowed_if_decision_present",
+    "source": "211n",
+    "rule_type": "allowed_missing",
+    "applies_to": {
+      "visit_types": ["prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["recommendations", "treatment_plan"],
+    "expectation": "Для профилактического осмотра отсутствие лечения допустимо, если в записи есть понятное итоговое медицинское решение или заключение.",
+    "flag_code": "ALLOW_NO_TREATMENT_IN_PROPHYLACTIC",
+    "severity": "minor"
+  },
+  {
+    "rule_id": "icd_text_alignment",
+    "source": "icd10",
+    "rule_type": "diagnosis_check",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["diagnosis_code", "diagnosis_text"],
+    "expectation": "Код МКБ и текстовая детализация диагноза должны быть хотя бы на одном клиническом уровне и не противоречить друг другу.",
+    "flag_code": "ICD_TEXT_MISMATCH",
+    "severity": "major"
+  },
+  {
+    "rule_id": "too_general_icd_for_rich_detail",
+    "source": "icd10",
+    "rule_type": "diagnosis_check",
+    "applies_to": {
+      "visit_types": ["primary", "repeat"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["diagnosis_code", "diagnosis_text"],
+    "expectation": "Если код МКБ слишком общий, а детализация диагноза содержит несколько самостоятельных состояний, это должно помечаться как флаг неполного или грубого кодирования.",
+    "flag_code": "DX_TOO_GENERAL_FOR_DETAIL",
+    "severity": "major"
+  }
+]
