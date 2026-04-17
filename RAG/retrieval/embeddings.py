@@ -97,8 +97,7 @@ class FastEmbedAdapter(EmbeddingAdapter):
         if self._model is None:
             from fastembed import TextEmbedding  # lazy import
             TextEmbedding.add_custom_model(
-                model_file="onnx-community/Qwen3-Embedding-0.6B-ONNX",
-                model_name="onnx-community/Qwen3-Embedding-0.6B-ONNX",
+                model="onnx-community/Qwen3-Embedding-0.6B-ONNX",
                 model_source=ModelSource.hf,
                 # Для Qwen3-0.6B размер эмбеддинга 1536 (проверьте в config.json на HF)
                 dim=1024, 
