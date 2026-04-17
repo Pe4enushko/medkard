@@ -149,3 +149,12 @@ class DocsStorage(BaseStorage):
             cur = await conn.execute("SELECT DISTINCT file_id FROM docs")
             rows = await cur.fetchall()
         return {r["file_id"] for r in rows}
+
+    async def delete_by_file_id(self, file_id: str) -> int:
+        """Delete all rows for the given file_id; returns number of deleted rows."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "DELETE FROM docs WHERE file_id = %(file_id)s",
+                {"file_id": file_id},
+            )
+        return cur.rowcount
