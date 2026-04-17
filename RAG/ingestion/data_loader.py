@@ -41,9 +41,26 @@ TABLE_ROW_CHUNK_SIZE: int = 8   # max rows per table chunk yielded to the pipeli
 TEXT_CHUNK_SIZE: int = 2000     # characters per text chunk
 TEXT_CHUNK_OVERLAP: int = 200   # character overlap between consecutive text chunks
 
-# Regex that matches numbered sections like "1.1 Title ..." spanning multiple lines.
-_SECTION_PATTERN: re.Pattern = re.compile(r'^(\d+\.\d+\s+(?!.*\.{3,}.*$).*?)(?=^\d+\.\d+\s+|\Z)', re.MULTILINE | re.DOTALL)
-_SECTION_TITLE_PATTERN: re.Pattern = re.compile(r'^(\d+\.\d+\s+(?!.*\.{3,}.*$)[^\n]+)', re.MULTILINE)
+# Regex that matches numbered sections like "1.1 Title" 
+# ignoring fake sections indicated by more than 2 dots in text (so we ignore trailing dots from ToC but match titles containing just some dots).
+_SECTION_PATTERN: re.Pattern = re.compile(
+    r'^('
+    r'\d+\.\d+\s+'
+    r'(?=[^\n]*[A-Za-zА-Яа-я])'
+    r'(?![^\n]*\.{2,})'
+    r'.*?'
+    r')(?=^\d+\.\d+\s+|\Z)',
+    re.MULTILINE | re.DOTALL
+)
+_SECTION_TITLE_PATTERN: re.Pattern = re.compile(
+    r'^('
+    r'\d+\.\d+\s+'
+    r'(?=[^\n]*[A-Za-zА-Яа-я])'
+    r'(?![^\n]*\.{2,})'
+    r'[^\n]+'
+    r')',
+    re.MULTILINE
+)
 PDFS_DIR: Path = Path("../pdfs")
 MANIFEST_PATH: Path = Path("manifest.csv")
 PDF_EXTENSION: str = ".pdf"
