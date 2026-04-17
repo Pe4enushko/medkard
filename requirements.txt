@@ -5,6 +5,7 @@ pydantic
 
 # Sentence-transformers (optional: only needed when EMBEDDING_PROVIDER=st)
 sentence-transformers
+sentence-transformers[onnx-gpu]
 optimum
 
 # PDF ingestion
