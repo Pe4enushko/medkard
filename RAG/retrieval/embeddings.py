@@ -91,12 +91,9 @@ class FastEmbedAdapter(EmbeddingAdapter):
     """Local inference via fastembed (ONNX runtime, runs in a thread executor)."""
 
     _model = None  # lazy-initialised TextEmbedding
-    
-
-    def _get_model(self):
-        if self._model is None:
-            from fastembed import TextEmbedding  # lazy import
-            TextEmbedding.add_custom_model(
+    def __init__(self):
+        super().__init__()
+        TextEmbedding.add_custom_model(
                 model="onnx-community/Qwen3-Embedding-0.6B-ONNX",
                 sources=[ModelSource.hf],
                 pooling="mean",
@@ -104,6 +101,10 @@ class FastEmbedAdapter(EmbeddingAdapter):
                 # Для Qwen3-0.6B размер эмбеддинга 1536 (проверьте в config.json на HF)
                 dim=1024, 
                 description="Qwen3 Embedding 0.6B ONNX version")
+
+    def _get_model(self):
+        if self._model is None:
+            from fastembed import TextEmbedding  # lazy import
 
             self._model = TextEmbedding(
                 model_name=EMBEDDING_MODEL,
