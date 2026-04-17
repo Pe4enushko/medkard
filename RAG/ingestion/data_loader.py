@@ -42,8 +42,8 @@ TEXT_CHUNK_SIZE: int = 2000     # characters per text chunk
 TEXT_CHUNK_OVERLAP: int = 200   # character overlap between consecutive text chunks
 
 # Regex that matches numbered sections like "1.1 Title ..." spanning multiple lines.
-_SECTION_PATTERN: re.Pattern = re.compile(r'(?ms)^(\d+\.\d+\s+.*?)(?=^\d+\.\d+\s+|\Z)')
-_SECTION_TITLE_PATTERN: re.Pattern = re.compile(r'^(\d+\.\d+\s+[^\n]+)')
+_SECTION_PATTERN: re.Pattern = re.compile(r'^(\d+\.\d+\s+(?!.*\.{3,}.*$).*?)(?=^\d+\.\d+\s+|\Z)', re.MULTILINE | re.DOTALL)
+_SECTION_TITLE_PATTERN: re.Pattern = re.compile(r'^(\d+\.\d+\s+(?!.*\.{3,}.*$)[^\n]+)', re.MULTILINE)
 PDFS_DIR: Path = Path("../pdfs")
 MANIFEST_PATH: Path = Path("manifest.csv")
 PDF_EXTENSION: str = ".pdf"
