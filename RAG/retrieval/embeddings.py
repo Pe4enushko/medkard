@@ -69,7 +69,7 @@ class SentenceTransformersAdapter(EmbeddingAdapter):
         if self._model is None:
             from sentence_transformers import SentenceTransformer  # lazy import
 
-            self._model = SentenceTransformer(EMBEDDING_MODEL)
+            self._model = SentenceTransformer(EMBEDDING_MODEL, device="cpu", backend="onnx")
         return self._model
 
     async def embed(self, text: str) -> list[float]:
