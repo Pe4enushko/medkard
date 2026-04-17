@@ -24,6 +24,8 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 
 from dotenv import load_dotenv
+from fastembed import TextEmbedding
+from fastembed.common.model_description import ModelSource
 
 load_dotenv()
 
@@ -89,10 +91,18 @@ class FastEmbedAdapter(EmbeddingAdapter):
     """Local inference via fastembed (ONNX runtime, runs in a thread executor)."""
 
     _model = None  # lazy-initialised TextEmbedding
+    
 
     def _get_model(self):
         if self._model is None:
             from fastembed import TextEmbedding  # lazy import
+            TextEmbedding.add_custom_model(
+                model_id="onnx-community/Qwen3-Embedding-0.6B-ONNX",
+                model_name="onnx-community/Qwen3-Embedding-0.6B-ONNX",
+                model_source=ModelSource.HF,
+                # Для Qwen3-0.6B размер эмбеддинга 1536 (проверьте в config.json на HF)
+                dim=1024, 
+                description="Qwen3 Embedding 0.6B ONNX version")
 
             self._model = TextEmbedding(
                 model_name=EMBEDDING_MODEL,
