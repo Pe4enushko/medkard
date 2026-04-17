@@ -194,6 +194,18 @@ class PDFContentReader:
 
         full_text = "\n".join(full_parts).strip()
 
+        # ── Strip TOC / title pages ───────────────────────────────────
+        # PDFs typically contain "Список сокращений" twice: once in the
+        # printed table of contents and once as the actual section heading.
+        # Everything up to (and including) the second match is front matter
+        # and should be discarded.
+        _ABBR = "Список сокращений"
+        first = full_text.find(_ABBR)
+        if first != -1:
+            second = full_text.find(_ABBR, first + len(_ABBR))
+            if second != -1:
+                full_text = full_text[second:].strip()
+
         # ── Text chunks — split by numbered sections, then chunk within each ──
         if full_text:
             sections = _split_into_sections(full_text)

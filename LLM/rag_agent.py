@@ -70,16 +70,18 @@ async def retrieve(query: str) -> str:
 
     return "\n\n---\n\n".join(parts)
 
+async def create_checker_agent(
+    system_prompt: str,
+    tools: list,
+) -> AgentExecutor:
+    """Create a checker agent with custom file-id-bound tools.
 
-async def create_rag_agent(system_prompt: str) -> AgentExecutor:
-    """Create and return a LangChain OpenAI-tools agent with the RAG retrieval tool.
-
-    The agent can call ``retrieve`` as many times as needed before producing
-    its final answer.
+    Unlike ``create_rag_agent``, the tools are supplied by the caller (pre-bound
+    to a specific guideline document via ``get_tools_for`` / ``get_*_tools_for``).
 
     Args:
-        system_prompt: Fully rendered system prompt describing the task and
-                       the expected output format.
+        system_prompt: Fully rendered system prompt for the checker.
+        tools:         List of :class:`BaseTool` instances (already file-id bound).
 
     Returns:
         A ready-to-invoke :class:`AgentExecutor` instance.
@@ -96,11 +98,11 @@ async def create_rag_agent(system_prompt: str) -> AgentExecutor:
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
-    agent = create_openai_tools_agent(llm=llm, tools=[retrieve], prompt=prompt)
+    agent = create_openai_tools_agent(llm=llm, tools=tools, prompt=prompt)
 
     return AgentExecutor(
         agent=agent,
-        tools=[retrieve],
+        tools=tools,
         verbose=True,
         max_iterations=8,
         handle_parsing_errors=True,

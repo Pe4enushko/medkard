@@ -36,6 +36,7 @@ numpy
 
 # Utilities
 python-dotenv
+openpyxl
 
 # Tests
 pytest

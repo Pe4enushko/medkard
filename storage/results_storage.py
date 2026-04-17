@@ -5,48 +5,44 @@ ResultsStorage — async psycopg3 interface for the *results* table.
 import json
 
 from .base import BaseStorage
-from .models import ClinicalSource, Result, Source
+from .models import Issue, IssueSource, Result
 
 
 def _row_to_result(row: dict) -> Result:
-    clinical_sources = [
-        ClinicalSource(
-            flag=cs["flag"],
+    issues = [
+        Issue(
+            issue=item["issue"],
             sources=[
-                Source(
-                    file=s["file"],
-                    file_metadata=s["file_metadata"],
-                    page=s["page"],
+                IssueSource(
+                    doc_title=s["doc_title"],
                     section=s.get("section"),
                 )
-                for s in cs.get("sources", [])
+                for s in item.get("sources", [])
             ],
         )
-        for cs in (row.get("clinical_sources") or [])
+        for item in (row.get("issues") or [])
     ]
     return Result(
         id=row["id"],
         input=row["input"],
         flags=row["flags"],
-        clinical_sources=clinical_sources,
+        issues=issues,
     )
 
 
-def _serialize_clinical_sources(clinical_sources: list[ClinicalSource]) -> str:
+def _serialize_issues(issues: list[Issue]) -> str:
     return json.dumps([
         {
-            "flag": cs.flag,
+            "issue": iss.issue,
             "sources": [
                 {
-                    "file": s.file,
-                    "file_metadata": s.file_metadata,
-                    "page": s.page,
-                    **( {"section": s.section} if s.section is not None else {}),
+                    "doc_title": s.doc_title,
+                    **({"section": s.section} if s.section is not None else {}),
                 }
-                for s in cs.sources
+                for s in iss.sources
             ],
         }
-        for cs in clinical_sources
+        for iss in issues
     ])
 
 
@@ -68,14 +64,14 @@ class ResultsStorage(BaseStorage):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
-                INSERT INTO results (input, flags, clinical_sources)
-                VALUES (%(input)s, %(flags)s, %(clinical_sources)s)
+                INSERT INTO results (input, flags, issues)
+                VALUES (%(input)s, %(flags)s, %(issues)s)
                 RETURNING id::text
                 """,
                 {
                     "input": json.dumps(result.input),
                     "flags": result.flags,
-                    "clinical_sources": _serialize_clinical_sources(result.clinical_sources),
+                    "issues": _serialize_issues(result.issues),
                 },
             )
             row = await cur.fetchone()
@@ -89,7 +85,7 @@ class ResultsStorage(BaseStorage):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
-                SELECT id::text, input, flags, clinical_sources
+                SELECT id::text, input, flags, issues
                 FROM results
                 WHERE id = %(id)s::uuid
                 """,
@@ -103,7 +99,7 @@ class ResultsStorage(BaseStorage):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
-                SELECT id::text, input, flags, clinical_sources
+                SELECT id::text, input, flags, issues
                 FROM results
                 WHERE %(flag)s = ANY(flags)
                 ORDER BY id

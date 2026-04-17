@@ -1,59 +1,68 @@
 """
-DiagnosisValidator — diagnosis-check audit for a single ambulatory visit.
+DiagnosisValidator — clinical-guideline checker for a single diagnosis.
 
 Workflow::
     validator = DiagnosisValidator(visit)
+    result    = await validator.validate_diagnosis(diagnosis)
+    # DiagnosisAuditResult(anamnesis_issues, inspection_issues, treatment_issues, ...)
 
-    diagnoses  = validator.get_diagnoses()      # list of diagnosis dicts
-    findings   = await validator.validate_diagnosis(diagnosis)
-    # [{flag, issue}, ...] per diagnosis
+Responsibilities (narrow):
+- Look up the relevant guideline via ClinicRecs.
+- Run the three checker agents (anamnesis / inspection / treatment) in parallel.
+- Return a DiagnosisAuditResult.
 
-``validate_diagnosis`` converts ДанныеОсмотра into readable text, then
-invokes the LangChain RAG agent from LLM.rag_agent to reason over the
-clinical context and return structured findings.
+Formal structure checking and Excel logging are handled by audit.pipeline.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
-from LLM.rag_agent import create_rag_agent
+from LLM.rag_agent import create_checker_agent
+from LLM.tools import (
+    get_anamnesis_tools_for,
+    get_inspection_tools_for,
+    get_treatment_tools_for,
+)
+from audit.diagnosis.clinic_recs import ClinicRecs
+from audit.models import DiagnosisAuditResult
+from storage.models.result import Issue, IssueSource
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
-_PROMPT_PATH = Path(__file__).parent.parent.parent / "LLM" / "prompts" / "diagnosis_validator.txt"
-_SYSTEM_PROMPT: str = _PROMPT_PATH.read_text(encoding="utf-8")
+# ── Checker prompts ───────────────────────────────────────────────────────────
+_PROMPTS_DIR = Path(__file__).parent.parent.parent / "LLM" / "prompts"
+
+
+def _load_prompt(name: str) -> str:
+    return (_PROMPTS_DIR / name).read_text(encoding="utf-8")
+
+
+_ANAMNESIS_PROMPT: str = _load_prompt("anamnesis_checker.txt")
+_INSPECTION_PROMPT: str = _load_prompt("inspection_checker.txt")
+_TREATMENT_PROMPT: str = _load_prompt("treatment_checker.txt")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def _parse_inspection_data(raw_visit: dict[str, Any]) -> str:
-    """Convert ДанныеОсмотра list into human-readable ``key: value`` text.
-
-    Each element ``{"Параметр": P, "Значение": V}`` becomes a line ``P: V``.
-    Empty or missing values are omitted.
-    """
     items: list[dict] = raw_visit.get("ДанныеОсмотра", [])
     lines: list[str] = []
     for item in items:
-        key: str = str(item.get("Параметр", "")).strip()
-        value: str = str(item.get("Значение", "")).strip()
+        key = str(item.get("Параметр", "")).strip()
+        value = str(item.get("Значение", "")).strip()
         if key and value:
             lines.append(f"{key}: {value}")
     return "\n".join(lines)
 
 
 def _format_diagnosis(diagnosis: dict[str, Any]) -> str:
-    """Render a single diagnosis record as structured text."""
-    code: str = diagnosis.get("КодМКБ", "—")
-    name: str = diagnosis.get("НаименованиеМКБ", "—")
-    detail: str = diagnosis.get("Детализация", "")
-    first: bool | None = diagnosis.get("ВыявленВпервые")
+    code = diagnosis.get("КодМКБ", "—")
+    name = diagnosis.get("НаименованиеМКБ", "—")
+    detail = diagnosis.get("Детализация", "")
+    first = diagnosis.get("ВыявленВпервые")
 
-    lines = [
-        f"Код МКБ: {code}",
-        f"Наименование МКБ: {name}",
-    ]
+    lines = [f"Код МКБ: {code}", f"Наименование МКБ: {name}"]
     if detail:
         lines.append(f"Детализация: {detail}")
     if first is not None:
@@ -61,8 +70,51 @@ def _format_diagnosis(diagnosis: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _parse_issues(output: str) -> list[Issue]:
+    """Parse a checker agent's JSON output into a list of Issue objects."""
+    text = output.strip()
+    if text.startswith("```"):
+        parts = text.split("```")
+        text = parts[1] if len(parts) > 1 else text
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+
+    try:
+        raw: list[dict] = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(raw, list):
+        return []
+
+    issues: list[Issue] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        issue_text = item.get("issue", "")
+        if not issue_text:
+            continue
+        sources = [
+            IssueSource(
+                doc_title=s.get("doc_title", ""),
+                section=s.get("section"),
+            )
+            for s in item.get("sources", [])
+            if isinstance(s, dict)
+        ]
+        issues.append(Issue(issue=issue_text, sources=sources))
+    return issues
+
+
+async def _run_checker(system_prompt: str, tools: list, human_message: str) -> list[Issue]:
+    agent = await create_checker_agent(system_prompt, tools)
+    result = await agent.ainvoke({"input": human_message})
+    return _parse_issues(result.get("output", "[]"))
+
+
 class DiagnosisValidator:
-    """Validates each diagnosis in a visit against clinical context via RAG agent.
+    """Checks a single diagnosis against its clinical guideline via three agents.
 
     Args:
         visit: Raw visit dict (as parsed from the source JSON).
@@ -70,69 +122,45 @@ class DiagnosisValidator:
 
     def __init__(self, visit: dict[str, Any]) -> None:
         self._visit = visit
-
-    def get_diagnoses(self) -> list[dict[str, Any]]:
-        """Return the list of diagnosis records from the visit (key «Диагнозы»).
-
-        Returns:
-            List of diagnosis dicts. Empty list if the key is absent.
-        """
-        return self._visit.get("Диагнозы", [])
+        self._clinic_recs = ClinicRecs()
 
     async def validate_diagnosis(
         self,
         diagnosis: dict[str, Any],
-    ) -> list[dict[str, str]]:
-        """Validate a single diagnosis against the clinical context of the visit.
-
-        Steps:
-            1. Parses ``ДанныеОсмотра`` into readable ``key: value`` text.
-            2. Combines the diagnosis record and the inspection text into a
-               single prompt message.
-            3. Invokes the RAG agent (which can call ``retrieve`` as needed).
-            4. Parses the final JSON output and returns the findings list.
+    ) -> DiagnosisAuditResult:
+        """Run anamnesis / inspection / treatment checker agents for *diagnosis*.
 
         Args:
-            diagnosis: A single element from ``get_diagnoses()``.
+            diagnosis: A single entry from the visit's «Диагнозы» list.
 
         Returns:
-            List of finding dicts: ``[{"flag": ..., "issue": ...}, ...]``.
-            Empty list means no defects were detected for this diagnosis.
-
-        Raises:
-            ValueError: If the agent output cannot be parsed as a JSON array.
+            :class:`DiagnosisAuditResult` with issues grouped by checker type.
         """
-        inspection_text = _parse_inspection_data(self._visit)
-        diagnosis_text = _format_diagnosis(diagnosis)
+        patient: dict = self._visit.get("Пациент", {})
+        file_id = await self._clinic_recs.pick_recs(patient, diagnosis)
 
-        human_message = (
-            "## Диагноз\n"
-            f"{diagnosis_text}\n\n"
-            "## Клинический контекст (данные осмотра)\n"
-            f"{inspection_text}"
+        anamnesis_issues: list[Issue] = []
+        inspection_issues: list[Issue] = []
+        treatment_issues: list[Issue] = []
+
+        if file_id:
+            human_message = (
+                "## Диагноз\n"
+                f"{_format_diagnosis(diagnosis)}\n\n"
+                "## Клинический контекст (данные осмотра)\n"
+                f"{_parse_inspection_data(self._visit)}"
+            )
+
+            anamnesis_issues, inspection_issues, treatment_issues = await asyncio.gather(
+                _run_checker(_ANAMNESIS_PROMPT, get_anamnesis_tools_for(file_id), human_message),
+                _run_checker(_INSPECTION_PROMPT, get_inspection_tools_for(file_id), human_message),
+                _run_checker(_TREATMENT_PROMPT, get_treatment_tools_for(file_id), human_message),
+            )
+
+        return DiagnosisAuditResult(
+            anamnesis_issues=anamnesis_issues,
+            inspection_issues=inspection_issues,
+            treatment_issues=treatment_issues,
+            guideline_file_id=file_id,
         )
 
-        agent = await create_rag_agent(_SYSTEM_PROMPT)
-        result = await agent.ainvoke({"input": human_message})
-        output: str = result.get("output", "[]").strip()
-
-        # Strip possible markdown code fences
-        if output.startswith("```"):
-            output = output.split("```")[1]
-            if output.startswith("json"):
-                output = output[4:]
-            output = output.strip()
-
-        try:
-            findings = json.loads(output)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"DiagnosisValidator: agent returned non-JSON output: {output!r}"
-            ) from exc
-
-        if not isinstance(findings, list):
-            raise ValueError(
-                f"DiagnosisValidator: expected a JSON array, got: {type(findings)}"
-            )
-        return [{"flag": f["flag"], "issue": f["issue"]} for f in findings]
-#TODO: develop normal flag list for diagnosis or move from flags on issues array.
