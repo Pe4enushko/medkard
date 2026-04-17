@@ -95,7 +95,7 @@ class FastEmbedAdapter(EmbeddingAdapter):
         super().__init__()
         TextEmbedding.add_custom_model(
                 model="onnx-community/Qwen3-Embedding-0.6B-ONNX",
-                sources={"hf":ModelSource.hf},
+                sources=ModelSource(hf="onnx-community/Qwen3-Embedding-0.6B-ONNX"),
                 pooling="mean",
                 normalization=True,
                 # Для Qwen3-0.6B размер эмбеддинга 1536 (проверьте в config.json на HF)
