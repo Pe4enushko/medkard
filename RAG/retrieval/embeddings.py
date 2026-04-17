@@ -25,7 +25,7 @@ from functools import lru_cache
 
 from dotenv import load_dotenv
 from fastembed import TextEmbedding
-from fastembed.common.model_description import ModelSource
+from fastembed.common.model_description import ModelSource, PoolingType
 
 load_dotenv()
 
@@ -97,7 +97,7 @@ class FastEmbedAdapter(EmbeddingAdapter):
             TextEmbedding.add_custom_model(
                     model="onnx-community/Qwen3-Embedding-0.6B-ONNX",
                     sources=ModelSource(hf="onnx-community/Qwen3-Embedding-0.6B-ONNX"),
-                    pooling="mean",
+                    pooling=PoolingType.MEAN,
                     normalization=True,
                     # Для Qwen3-0.6B размер эмбеддинга 1536 (проверьте в config.json на HF)
                     dim=1024, 
