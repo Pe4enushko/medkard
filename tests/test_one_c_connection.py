@@ -19,6 +19,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def main() -> None:
     client = OneCClient.from_env()
+    print(client.url)
+    print(client.login)
     data = client.fetch_json_for_today()
 
     filename = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".json"
