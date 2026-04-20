@@ -80,6 +80,7 @@ async def decide_file_id(
         max_tokens=32,
     )
 
+    logger.debug()("[decider] LLM response:\n%s", resp.model_dump_json(indent=2))
     raw_content = resp.choices[0].message.content
     logger.debug("[decider] raw LLM answer: %s", raw_content)
     chosen = raw_content.strip().strip('"').strip("'")
