@@ -124,6 +124,19 @@ async def main() -> None:
                 # Collect all chunks for this file, then process in batches.
                 all_chunks = list(reader.iter_chunks())
                 log.info("  %s: %d chunk(s) to process", current_file_id, len(all_chunks))
+                for ci, chunk in enumerate(all_chunks):
+                    meta = chunk["metadata"]
+                    content_preview = _chunk_text(chunk)[:120].replace("\n", " ")
+                    log.debug(
+                        "  [%s] chunk %d/%d — type=%s page=%s section=%r content=%r",
+                        current_file_id,
+                        ci + 1,
+                        len(all_chunks),
+                        chunk.get("type"),
+                        meta.get("page"),
+                        meta.get("section"),
+                        content_preview,
+                    )
 
                 for batch_start in range(0, len(all_chunks), QUERY_GENERATION_BATCH_SIZE):
                     batch = all_chunks[batch_start: batch_start + QUERY_GENERATION_BATCH_SIZE]
