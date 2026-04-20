@@ -8,8 +8,8 @@ appointments payload. The first appointment in the array will be audited.
 import asyncio
 from pathlib import Path
 
-from audit.pipeline import AuditPipeline
-from parsers.json_parser import AppointmentsParser
+from ..audit.pipeline import AuditPipeline
+from ..parsers.json_parser import AppointmentsParser
 
 APPOINTMENTS_JSON_PATH = r"visit.json"
 
