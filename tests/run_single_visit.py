@@ -61,7 +61,8 @@ async def main() -> None:
 
     for i, result in enumerate(results, 1):
         logger.info("--- Result %d ---", i)
-        logger.info("Flags : %s", result.flags)
+        logger.info("Formal flags : %s", result.formal.flags)
+        logger.info("Formal issues: %s", result.formal.findings)
         logger.info("Issues: %s", result.issues)
 
 

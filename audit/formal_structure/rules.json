@@ -251,5 +251,19 @@
     "expectation": "Если код МКБ слишком общий, а детализация диагноза содержит несколько самостоятельных состояний, это должно помечаться как флаг неполного или грубого кодирования.",
     "flag_code": "DX_TOO_GENERAL_FOR_DETAIL",
     "severity": "major"
+  },
+  {
+    "rule_id": "has_typos",
+    "source": "",
+    "rule_type": "structure_defect",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["any_field"],
+    "expectation": "Запись не должна содержать явных орфографических ошибок, опечаток или искажённых медицинских терминов, затрудняющих понимание документа.",
+    "flag_code": "HAS_TYPOS",
+    "severity": "minor"
   }
 ]

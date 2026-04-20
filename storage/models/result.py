@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
@@ -18,11 +20,35 @@ class Issue:
 
 
 @dataclass
+class FormalFinding:
+    """One finding from the formal-structure check."""
+
+    flag: str
+    issue: str
+
+
+@dataclass
+class FormalStructureResult:
+    """All findings from the formal-structure audit dimension."""
+
+    findings: list[FormalFinding] = field(default_factory=list)
+
+    @property
+    def flags(self) -> list[str]:
+        return [f.flag for f in self.findings]
+
+    def to_dict(self) -> dict:
+        return {
+            "findings": [{"flag": f.flag, "issue": f.issue} for f in self.findings]
+        }
+
+
+@dataclass
 class Result:
     """Audit result for a single ambulatory card."""
 
     input: dict                             # Raw JSON payload from 1C
-    flags: list[str] = field(default_factory=list)
+    formal: FormalStructureResult = field(default_factory=FormalStructureResult)
     issues: list[Issue] = field(default_factory=list)
 
     # Assigned by the database on insert; None before insertion.

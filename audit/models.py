@@ -6,33 +6,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from storage.models.result import Issue
+# FormalFinding and FormalStructureResult live in storage.models.result to avoid
+# circular imports; re-exported here for convenience.
+from storage.models.result import FormalFinding, FormalStructureResult, Issue
 
+__all__ = ["FormalFinding", "FormalStructureResult", "DiagnosisAuditResult"]
 
-# ── Formal structure ──────────────────────────────────────────────────────────
-
-@dataclass
-class FormalFinding:
-    """One finding from the formal-structure check."""
-
-    flag: str
-    issue: str
-
-
-@dataclass
-class FormalStructureResult:
-    """All findings from the formal-structure audit dimension."""
-
-    findings: list[FormalFinding] = field(default_factory=list)
-
-    @property
-    def flags(self) -> list[str]:
-        return [f.flag for f in self.findings]
-
-    def to_dict(self) -> dict:
-        return {
-            "findings": [{"flag": f.flag, "issue": f.issue} for f in self.findings]
-        }
+# ── Formal structure (re-exported from storage.models.result) ─────────────────
 
 
 # ── Diagnosis (clinical-guideline checkers) ───────────────────────────────────

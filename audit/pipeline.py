@@ -120,7 +120,7 @@ class AuditPipeline:
             logger.info("[pipeline] visit %s has no diagnoses — skipping DiagnosisValidator", visit_id)
             empty_diag = DiagnosisAuditResult()
             self._excel.append(visit=visit, formal=formal_result, diagnosis=empty_diag)
-            return [Result(input=visit, flags=formal_result.flags, issues=[])]
+            return [Result(input=visit, formal=formal_result, issues=[])]
 
         # ── Diagnosis check (once per diagnosis) ──────────────────────────────
         diag_validator = DiagnosisValidator(visit)
@@ -159,7 +159,7 @@ class AuditPipeline:
             results.append(
                 Result(
                     input=visit,
-                    flags=formal_result.flags,
+                    formal=formal_result,
                     issues=diag_result.all_issues,
                 )
             )
