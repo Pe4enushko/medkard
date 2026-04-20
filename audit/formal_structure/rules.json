@@ -234,7 +234,7 @@
       "age_group": "child"
     },
     "targets": ["diagnosis_code", "diagnosis_text"],
-    "expectation": "Код МКБ и текстовая детализация диагноза должны быть хотя бы на одном клиническом уровне и не противоречить друг другу.",
+    "expectation": "Клинический диагноз должен соответствовать выбранному коду МКБ-10 по анатомической локализации и патогенезу. Использование симптоматических кодов (класс R) при наличии установленного основного заболевания считается дефектом",
     "flag_code": "ICD_TEXT_MISMATCH",
     "severity": "major"
   },
@@ -243,7 +243,7 @@
     "source": "icd10",
     "rule_type": "diagnosis_check",
     "applies_to": {
-      "visit_types": ["primary", "repeat"],
+      "visit_types": ["primary", "repeat", "prophylactic"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -265,5 +265,47 @@
     "expectation": "Запись не должна содержать явных орфографических ошибок, опечаток или искажённых медицинских терминов, затрудняющих понимание документа.",
     "flag_code": "HAS_TYPOS",
     "severity": "minor"
+  },
+  {
+    "rule_id": "legal_representative_info",
+    "source": "323-FZ",
+    "rule_type": "required_field",
+    "targets": ["companion_info"],
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "expectation": "Должно быть указано, в сопровождении какого законного представителя проведен осмотр ребенка.",
+    "flag_code": "MISSING_COMPANION_INFO",
+    "severity": "major"
+  },
+  {
+    "rule_id": "treatment_dosage_clarity",
+    "source": "203n",
+    "rule_type": "content_analysis",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["treatment_plan"],
+    "expectation": "Назначение лекарственных препаратов должно содержать дозировку, кратность и длительность приема.",
+    "flag_code": "INCOMPLETE_PRESCRIPTION",
+    "severity": "major"
+  },
+  {
+    "rule_id": "diagnosis_justification_presence",
+    "source": "203n",
+    "rule_type": "required_field",
+    "applies_to": {
+      "visit_types": ["primary", "repeat", "prophylactic"],
+      "specialties": ["pediatrics"],
+      "age_group": "child"
+    },
+    "targets": ["diagnosis_justification"],
+    "expectation": "В карте должно присутствовать текстовое обоснование клинического диагноза.",
+    "flag_code": "MISSING_DX_JUSTIFICATION",
+    "severity": "major"
   }
 ]
