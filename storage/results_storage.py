@@ -5,46 +5,56 @@ ResultsStorage — async psycopg3 interface for the *results* table.
 import json
 
 from .base import BaseStorage
-from .models import FormalFinding, FormalStructureResult, DiagnisisIssue, IssueSource, Result
+from .models import DiagnosisResult, FormalFinding, FormalStructureResult, DiagnisisIssue, IssueSource, Result
+
+
+def _deserialize_diagnosis(raw: list[dict]) -> list[DiagnosisResult]:
+    results = []
+    for entry in (raw or []):
+        issues = [
+            DiagnisisIssue(
+                issue=item["issue"],
+                sources=[
+                    IssueSource(doc_title=s["doc_title"], section=s.get("section"))
+                    for s in item.get("sources", [])
+                ],
+            )
+            for item in entry.get("issues", [])
+        ]
+        results.append(DiagnosisResult(icd_code=entry.get("icd_code", ""), issues=issues))
+    return results
 
 
 def _row_to_result(row: dict) -> Result:
-    issues = [
-        DiagnisisIssue(
-            issue=item["issue"],
-            sources=[
-                IssueSource(
-                    doc_title=s["doc_title"],
-                    section=s.get("section"),
-                )
-                for s in item.get("sources", [])
-            ],
-        )
-        for item in (row.get("issues") or [])
-    ]
     return Result(
         id=row["id"],
         input=row["input"],
         formal=FormalStructureResult(
             findings=[FormalFinding(flag=f, issue="") for f in (row.get("flags") or [])]
         ),
-        diagnosis=issues,
+        diagnosis=_deserialize_diagnosis(row.get("issues") or []),
     )
 
 
-def _serialize_issues(issues: list[DiagnisisIssue]) -> str:
+def _serialize_diagnosis(diagnosis: list[DiagnosisResult]) -> str:
     return json.dumps([
         {
-            "issue": iss.issue,
-            "sources": [
+            "icd_code": dr.icd_code,
+            "issues": [
                 {
-                    "doc_title": s.doc_title,
-                    **({"section": s.section} if s.section is not None else {}),
+                    "issue": iss.issue,
+                    "sources": [
+                        {
+                            "doc_title": s.doc_title,
+                            **({"section": s.section} if s.section is not None else {}),
+                        }
+                        for s in iss.sources
+                    ],
                 }
-                for s in iss.sources
+                for iss in dr.issues
             ],
         }
-        for iss in issues
+        for dr in diagnosis
     ])
 
 
@@ -73,7 +83,7 @@ class ResultsStorage(BaseStorage):
                 {
                     "input": json.dumps(result.input),
                     "flags": result.formal.flags,
-                    "issues": _serialize_issues(result.diagnosis),
+                    "issues": _serialize_diagnosis(result.diagnosis),
                 },
             )
             row = await cur.fetchone()

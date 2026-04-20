@@ -77,10 +77,9 @@ async def decide_file_id(
             {"role": "user", "content": user},
         ],
         temperature=0,
-        max_tokens=32,
     )
 
-    logger.debug()("[decider] LLM response:\n%s", resp.model_dump_json(indent=2))
+    logger.debug("[decider] LLM response:\n%s", resp.model_dump_json(indent=2))
     raw_content = resp.choices[0].message.content
     logger.debug("[decider] raw LLM answer: %s", raw_content)
     chosen = raw_content.strip().strip('"').strip("'")

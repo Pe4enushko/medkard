@@ -24,7 +24,7 @@ from audit.diagnosis.validator import DiagnosisValidator
 from parsers.excel import AuditExcelWriter
 from audit.formal_structure.validator import FormalValidator
 from audit.models import DiagnosisAuditResult, FormalFinding, FormalStructureResult
-from storage.models.result import Result
+from storage.models.result import DiagnosisResult, Result
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +73,9 @@ class AuditPipeline:
                        or a raw JSON string of either shape.
 
         Returns:
-            One :class:`~storage.models.result.Result` per (visit, diagnosis).
-            If a visit has no diagnoses, a single result with an empty issues
-            list is still returned (formal findings only).
+            One :class:`~storage.models.result.Result` per visit, containing
+            a :class:`~storage.models.result.FormalStructureResult` and a list
+            of :class:`~storage.models.result.DiagnosisResult` (one per ICD entry).
         """
         appointments = _split_appointments(raw_input)
         results: list[Result] = []
@@ -123,7 +123,7 @@ class AuditPipeline:
 
         # ── Diagnosis check (once per diagnosis) ──────────────────────────────
         diag_validator = DiagnosisValidator(visit)
-        results: list[Result] = []
+        diagnosis_results: list[DiagnosisResult] = []
 
         for dx_idx, diagnosis in enumerate(diagnoses):
             dx_code = diagnosis.get("КодМКБ", f"#{dx_idx + 1}")
@@ -155,13 +155,17 @@ class AuditPipeline:
                 diagnosis=diag_result,
             )
 
-            results.append(
-                Result(
-                    input=visit,
-                    formal=formal_result,
-                    diagnosis=diag_result.all_issues,
+            diagnosis_results.append(
+                DiagnosisResult(
+                    icd_code=dx_code,
+                    issues=diag_result.all_issues,
                 )
             )
 
-        logger.debug("[pipeline] _audit_visit END — visit_id=%s, %d result(s)", visit_id, len(results))
-        return results
+        result = Result(
+            input=visit,
+            formal=formal_result,
+            diagnosis=diagnosis_results,
+        )
+        logger.debug("[pipeline] _audit_visit END — visit_id=%s\n%s", visit_id, result.pretty_format())
+        return [result]

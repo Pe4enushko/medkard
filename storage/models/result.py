@@ -65,12 +65,27 @@ class FormalStructureResult:
 
 
 @dataclass
+class DiagnosisResult:
+    """Audit result for a single diagnosis entry from the visit."""
+
+    icd_code: str
+    issues: list[DiagnisisIssue] = field(default_factory=list)
+
+    def pretty_format(self) -> str:
+        if not self.issues:
+            return f"  [{self.icd_code}] OK"
+        lines = [f"  [{self.icd_code}]"]
+        lines.extend(iss.pretty_format() for iss in self.issues)
+        return "\n".join(lines)
+
+
+@dataclass
 class Result:
     """Audit result for a single ambulatory card."""
 
     input: dict                             # Raw JSON payload from 1C
     formal: FormalStructureResult = field(default_factory=FormalStructureResult)
-    diagnosis: list[DiagnisisIssue] = field(default_factory=list)
+    diagnosis: list[DiagnosisResult] = field(default_factory=list)
 
     # Assigned by the database on insert; None before insertion.
     id: str | None = None
@@ -79,8 +94,8 @@ class Result:
         lines = [f"Result(id={self.id})"]
         lines.append(self.formal.pretty_format())
         if self.diagnosis:
-            lines.append("  Diagnosis issues:")
-            lines.extend(iss.pretty_format() for iss in self.diagnosis)
+            lines.append("  Diagnosis results:")
+            lines.extend(dr.pretty_format() for dr in self.diagnosis)
         else:
-            lines.append("  Diagnosis issues: none")
+            lines.append("  Diagnosis results: none")
         return "\n".join(lines)

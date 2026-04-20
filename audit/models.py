@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 
 # FormalFinding and FormalStructureResult live in storage.models.result to avoid
 # circular imports; re-exported here for convenience.
-from storage.models.result import FormalFinding, FormalStructureResult, DiagnisisIssue
+from storage.models.result import DiagnosisResult, FormalFinding, FormalStructureResult, DiagnisisIssue
 
-__all__ = ["FormalFinding", "FormalStructureResult", "DiagnosisAuditResult"]
+__all__ = ["DiagnosisResult", "FormalFinding", "FormalStructureResult", "DiagnosisAuditResult"]
 
 # ── Formal structure (re-exported from storage.models.result) ─────────────────
 
