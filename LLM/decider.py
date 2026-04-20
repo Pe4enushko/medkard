@@ -81,6 +81,13 @@ async def decide_file_id(
 
     logger.debug("[decider] LLM response:\n%s", resp.model_dump_json(indent=2))
     raw_content = resp.choices[0].message.content
+    finish_reason = resp.choices[0].finish_reason
+    if finish_reason != "stop":
+        logger.error(
+            "[decider] unexpected finish_reason=%r; full response: %s",
+            finish_reason,
+            resp.model_dump_json(indent=2),
+        )
     logger.debug("[decider] raw LLM answer: %s", raw_content)
     chosen = raw_content.strip().strip('"').strip("'")
     # Validate it is actually one of the candidate IDs

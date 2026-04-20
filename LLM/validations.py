@@ -86,7 +86,7 @@ async def validate_visit(
     resolved_client = client or _get_client()
     visit_text = json.dumps(visit, ensure_ascii=False, indent=2)
 
-    result: _Findings = await resolved_client.chat.completions.create(
+    result, completion = await resolved_client.chat.completions.create_with_completion(
         model=model,
         response_model=_Findings,
         messages=[
@@ -94,8 +94,15 @@ async def validate_visit(
             {"role": "user", "content": visit_text},
         ],
         extra_body={"guided_json": _JSON_SCHEMA},
-        temperature=0.2,  # deterministic output
+        temperature=0.2,
     )
 
+    finish_reason = completion.choices[0].finish_reason
+    if finish_reason != "stop":
+        logger.error(
+            "[validations] unexpected finish_reason=%r; full response: %s",
+            finish_reason,
+            completion.model_dump_json(indent=2),
+        )
     logger.debug("[validations] raw LLM answer: %s", result.model_dump_json(indent=2))
     return [{"flag": f.flag, "issue": f.issue} for f in result.findings]

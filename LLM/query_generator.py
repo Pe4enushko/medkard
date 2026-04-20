@@ -16,6 +16,7 @@ Usage::
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # ── Configurable ──────────────────────────────────────────────────────────────
 MODEL: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
@@ -93,7 +96,7 @@ async def generate_queries(
     resolved_client = client or _get_client()
     prompt = _PROMPT_TEMPLATE.replace("{chunk}", _render_content(chunk))
 
-    queries: HypotheticalQueries = await resolved_client.chat.completions.create(
+    queries, completion = await resolved_client.chat.completions.create_with_completion(
         model=model,
         response_model=HypotheticalQueries,
         messages=[{"role": "user", "content": prompt}],
@@ -101,5 +104,13 @@ async def generate_queries(
         # silently ignored by the standard OpenAI API.
         extra_body={"guided_json": _JSON_SCHEMA},
     )
+
+    finish_reason = completion.choices[0].finish_reason
+    if finish_reason != "stop":
+        logger.error(
+            "[query_generator] unexpected finish_reason=%r; full response: %s",
+            finish_reason,
+            completion.model_dump_json(indent=2),
+        )
 
     return chunk, queries

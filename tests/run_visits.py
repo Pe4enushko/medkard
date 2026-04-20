@@ -52,15 +52,14 @@ async def main() -> None:
 
     path = Path(APPOINTMENTS_JSON_PATH)
     visits = AppointmentsParser.split_file(path)
-    visit = visits[0]
+    for visit in visits:
+        logger.info("Input visit to be processed:\n%s", json.dumps(visit, ensure_ascii=False, indent=2))
 
-    logger.info("Input visit to be processed:\n%s", json.dumps(visit, ensure_ascii=False, indent=2))
+        pipeline = AuditPipeline(excel_path="test_results.xlsx")
+        results = await pipeline._audit_visit(visit)
 
-    pipeline = AuditPipeline(excel_path="test_results.xlsx")
-    results = await pipeline._audit_visit(visit)
-
-    for i, result in enumerate(results, 1):
-        logger.info("--- Result %d ---\n%s", i, result.pretty_format())
+        for i, result in enumerate(results, 1):
+            logger.info("--- Result %d ---\n%s", i, result.pretty_format())
 
 
 if __name__ == "__main__":

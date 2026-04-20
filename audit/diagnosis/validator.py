@@ -116,7 +116,15 @@ async def _run_checker(system_prompt: str, tools: list, human_message: str) -> l
     logger.debug("[checker] system_prompt:\n%s", system_prompt)
     agent = create_checker_agent(system_prompt, tools)
     result = await agent.ainvoke({"messages": [("user", human_message)]})
-    raw_answer = result["messages"][-1].content
+    last_msg = result["messages"][-1]
+    raw_answer = last_msg.content
+    finish_reason = (getattr(last_msg, "response_metadata", {}) or {}).get("finish_reason")
+    if finish_reason and finish_reason != "stop":
+        logger.error(
+            "[checker] unexpected finish_reason=%r; response_metadata: %s",
+            finish_reason,
+            getattr(last_msg, "response_metadata", {}),
+        )
     logger.debug("[checker] raw LLM answer:\n%s", raw_answer)
     issues = _parse_issues(raw_answer)
     logger.debug("[checker] parsed %d issue(s)", len(issues))
@@ -166,7 +174,10 @@ class DiagnosisValidator:
         treatment_issues: list[DiagnisisIssue] = []
 
         if file_id:
+            patient_info = "\n".join(f"{k}: {v}" for k, v in patient.items() if v is not None)
             human_message = (
+                "## Пациент\n"
+                f"{patient_info}\n\n"
                 "## Диагноз\n"
                 f"{_format_diagnosis(diagnosis)}\n\n"
                 "## Клинический контекст (данные осмотра)\n"
