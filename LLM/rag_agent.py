@@ -12,8 +12,8 @@ Usage::
     from LLM.rag_agent import create_rag_agent
 
     agent = await create_rag_agent(system_prompt)
-    result = await agent.ainvoke({"input": clinical_text})
-    # result["output"] is the agent's final answer string
+    result = await agent.ainvoke({"messages": [("user", clinical_text)]})
+    # result["messages"][-1].content is the agent's final answer string
 """
 
 from __future__ import annotations
@@ -22,13 +22,12 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.tools import tool
+from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
 from RAG.retrieval.embeddings import embed
 from RAG.retrieval.vector_store import hybrid_search
+from langchain_core.tools import tool
 
 load_dotenv()
 
@@ -50,7 +49,6 @@ async def retrieve(query: str) -> str:
         query: A natural-language search query in Russian or English.
     """
     embedding = await embed(query)
-    # Run fact, procedure, and constraint searches; merge by taking union over all types.
     results = await hybrid_search(
         query_text=query,
         embedding=embedding,
@@ -70,21 +68,20 @@ async def retrieve(query: str) -> str:
 
     return "\n\n---\n\n".join(parts)
 
-async def create_checker_agent(
+
+def create_checker_agent(
     system_prompt: str,
     tools: list,
-) -> AgentExecutor:
+) -> Any:
     """Create a checker agent with custom file-id-bound tools.
-
-    Unlike ``create_rag_agent``, the tools are supplied by the caller (pre-bound
-    to a specific guideline document via ``get_tools_for`` / ``get_*_tools_for``).
 
     Args:
         system_prompt: Fully rendered system prompt for the checker.
-        tools:         List of :class:`BaseTool` instances (already file-id bound).
+        tools:         List of tool instances (already file-id bound).
 
     Returns:
-        A ready-to-invoke :class:`AgentExecutor` instance.
+        A compiled agent graph (``CompiledStateGraph``) ready to invoke via
+        ``await agent.ainvoke({"messages": [("user", clinical_text)]})``.
     """
     llm = ChatOpenAI(
         model=MODEL,
@@ -92,19 +89,9 @@ async def create_checker_agent(
         temperature=0,
     )
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
-    ])
-
-    agent = create_openai_tools_agent(llm=llm, tools=tools, prompt=prompt)
-
-    return AgentExecutor(
-        agent=agent,
+    return create_agent(
+        model=llm,
         tools=tools,
-        verbose=True,
-        max_iterations=8,
-        handle_parsing_errors=True,
-        return_intermediate_steps=False,
+        system_prompt=system_prompt,
     )
+
