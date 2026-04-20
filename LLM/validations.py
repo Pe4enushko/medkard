@@ -17,6 +17,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # ── Configurable ──────────────────────────────────────────────────────────────
 MODEL: str = os.environ.get("LLM_MODEL", "openai/gpt-oss-20b")
@@ -94,4 +97,5 @@ async def validate_visit(
         temperature=0.0,  # deterministic output
     )
 
+    logger.debug("[validations] raw LLM answer: %s", result.model_dump_json(indent=2))
     return [{"flag": f.flag, "issue": f.issue} for f in result.findings]

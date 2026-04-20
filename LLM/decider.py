@@ -14,6 +14,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
@@ -21,6 +22,8 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 MODEL: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
@@ -77,7 +80,9 @@ async def decide_file_id(
         max_tokens=32,
     )
 
-    chosen = resp.choices[0].message.content.strip().strip('"').strip("'")
+    raw_content = resp.choices[0].message.content
+    logger.debug("[decider] raw LLM answer: %s", raw_content)
+    chosen = raw_content.strip().strip('"').strip("'")
     # Validate it is actually one of the candidate IDs
     valid_ids = {row.get("ID", "") for row in candidates}
     return chosen if chosen in valid_ids else None

@@ -18,8 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from LLM.rag_agent import create_checker_agent
 from LLM.tools import (
@@ -108,9 +111,11 @@ def _parse_issues(output: str) -> list[Issue]:
 
 
 async def _run_checker(system_prompt: str, tools: list, human_message: str) -> list[Issue]:
-    agent = await create_checker_agent(system_prompt, tools)
-    result = await agent.ainvoke({"input": human_message})
-    return _parse_issues(result.get("output", "[]"))
+    agent = create_checker_agent(system_prompt, tools)
+    result = await agent.ainvoke({"messages": [("user", human_message)]})
+    raw_answer = result["messages"][-1].content
+    logger.debug("[checker] raw LLM answer: %s", raw_answer)
+    return _parse_issues(raw_answer)
 
 
 class DiagnosisValidator:
