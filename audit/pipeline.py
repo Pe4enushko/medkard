@@ -102,15 +102,14 @@ class AuditPipeline:
         # ── Formal structure (once per visit) ─────────────────────────────────
         logger.info("[pipeline] running FormalValidator for visit %s", visit_id)
         formal_raw = await FormalValidator().validate(visit)
-        logger.info(
-            "[pipeline] FormalValidator done — %d finding(s): %s",
-            len(formal_raw),
-            formal_raw,
-        )
         formal_result = FormalStructureResult(
             findings=[
                 FormalFinding(flag=f["flag"], issue=f["issue"]) for f in formal_raw
             ]
+        )
+        logger.info(
+            "[pipeline] FormalValidator done:\n%s",
+            formal_result.pretty_format(),
         )
 
         diagnoses: list[dict] = visit.get("Диагнозы", [])
@@ -147,7 +146,7 @@ class AuditPipeline:
             )
             logger.debug(
                 "[pipeline] DiagnosisAuditResult:\n%s",
-                json.dumps(diag_result.to_dict(), ensure_ascii=False, indent=2),
+                diag_result.pretty_format(),
             )
 
             self._excel.append(

@@ -10,6 +10,12 @@ class IssueSource:
     doc_title: str          # Manifest «Наименование» value
     section: str | None = None  # TOC section title, if known
 
+    def pretty_format(self) -> str:
+        s = f"      source: {self.doc_title}"
+        if self.section:
+            s += f" / {self.section}"
+        return s
+
 
 @dataclass
 class DiagnisisIssue:
@@ -18,6 +24,11 @@ class DiagnisisIssue:
     issue: str
     sources: list[IssueSource] = field(default_factory=list)
 
+    def pretty_format(self) -> str:
+        lines = [f"    • {self.issue}"]
+        lines.extend(src.pretty_format() for src in self.sources)
+        return "\n".join(lines)
+
 
 @dataclass
 class FormalFinding:
@@ -25,6 +36,9 @@ class FormalFinding:
 
     flag: str
     issue: str
+
+    def pretty_format(self) -> str:
+        return f"    [{self.flag}] {self.issue}"
 
 
 @dataclass
@@ -42,6 +56,13 @@ class FormalStructureResult:
             "findings": [{"flag": f.flag, "issue": f.issue} for f in self.findings]
         }
 
+    def pretty_format(self) -> str:
+        if not self.findings:
+            return "  Formal structure: OK"
+        lines = ["  Formal structure:"]
+        lines.extend(f.pretty_format() for f in self.findings)
+        return "\n".join(lines)
+
 
 @dataclass
 class Result:
@@ -53,3 +74,13 @@ class Result:
 
     # Assigned by the database on insert; None before insertion.
     id: str | None = None
+
+    def pretty_format(self) -> str:
+        lines = [f"Result(id={self.id})"]
+        lines.append(self.formal.pretty_format())
+        if self.diagnosis:
+            lines.append("  Diagnosis issues:")
+            lines.extend(iss.pretty_format() for iss in self.diagnosis)
+        else:
+            lines.append("  Diagnosis issues: none")
+        return "\n".join(lines)

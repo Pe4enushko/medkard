@@ -49,3 +49,19 @@ class DiagnosisAuditResult:
             "inspection": _issue_list(self.inspection_issues),
             "treatment": _issue_list(self.treatment_issues),
         }
+
+    def pretty_format(self) -> str:
+        def _section(label: str, issues: list[DiagnisisIssue]) -> str:
+            if not issues:
+                return f"  {label}: OK"
+            lines = [f"  {label}:"]
+            lines.extend(iss.pretty_format() for iss in issues)
+            return "\n".join(lines)
+
+        parts = [
+            f"DiagnosisAuditResult(guideline={self.guideline_file_id})",
+            _section("Anamnesis", self.anamnesis_issues),
+            _section("Inspection", self.inspection_issues),
+            _section("Treatment", self.treatment_issues),
+        ]
+        return "\n".join(parts)

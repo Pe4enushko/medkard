@@ -60,10 +60,7 @@ async def main() -> None:
     results = await pipeline._audit_visit(visit)
 
     for i, result in enumerate(results, 1):
-        logger.info("--- Result %d ---", i)
-        logger.info("Formal flags : %s", result.formal.flags)
-        logger.info("Formal issues: %s", result.formal.findings)
-        logger.info("Issues: %s", result.diagnosis)
+        logger.info("--- Result %d ---\n%s", i, result.pretty_format())
 
 
 if __name__ == "__main__":
