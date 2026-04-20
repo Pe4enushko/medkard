@@ -95,7 +95,6 @@ class AuditPipeline:
     async def _audit_visit(self, visit: dict[str, Any]) -> list[Result]:
         """Audit a single visit; returns one Result per diagnosis."""
         priem = visit.get("Прием") or {}
-        logger.debug("[pipeline] priem extracted: %s", priem)
         visit_id = priem.get("GUID") or priem.get("DATE") or "unknown"
         logger.debug("[pipeline] _audit_visit START — visit_id=%s", visit_id)
         logger.debug("[pipeline] visit input:\n%s", json.dumps(visit, ensure_ascii=False, indent=2))
