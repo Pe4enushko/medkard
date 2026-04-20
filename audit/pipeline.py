@@ -96,7 +96,7 @@ class AuditPipeline:
         """Audit a single visit; returns one Result per diagnosis."""
 
         # ── Formal structure (once per visit) ─────────────────────────────────
-        formal_raw = FormalValidator(visit).validate(visit)
+        formal_raw = FormalValidator().validate(visit)
         formal_result = FormalStructureResult(
             findings=[
                 FormalFinding(flag=f["flag"], issue=f["issue"]) for f in formal_raw
