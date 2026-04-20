@@ -25,10 +25,10 @@ class OneCClient:
     @classmethod
     def from_env(cls) -> "OneCClient":
         return cls(
-            url=os.getenv("ONE_C_APPOINTMENTS_URL", ""),
-            login=os.getenv("ONE_C_LOGIN", ""),
-            password=os.getenv("ONE_C_PASSWORD", ""),
-            timeout_seconds=float(os.getenv("ONE_C_TIMEOUT_SECONDS", "15")),
+            url=os.environ["ONE_C_APPOINTMENTS_URL"],
+            login=os.environ["ONE_C_LOGIN"],
+            password=os.environ["ONE_C_PASSWORD"],
+            timeout_seconds=float(os.environ.get("ONE_C_TIMEOUT_SECONDS", 15)),
         )
 
     def fetch_json_for_today(self) -> Any:
