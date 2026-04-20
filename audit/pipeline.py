@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from audit.diagnosis.validator import DiagnosisValidator
-from audit.excel import AuditExcelWriter
+from parsers.excel import AuditExcelWriter
 from audit.formal_structure.validator import FormalValidator
 from audit.models import DiagnosisAuditResult, FormalFinding, FormalStructureResult
 from storage.models.result import Result

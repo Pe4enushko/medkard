@@ -1,22 +1,23 @@
 """
 Run _audit_visit on a single visit parsed from a JSON file.
 
-Change VISIT_JSON_PATH to point at the JSON file containing one visit dict.
+Change APPOINTMENTS_JSON_PATH to point at the JSON file containing an
+appointments payload. The first appointment in the array will be audited.
 """
 
 import asyncio
-import json
 from pathlib import Path
 
 from audit.pipeline import AuditPipeline
+from parsers.json_parser import AppointmentsParser
 
-VISIT_JSON_PATH = r"visit.json"
+APPOINTMENTS_JSON_PATH = r"visit.json"
 
 
 async def main() -> None:
-    path = Path(VISIT_JSON_PATH)
-    with open(path, encoding="utf-8") as f:
-        visit = json.load(f)
+    path = Path(APPOINTMENTS_JSON_PATH)
+    visits = AppointmentsParser.split_file(path)
+    visit = visits[0]
 
     pipeline = AuditPipeline(excel_path="audit_results.xlsx")
     results = await pipeline._audit_visit(visit)
