@@ -157,11 +157,11 @@ class FormalValidator:
         logger.debug("[formal] applicable rules (%d): %s", len(rules), [r.get("flag_code") for r in rules])
 
         system_prompt = self._render_prompt(rules)
-        logger.debug("[formal] rendered system prompt:\n%s", system_prompt)
-        logger.debug(
-            "[formal] visit payload sent to LLM:\n%s",
-            json.dumps(visit, ensure_ascii=False, indent=2),
-        )
+        #logger.debug("[formal] rendered system prompt:\n%s", system_prompt)
+        # logger.debug(
+        #     "[formal] visit payload sent to LLM:\n%s",
+        #     json.dumps(visit, ensure_ascii=False, indent=2),
+        # )
 
         findings = await validate_visit(system_prompt, visit)
         logger.info("[formal] LLM returned %d finding(s): %s", len(findings), findings)
