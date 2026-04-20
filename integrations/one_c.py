@@ -8,6 +8,9 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from typing import Any
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class OneCClient:
     def __init__(
