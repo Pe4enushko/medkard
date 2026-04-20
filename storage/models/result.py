@@ -12,7 +12,7 @@ class IssueSource:
 
 
 @dataclass
-class Issue:
+class DiagnisisIssue:
     """One audit finding together with the guideline sources that support it."""
 
     issue: str
@@ -49,7 +49,7 @@ class Result:
 
     input: dict                             # Raw JSON payload from 1C
     formal: FormalStructureResult = field(default_factory=FormalStructureResult)
-    issues: list[Issue] = field(default_factory=list)
+    diagnosis: list[DiagnisisIssue] = field(default_factory=list)
 
     # Assigned by the database on insert; None before insertion.
     id: str | None = None

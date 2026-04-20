@@ -5,12 +5,12 @@ ResultsStorage — async psycopg3 interface for the *results* table.
 import json
 
 from .base import BaseStorage
-from .models import FormalFinding, FormalStructureResult, Issue, IssueSource, Result
+from .models import FormalFinding, FormalStructureResult, DiagnisisIssue, IssueSource, Result
 
 
 def _row_to_result(row: dict) -> Result:
     issues = [
-        Issue(
+        DiagnisisIssue(
             issue=item["issue"],
             sources=[
                 IssueSource(
@@ -28,11 +28,11 @@ def _row_to_result(row: dict) -> Result:
         formal=FormalStructureResult(
             findings=[FormalFinding(flag=f, issue="") for f in (row.get("flags") or [])]
         ),
-        issues=issues,
+        diagnosis=issues,
     )
 
 
-def _serialize_issues(issues: list[Issue]) -> str:
+def _serialize_issues(issues: list[DiagnisisIssue]) -> str:
     return json.dumps([
         {
             "issue": iss.issue,
@@ -73,7 +73,7 @@ class ResultsStorage(BaseStorage):
                 {
                     "input": json.dumps(result.input),
                     "flags": result.formal.flags,
-                    "issues": _serialize_issues(result.issues),
+                    "issues": _serialize_issues(result.diagnosis),
                 },
             )
             row = await cur.fetchone()

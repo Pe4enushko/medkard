@@ -63,7 +63,7 @@ async def main() -> None:
         logger.info("--- Result %d ---", i)
         logger.info("Formal flags : %s", result.formal.flags)
         logger.info("Formal issues: %s", result.formal.findings)
-        logger.info("Issues: %s", result.issues)
+        logger.info("Issues: %s", result.diagnosis)
 
 
 if __name__ == "__main__":

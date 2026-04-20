@@ -32,7 +32,7 @@ from LLM.tools import (
 )
 from audit.diagnosis.clinic_recs import ClinicRecs
 from audit.models import DiagnosisAuditResult
-from storage.models.result import Issue, IssueSource
+from storage.models.result import DiagnisisIssue, IssueSource
 
 # ── Checker prompts ───────────────────────────────────────────────────────────
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "LLM" / "prompts"
@@ -73,7 +73,7 @@ def _format_diagnosis(diagnosis: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _parse_issues(output: str) -> list[Issue]:
+def _parse_issues(output: str) -> list[DiagnisisIssue]:
     """Parse a checker agent's JSON output into a list of Issue objects."""
     text = output.strip()
     if text.startswith("```"):
@@ -91,7 +91,7 @@ def _parse_issues(output: str) -> list[Issue]:
     if not isinstance(raw, list):
         return []
 
-    issues: list[Issue] = []
+    issues: list[DiagnisisIssue] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -106,11 +106,11 @@ def _parse_issues(output: str) -> list[Issue]:
             for s in item.get("sources", [])
             if isinstance(s, dict)
         ]
-        issues.append(Issue(issue=issue_text, sources=sources))
+        issues.append(DiagnisisIssue(issue=issue_text, sources=sources))
     return issues
 
 
-async def _run_checker(system_prompt: str, tools: list, human_message: str) -> list[Issue]:
+async def _run_checker(system_prompt: str, tools: list, human_message: str) -> list[DiagnisisIssue]:
     tool_names = [t.name for t in tools]
     logger.debug("[checker] START — tools=%s", tool_names)
     logger.debug("[checker] system_prompt:\n%s", system_prompt)
@@ -161,9 +161,9 @@ class DiagnosisValidator:
         file_id = await self._clinic_recs.pick_recs(patient, diagnosis)
         logger.info("[diagnosis] guideline file_id picked: %s", file_id)
 
-        anamnesis_issues: list[Issue] = []
-        inspection_issues: list[Issue] = []
-        treatment_issues: list[Issue] = []
+        anamnesis_issues: list[DiagnisisIssue] = []
+        inspection_issues: list[DiagnisisIssue] = []
+        treatment_issues: list[DiagnisisIssue] = []
 
         if file_id:
             human_message = (

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 # FormalFinding and FormalStructureResult live in storage.models.result to avoid
 # circular imports; re-exported here for convenience.
-from storage.models.result import FormalFinding, FormalStructureResult, Issue
+from storage.models.result import FormalFinding, FormalStructureResult, DiagnisisIssue
 
 __all__ = ["FormalFinding", "FormalStructureResult", "DiagnosisAuditResult"]
 
@@ -21,17 +21,17 @@ __all__ = ["FormalFinding", "FormalStructureResult", "DiagnosisAuditResult"]
 class DiagnosisAuditResult:
     """Issues found by the three checker agents for a single diagnosis."""
 
-    anamnesis_issues: list[Issue] = field(default_factory=list)
-    inspection_issues: list[Issue] = field(default_factory=list)
-    treatment_issues: list[Issue] = field(default_factory=list)
+    anamnesis_issues: list[DiagnisisIssue] = field(default_factory=list)
+    inspection_issues: list[DiagnisisIssue] = field(default_factory=list)
+    treatment_issues: list[DiagnisisIssue] = field(default_factory=list)
     guideline_file_id: str | None = None
 
     @property
-    def all_issues(self) -> list[Issue]:
+    def all_issues(self) -> list[DiagnisisIssue]:
         return self.anamnesis_issues + self.inspection_issues + self.treatment_issues
 
     def to_dict(self) -> dict:
-        def _issue_list(issues: list[Issue]) -> list[dict]:
+        def _issue_list(issues: list[DiagnisisIssue]) -> list[dict]:
             return [
                 {
                     "issue": iss.issue,
