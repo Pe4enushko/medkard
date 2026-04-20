@@ -94,7 +94,7 @@ async def validate_visit(
             {"role": "user", "content": visit_text},
         ],
         extra_body={"guided_json": _JSON_SCHEMA},
-        temperature=0.0,  # deterministic output
+        temperature=0.2,  # deterministic output
     )
 
     logger.debug("[validations] raw LLM answer: %s", result.model_dump_json(indent=2))
