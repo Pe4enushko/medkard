@@ -94,9 +94,19 @@ class AuditPipeline:
 
     async def _audit_visit(self, visit: dict[str, Any]) -> list[Result]:
         """Audit a single visit; returns one Result per diagnosis."""
+        priem = visit.get("Прием") or {}
+        visit_id = priem.get("GUID") or priem.get("DATE") or "unknown"
+        logger.debug("[pipeline] _audit_visit START — visit_id=%s", visit_id)
+        logger.debug("[pipeline] visit input:\n%s", json.dumps(visit, ensure_ascii=False, indent=2))
 
         # ── Formal structure (once per visit) ─────────────────────────────────
+        logger.info("[pipeline] running FormalValidator for visit %s", visit_id)
         formal_raw = await FormalValidator().validate(visit)
+        logger.info(
+            "[pipeline] FormalValidator done — %d finding(s): %s",
+            len(formal_raw),
+            formal_raw,
+        )
         formal_result = FormalStructureResult(
             findings=[
                 FormalFinding(flag=f["flag"], issue=f["issue"]) for f in formal_raw
@@ -104,9 +114,10 @@ class AuditPipeline:
         )
 
         diagnoses: list[dict] = visit.get("Диагнозы", [])
+        logger.debug("[pipeline] diagnoses found: %d", len(diagnoses))
 
         if not diagnoses:
-            # No diagnoses — log formal findings only.
+            logger.info("[pipeline] visit %s has no diagnoses — skipping DiagnosisValidator", visit_id)
             empty_diag = DiagnosisAuditResult()
             self._excel.append(visit=visit, formal=formal_result, diagnosis=empty_diag)
             return [Result(input=visit, flags=formal_result.flags, issues=[])]
@@ -115,8 +126,29 @@ class AuditPipeline:
         diag_validator = DiagnosisValidator(visit)
         results: list[Result] = []
 
-        for diagnosis in diagnoses:
+        for dx_idx, diagnosis in enumerate(diagnoses):
+            dx_code = diagnosis.get("КодМКБ", f"#{dx_idx + 1}")
+            logger.info(
+                "[pipeline] DiagnosisValidator — visit %s, diagnosis %d/%d (%s)",
+                visit_id, dx_idx + 1, len(diagnoses), dx_code,
+            )
+            logger.debug(
+                "[pipeline] diagnosis input:\n%s",
+                json.dumps(diagnosis, ensure_ascii=False, indent=2),
+            )
             diag_result = await diag_validator.validate_diagnosis(diagnosis)
+            logger.info(
+                "[pipeline] DiagnosisValidator done — visit %s dx %s: "
+                "anamnesis=%d inspection=%d treatment=%d",
+                visit_id, dx_code,
+                len(diag_result.anamnesis_issues),
+                len(diag_result.inspection_issues),
+                len(diag_result.treatment_issues),
+            )
+            logger.debug(
+                "[pipeline] DiagnosisAuditResult:\n%s",
+                json.dumps(diag_result.to_dict(), ensure_ascii=False, indent=2),
+            )
 
             self._excel.append(
                 visit=visit,
@@ -132,4 +164,5 @@ class AuditPipeline:
                 )
             )
 
+        logger.debug("[pipeline] _audit_visit END — visit_id=%s, %d result(s)", visit_id, len(results))
         return results

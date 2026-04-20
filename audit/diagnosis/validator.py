@@ -111,11 +111,16 @@ def _parse_issues(output: str) -> list[Issue]:
 
 
 async def _run_checker(system_prompt: str, tools: list, human_message: str) -> list[Issue]:
+    tool_names = [t.name for t in tools]
+    logger.debug("[checker] START — tools=%s", tool_names)
+    logger.debug("[checker] system_prompt:\n%s", system_prompt)
     agent = create_checker_agent(system_prompt, tools)
     result = await agent.ainvoke({"messages": [("user", human_message)]})
     raw_answer = result["messages"][-1].content
-    logger.debug("[checker] raw LLM answer: %s", raw_answer)
-    return _parse_issues(raw_answer)
+    logger.debug("[checker] raw LLM answer:\n%s", raw_answer)
+    issues = _parse_issues(raw_answer)
+    logger.debug("[checker] parsed %d issue(s)", len(issues))
+    return issues
 
 
 class DiagnosisValidator:
@@ -142,7 +147,19 @@ class DiagnosisValidator:
             :class:`DiagnosisAuditResult` with issues grouped by checker type.
         """
         patient: dict = self._visit.get("Пациент", {})
+        dx_code = diagnosis.get("КодМКБ", "?")
+        logger.info("[diagnosis] validate_diagnosis START — dx=%s", dx_code)
+        logger.debug(
+            "[diagnosis] diagnosis input:\n%s",
+            json.dumps(diagnosis, ensure_ascii=False, indent=2),
+        )
+        logger.debug(
+            "[diagnosis] patient context:\n%s",
+            json.dumps(patient, ensure_ascii=False, indent=2),
+        )
+
         file_id = await self._clinic_recs.pick_recs(patient, diagnosis)
+        logger.info("[diagnosis] guideline file_id picked: %s", file_id)
 
         anamnesis_issues: list[Issue] = []
         inspection_issues: list[Issue] = []
@@ -155,12 +172,23 @@ class DiagnosisValidator:
                 "## Клинический контекст (данные осмотра)\n"
                 f"{_parse_inspection_data(self._visit)}"
             )
+            logger.debug("[diagnosis] human_message sent to checkers:\n%s", human_message)
+            logger.info("[diagnosis] launching anamnesis / inspection / treatment checkers in parallel")
 
             anamnesis_issues, inspection_issues, treatment_issues = await asyncio.gather(
                 _run_checker(_ANAMNESIS_PROMPT, get_anamnesis_tools_for(file_id), human_message),
                 _run_checker(_INSPECTION_PROMPT, get_inspection_tools_for(file_id), human_message),
                 _run_checker(_TREATMENT_PROMPT, get_treatment_tools_for(file_id), human_message),
             )
+            logger.info(
+                "[diagnosis] checkers done — anamnesis=%d inspection=%d treatment=%d",
+                len(anamnesis_issues), len(inspection_issues), len(treatment_issues),
+            )
+            logger.debug("[diagnosis] anamnesis_issues: %s", anamnesis_issues)
+            logger.debug("[diagnosis] inspection_issues: %s", inspection_issues)
+            logger.debug("[diagnosis] treatment_issues: %s", treatment_issues)
+        else:
+            logger.warning("[diagnosis] no guideline file_id — skipping checker agents for dx=%s", dx_code)
 
         return DiagnosisAuditResult(
             anamnesis_issues=anamnesis_issues,

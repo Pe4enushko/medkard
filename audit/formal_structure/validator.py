@@ -15,11 +15,14 @@ the system prompt, and calls the LLM via LLM.validations.validate_visit.
 from __future__ import annotations
 
 import json
+import logging
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any
 
 from LLM.validations import validate_visit
+
+logger = logging.getLogger(__name__)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE = Path(__file__).parent
@@ -148,6 +151,18 @@ class FormalValidator:
             Empty list means no formal-structure defects were detected.
         """
         visit_type = self.get_visit_type(visit)
+        logger.debug("[formal] visit_type resolved: %s", visit_type.name)
+
         rules = self.get_rules(visit_type)
+        logger.debug("[formal] applicable rules (%d): %s", len(rules), [r.get("flag_code") for r in rules])
+
         system_prompt = self._render_prompt(rules)
-        return await validate_visit(system_prompt, visit)
+        logger.debug("[formal] rendered system prompt:\n%s", system_prompt)
+        logger.debug(
+            "[formal] visit payload sent to LLM:\n%s",
+            json.dumps(visit, ensure_ascii=False, indent=2),
+        )
+
+        findings = await validate_visit(system_prompt, visit)
+        logger.info("[formal] LLM returned %d finding(s): %s", len(findings), findings)
+        return findings
