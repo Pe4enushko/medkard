@@ -3,9 +3,12 @@ ResultsStorage — async psycopg3 interface for the *results* table.
 """
 
 import json
+import logging
 
 from .base import BaseStorage
 from .models import DiagnosisResult, FormalFinding, FormalStructureResult, DiagnisisIssue, IssueSource, Result
+
+logger = logging.getLogger(__name__)
 
 
 def _deserialize_diagnosis(raw: list[dict]) -> list[DiagnosisResult]:
@@ -73,22 +76,27 @@ class ResultsStorage(BaseStorage):
 
     async def insert(self, result: Result) -> str:
         """Insert a Result and return its UUID. Also sets result.id."""
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                """
-                INSERT INTO results (input, flags, issues)
-                VALUES (%(input)s, %(flags)s, %(issues)s)
-                RETURNING id::text
-                """,
-                {
-                    "input": json.dumps(result.input),
-                    "flags": result.formal.flags,
-                    "issues": _serialize_diagnosis(result.diagnosis),
-                },
-            )
-            row = await cur.fetchone()
-        result.id = row["id"]
-        return row["id"]
+        try:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    """
+                    INSERT INTO results (input, flags, issues)
+                    VALUES (%(input)s, %(flags)s, %(issues)s)
+                    RETURNING id::text
+                    """,
+                    {
+                        "input": json.dumps(result.input),
+                        "flags": result.formal.flags,
+                        "issues": _serialize_diagnosis(result.diagnosis),
+                    },
+                )
+                row = await cur.fetchone()
+            result.id = row["id"]
+            logger.info("DB INSERT OK id=%s", row["id"])
+            return row["id"]
+        except Exception:
+            logger.exception("DB INSERT FAILED")
+            raise
 
     # ── Reads ─────────────────────────────────────────────────────────────────
 

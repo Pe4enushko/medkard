@@ -21,6 +21,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from audit.models import DiagnosisAuditResult, FormalStructureResult
 
 _HEADERS = ["input", "formal_structure", "diagnosis"]
+logger = logging.getLogger(__name__)
 
 
 def _pretty(obj: Any) -> str:
@@ -70,11 +72,27 @@ class AuditExcelWriter:
             formal:    Formal-structure audit result.
             diagnosis: Diagnosis audit result (all three checker agents).
         """
-        row = [
-            _pretty(visit),
-            _pretty(formal.to_dict()),
-            _pretty(diagnosis.to_dict()),
-        ]
-        wb, ws = self._open_or_create()
-        ws.append(row)
-        wb.save(self._path)
+        try:
+            row = [
+                _pretty(visit),
+                _pretty(formal.to_dict()),
+                _pretty(diagnosis.to_dict()),
+            ]
+            wb, ws = self._open_or_create()
+            ws.append(row)
+            wb.save(self._path)
+            logger.info("EXCEL APPEND OK path=%s", self._path)
+        except Exception:
+            logger.exception("EXCEL APPEND FAILED path=%s", self._path)
+            raise
+
+    def rows_count(self) -> int:
+        """Return current number of rows in the active worksheet (0 if file absent)."""
+        if not self._path.exists():
+            return 0
+        wb = openpyxl.load_workbook(self._path)
+        try:
+            return wb.active.max_row
+        finally:
+            wb.close()
+

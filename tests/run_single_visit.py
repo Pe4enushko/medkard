@@ -57,10 +57,9 @@ async def main() -> None:
     logger.info("Input visit to be processed:\n%s", json.dumps(visit, ensure_ascii=False, indent=2))
 
     pipeline = AuditPipeline(excel_path="test_results.xlsx")
-    results = await pipeline._audit_visit(visit)
+    result = await pipeline._audit_visit(visit)
 
-    for i, result in enumerate(results, 1):
-        logger.info("--- Result %d ---\n%s", i, result.pretty_format())
+    logger.info("--- Result ---\n%s", result.pretty_format())
 
 
 if __name__ == "__main__":

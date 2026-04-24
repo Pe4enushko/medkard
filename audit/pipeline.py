@@ -85,15 +85,15 @@ class AuditPipeline:
             visit_id = priem.get("GUID") or priem.get("DATE") or f"#{idx + 1}"
             logger.info("Auditing visit %s (%d/%d)", visit_id, idx + 1, len(appointments))
 
-            visit_results = await self._audit_visit(visit)
-            results.extend(visit_results)
+            visit_result = await self._audit_visit(visit)
+            results.append(visit_result)
 
         return results
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    async def _audit_visit(self, visit: dict[str, Any]) -> list[Result]:
-        """Audit a single visit; returns one Result per diagnosis."""
+    async def _audit_visit(self, visit: dict[str, Any]) -> Result:
+        """Audit a single visit and return one Result object."""
         priem = visit.get("Прием") or {}
         visit_id = priem.get("GUID") or priem.get("DATE") or "unknown"
         logger.debug("[pipeline] _audit_visit START — visit_id=%s", visit_id)
@@ -119,7 +119,7 @@ class AuditPipeline:
             logger.info("[pipeline] visit %s has no diagnoses — skipping DiagnosisValidator", visit_id)
             empty_diag = DiagnosisAuditResult()
             self._excel.append(visit=visit, formal=formal_result, diagnosis=empty_diag)
-            return [Result(input=visit, formal=formal_result, diagnosis=[])]
+            return Result(input=visit, formal=formal_result, diagnosis=[])
 
         # ── Diagnosis check (once per diagnosis) ──────────────────────────────
         diag_validator = DiagnosisValidator(visit)
@@ -168,4 +168,4 @@ class AuditPipeline:
             diagnosis=diagnosis_results,
         )
         logger.debug("[pipeline] _audit_visit END — visit_id=%s\n%s", visit_id, result.pretty_format())
-        return [result]
+        return result
