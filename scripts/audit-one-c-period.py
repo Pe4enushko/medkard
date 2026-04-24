@@ -16,6 +16,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -50,16 +51,35 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+def _safe_period_part(value: str) -> str:
+    return "".join(char if char.isalnum() else "-" for char in value).strip("-")
+
+
+def _cache_path_for_period(datebegin: str, dateend: str) -> Path:
+    safe_datebegin = _safe_period_part(datebegin)
+    safe_dateend = _safe_period_part(dateend)
+    return DATA_SNAPSHOTS_DIR / f"one_c_{safe_datebegin}_to_{safe_dateend}.json"
+
+
+def _load_or_fetch_one_c_payload(datebegin: str, dateend: str) -> Any:
+    cache_path = _cache_path_for_period(datebegin, dateend)
+    if cache_path.exists():
+        log.info("Using cached 1C response: %s", cache_path)
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+
+    log.info("No cached 1C response found for period; fetching from 1C")
+    client = OneCClient.from_env()
+    payload = client.fetch_json_for_period(datebegin=datebegin, dateend=dateend)
+    cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    log.info("Cached 1C response: %s", cache_path)
+    return payload
+
+
 async def main() -> None:
     log.info("Starting period audit: datebegin=%s dateend=%s", DATEBEGIN, DATEEND)
 
-    # ── 1. Fetch raw JSON from 1C ─────────────────────────────────────────────
-    client = OneCClient.from_env()
-    payload = client.fetch_json_for_period(datebegin=DATEBEGIN, dateend=DATEEND)
-
-    snapshot_path = DATA_SNAPSHOTS_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    snapshot_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    log.info("Snapshot saved: %s", snapshot_path)
+    # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────────
+    payload = _load_or_fetch_one_c_payload(datebegin=DATEBEGIN, dateend=DATEEND)
 
     # ── 2. Run full pipeline with raw payload ─────────────────────────────────
     pipeline = AuditPipeline(excel_path=EXCEL_PATH)
