@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # ── Configurable ──────────────────────────────────────────────────────────────
 # How many vector-search candidates to fetch before BM25 reranking.
 # Actual returned results = top_k;  candidates fetched = top_k * CANDIDATES_FACTOR.
-CANDIDATES_FACTOR: int = 5
+CANDIDATES_FACTOR: int = 10
 # RRF constant: higher = rankings are more stable; lower = more weight on top results.
 RRF_K: int = 60
 # ─────────────────────────────────────────────────────────────────────────────
