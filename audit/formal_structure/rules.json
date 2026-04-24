@@ -4,7 +4,7 @@
     "source": "274n",
     "rule_type": "required_field",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -60,7 +60,7 @@
     "source": "274n",
     "rule_type": "required_field",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -102,7 +102,7 @@
     "source": "203n",
     "rule_type": "required_field",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -116,7 +116,7 @@
     "source": "274n",
     "rule_type": "structure_defect",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -130,7 +130,7 @@
     "source": "274n",
     "rule_type": "structure_defect",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -144,7 +144,7 @@
     "source": "274n",
     "rule_type": "structure_defect",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -158,7 +158,7 @@
     "source": "274n",
     "rule_type": "consistency",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -229,7 +229,7 @@
     "source": "icd10",
     "rule_type": "diagnosis_check",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -243,7 +243,7 @@
     "source": "icd10",
     "rule_type": "diagnosis_check",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["primary", "repeat"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -257,7 +257,7 @@
     "source": "",
     "rule_type": "structure_defect",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -272,7 +272,7 @@
     "rule_type": "required_field",
     "targets": ["companion_info"],
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -285,7 +285,7 @@
     "source": "203n",
     "rule_type": "content_analysis",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },
@@ -299,7 +299,7 @@
     "source": "203n",
     "rule_type": "required_field",
     "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
+      "visit_types": ["all"],
       "specialties": ["pediatrics"],
       "age_group": "child"
     },

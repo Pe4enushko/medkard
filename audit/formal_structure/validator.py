@@ -4,9 +4,9 @@ FormalValidator — formal-structure audit for a single ambulatory visit.
 Workflow::
     validator = FormalValidator()
 
-    visit_type = validator.get_visit_type(visit)   # VisitType enum
-    rules      = validator.get_rules(visit_type)    # applicable rule dicts
-    findings   = await validator.validate(visit)    # [{flag, issue}, ...]
+    visit_type = await validator.get_visit_type(visit)   # VisitType enum
+    rules      = validator.get_rules(visit_type)          # applicable rule dicts
+    findings   = await validator.validate(visit)          # [{flag, issue}, ...]
 
 The `validate` method combines the two steps above, renders the rules into
 the system prompt, and calls the LLM via LLM.validations.validate_visit.
@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from LLM.validations import validate_visit
+from LLM.visit_classifier import VisitClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class VisitType(Enum):
     PRIMARY = auto()        # первичный
     REPEAT = auto()         # повторный
     PROPHYLACTIC = auto()   # профилактический
+    OTHER = auto()          # не удалось определить тип
 
 
 # Mapping VisitType → value expected in rules.json "applies_to.visit_types"
@@ -46,6 +48,14 @@ _VISIT_TYPE_RULE_KEY: dict[VisitType, str] = {
     VisitType.PRIMARY:       "primary",
     VisitType.REPEAT:        "repeat",
     VisitType.PROPHYLACTIC:  "prophylactic",
+    VisitType.OTHER:         "other",
+}
+
+_LLM_LABEL_TO_TYPE: dict[str, VisitType] = {
+    "primary":      VisitType.PRIMARY,
+    "repeat":       VisitType.REPEAT,
+    "prophylactic": VisitType.PROPHYLACTIC,
+    "other":        VisitType.OTHER,
 }
 
 
@@ -56,54 +66,65 @@ class FormalValidator:
     and the system prompt template is loaded from ``LLM/prompts/``.
     """
 
-    def get_visit_type(self, visit: dict[str, Any]) -> VisitType:
-        """Determine the visit type from the first service name.
+    async def get_visit_type(self, visit: dict[str, Any]) -> VisitType:
+        """Determine the visit type, falling back to LLM if rule-based detection fails.
 
-        Inspects ``visit["Услуги"][0]["Наименование"]`` (case-insensitive) for
-        the presence of «первичный», «повторный», or «профилактический».
+        First inspects ``visit["Услуги"][0]["Наименование"]`` for the keywords
+        «первичный», «повторный», or «профилактический». On failure, asks the
+        LLM via :class:`~LLM.visit_classifier.VisitClassifier`. If the LLM also
+        returns nothing valid, defaults to ``PROPHYLACTIC`` and logs an error.
 
         Args:
             visit: Raw visit dict (as parsed from the source JSON).
 
         Returns:
             A :class:`VisitType` enum member.
-
-        Raises:
-            ValueError: If the visit type cannot be determined.
         """
         try:
             name: str = visit["Услуги"][0]["Наименование"].lower()
-        except (KeyError, IndexError, AttributeError) as exc:
-            raise ValueError(
-                "Cannot determine visit type: Услуги[0].Наименование is missing or invalid."
-            ) from exc
+            if "первичн" in name:
+                return VisitType.PRIMARY
+            if "повторн" in name:
+                return VisitType.REPEAT
+            if "профилактическ" in name:
+                return VisitType.PROPHYLACTIC
+            raise ValueError(f"Unrecognised service name: {name!r}")
+        except (KeyError, IndexError, AttributeError, ValueError) as exc:
+            logger.warning(
+                "[formal] rule-based visit type detection failed (%s) — falling back to LLM", exc
+            )
 
-        if "первичн" in name:
-            return VisitType.PRIMARY
-        if "повторн" in name:
-            return VisitType.REPEAT
-        if "профилактическ" in name:
-            return VisitType.PROPHYLACTIC
+        label = await VisitClassifier().classify(visit)
+        visit_type = _LLM_LABEL_TO_TYPE.get(label or "")
+        if visit_type is None:
+            logger.error(
+                "[formal] LLM could not determine visit type (returned %r) — defaulting to OTHER",
+                label,
+            )
+            return VisitType.OTHER
 
-        raise ValueError(
-            f"Cannot determine visit type from service name: {name!r}. "
-            "Expected 'первичный', 'повторный', or 'профилактический'."
-        )
+        logger.info("[formal] LLM identified visit type: %s", visit_type.name)
+        return visit_type
 
     def get_rules(self, visit_type: VisitType) -> list[dict]:
         """Return the subset of rules applicable to the given visit type.
+
+        A rule is included if its ``applies_to.visit_types`` contains the
+        specific key for ``visit_type`` **or** contains ``"all"``.
 
         Args:
             visit_type: A :class:`VisitType` enum member.
 
         Returns:
-            List of rule dicts from ``rules.json`` whose
-            ``applies_to.visit_types`` includes the corresponding key.
+            List of rule dicts from ``rules.json``.
         """
         key = _VISIT_TYPE_RULE_KEY[visit_type]
         return [
             rule for rule in _RULES
-            if key in rule.get("applies_to", {}).get("visit_types", [])
+            if (
+                key in rule.get("applies_to", {}).get("visit_types", [])
+                or "all" in rule.get("applies_to", {}).get("visit_types", [])
+            )
         ]
 
     def _format_rules(self, rules: list[dict]) -> str:
@@ -138,7 +159,7 @@ class FormalValidator:
     ) -> list[dict[str, str]]:
         """Validate a visit record against the applicable formal-structure rules.
 
-        1. Determines the visit type from ``Услуги[0].Наименование``.
+        1. Determines the visit type via ``get_visit_type``.
         2. Filters ``rules.json`` to the rules applicable to that visit type.
         3. Renders the system prompt with those rules.
         4. Calls the LLM and returns structured findings.
@@ -150,18 +171,13 @@ class FormalValidator:
             List of finding dicts: ``[{"flag": ..., "issue": ...}, ...]``.
             Empty list means no formal-structure defects were detected.
         """
-        visit_type = self.get_visit_type(visit)
+        visit_type = await self.get_visit_type(visit)
         logger.debug("[formal] visit_type resolved: %s", visit_type.name)
 
         rules = self.get_rules(visit_type)
         logger.debug("[formal] applicable rules (%d): %s", len(rules), [r.get("flag_code") for r in rules])
 
         system_prompt = self._render_prompt(rules)
-        #logger.debug("[formal] rendered system prompt:\n%s", system_prompt)
-        # logger.debug(
-        #     "[formal] visit payload sent to LLM:\n%s",
-        #     json.dumps(visit, ensure_ascii=False, indent=2),
-        # )
 
         findings = await validate_visit(system_prompt, visit)
         logger.info("[formal] LLM returned %d finding(s): %s", len(findings), findings)
