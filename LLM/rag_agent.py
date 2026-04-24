@@ -23,14 +23,11 @@ from typing import Any
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import BaseMessage, RemoveMessage
-from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from RAG.retrieval.embeddings import embed
 from RAG.retrieval.vector_store import hybrid_search
+from langchain_core.tools import tool
 
 load_dotenv()
 
@@ -38,133 +35,6 @@ load_dotenv()
 MODEL: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 RAG_TOP_K: int = int(os.environ.get("RAG_AGENT_TOP_K", "5"))
 # ─────────────────────────────────────────────────────────────────────────────
-
-BAD_TOKENS: tuple[str, ...] = (
-    "<|channel|>",
-    "<|start|>",
-    "<|end|>",
-    "<|constrain|>",
-    "to=functions.",
-)
-
-
-def _cleanse_text(text: str) -> str:
-    for token in BAD_TOKENS:
-        text = text.replace(token, "")
-    return text
-
-
-def _cleanse_content(content: Any) -> Any:
-    if isinstance(content, str):
-        return _cleanse_text(content)
-    if isinstance(content, list):
-        return [_cleanse_content(item) for item in content]
-    if isinstance(content, tuple):
-        return tuple(_cleanse_content(item) for item in content)
-    if isinstance(content, dict):
-        return {key: _cleanse_content(value) for key, value in content.items()}
-    return content
-
-
-def _replace_message_content(message: Any, content: Any) -> Any:
-    if isinstance(message, BaseMessage):
-        if hasattr(message, "model_copy"):
-            return message.model_copy(update={"content": content})
-        return message.copy(update={"content": content})
-
-    if isinstance(message, dict):
-        return {**message, "content": content}
-
-    if isinstance(message, tuple) and len(message) >= 2:
-        return (message[0], content, *message[2:])
-
-    return message
-
-
-def _cleanse_message(message: Any) -> Any:
-    content = (
-        message.get("content")
-        if isinstance(message, dict)
-        else getattr(message, "content", None)
-    )
-    if isinstance(message, tuple) and len(message) >= 2:
-        content = message[1]
-
-    cleansed_content = _cleanse_content(content)
-    if cleansed_content == content:
-        return message
-
-    return _replace_message_content(message, cleansed_content)
-
-
-def _cleanse_messages(messages: list[Any]) -> tuple[list[Any], bool]:
-    cleansed = [_cleanse_message(message) for message in messages]
-    changed = any(
-        new_message is not old_message
-        for new_message, old_message in zip(cleansed, messages)
-    )
-    return cleansed, changed
-
-
-class BadTokenCleansingMiddleware(AgentMiddleware):
-    """Remove provider control-token artifacts from every agent message."""
-
-    def before_model(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
-        return self._cleanse_state_messages(state)
-
-    async def abefore_model(
-        self,
-        state: dict[str, Any],
-        runtime: Any,
-    ) -> dict[str, Any] | None:
-        return self._cleanse_state_messages(state)
-
-    def after_model(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
-        return self._cleanse_state_messages(state)
-
-    async def aafter_model(
-        self,
-        state: dict[str, Any],
-        runtime: Any,
-    ) -> dict[str, Any] | None:
-        return self._cleanse_state_messages(state)
-
-    def before_agent(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
-        return self._cleanse_state_messages(state)
-
-    async def abefore_agent(
-        self,
-        state: dict[str, Any],
-        runtime: Any,
-    ) -> dict[str, Any] | None:
-        return self._cleanse_state_messages(state)
-
-    def after_agent(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
-        return self._cleanse_state_messages(state)
-
-    async def aafter_agent(
-        self,
-        state: dict[str, Any],
-        runtime: Any,
-    ) -> dict[str, Any] | None:
-        return self._cleanse_state_messages(state)
-
-    @staticmethod
-    def _cleanse_state_messages(state: dict[str, Any]) -> dict[str, Any] | None:
-        messages = state.get("messages")
-        if not messages:
-            return None
-
-        cleansed_messages, changed = _cleanse_messages(list(messages))
-        if not changed:
-            return None
-
-        return {
-            "messages": [
-                RemoveMessage(id=REMOVE_ALL_MESSAGES),
-                *cleansed_messages,
-            ],
-        }
 
 
 @tool
@@ -223,5 +93,5 @@ def create_checker_agent(
         model=llm,
         tools=tools,
         system_prompt=system_prompt,
-        middleware=[BadTokenCleansingMiddleware()],
     )
+
