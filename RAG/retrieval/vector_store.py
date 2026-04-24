@@ -17,6 +17,8 @@ Hybrid search result shape:
     }
 """
 
+import json
+import logging
 import os
 from typing import Literal
 from urllib.parse import quote_plus
@@ -31,6 +33,7 @@ from rank_bm25 import BM25Okapi
 from RAG.retrieval.embeddings import EMBEDDING_DIM, EMBEDDING_MODEL, embed  # noqa: F401
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # ── Configurable ──────────────────────────────────────────────────────────────
 # How many vector-search candidates to fetch before BM25 reranking.
@@ -170,6 +173,53 @@ def _rrf(rankings: list[list[str]], k: int = RRF_K) -> dict[str, float]:
     return scores
 
 
+def _metadata_dict(raw_metadata: object) -> dict:
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+    if isinstance(raw_metadata, str):
+        try:
+            parsed = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _log_hybrid_chunks(
+    query_text: str,
+    query_type: QueryType,
+    top_k: int,
+    results: list[dict],
+) -> None:
+    lines = [
+        "🔎 [retrieval] hybrid_search raw chunks",
+        f"query_type: {query_type}",
+        f"top_k: {top_k}",
+        f"query: {query_text}",
+        f"count: {len(results)}",
+    ]
+
+    for idx, row in enumerate(results, start=1):
+        metadata = _metadata_dict(row.get("metadata"))
+        section = metadata.get("section") or "—"
+        title = metadata.get("title") or metadata.get("doc_title") or "—"
+        score = row.get("rrf_score")
+        score_text = f"{score:.6f}" if isinstance(score, float) else str(score)
+        lines.extend(
+            [
+                "",
+                f"--- chunk {idx} ---",
+                f"id: {row.get('id', '—')}",
+                f"rrf_score: {score_text}",
+                f"title: {title}",
+                f"section: {section}",
+                str(row.get("chunk") or ""),
+            ]
+        )
+
+    logger.info("%s", "\n".join(lines))
+
+
 # ── Public hybrid search ──────────────────────────────────────────────────────
 
 async def hybrid_search(
@@ -208,6 +258,12 @@ async def hybrid_search(
 
     candidates = await _vector_search(embedding, col, n_candidates)
     if not candidates:
+        logger.info(
+            "🔎 [retrieval] hybrid_search found no chunks query_type=%s top_k=%d query=%r",
+            query_type,
+            top_k,
+            query_text,
+        )
         return []
 
     # Rank by vector similarity (already ordered distance ASC = similarity DESC)
@@ -230,4 +286,10 @@ async def hybrid_search(
         row["rrf_score"] = score
         results.append(row)
 
+    _log_hybrid_chunks(
+        query_text=query_text,
+        query_type=query_type,
+        top_k=top_k,
+        results=results,
+    )
     return results

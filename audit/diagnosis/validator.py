@@ -159,7 +159,7 @@ async def _run_checker(
             finish_reason,
             getattr(last_msg, "response_metadata", {}),
         )
-    logger.debug("[checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
+    logger.info("🤖 [checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
     logger.debug("[checker:%s] parsed %d issue(s)", checker_label, len(issues))
     return _CheckerRun(

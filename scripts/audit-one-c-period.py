@@ -41,7 +41,7 @@ _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 LOG_FILE = LOGS_DIR / f"audit-one-c-period_{_ts}.log"
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
