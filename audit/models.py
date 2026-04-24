@@ -25,6 +25,7 @@ class DiagnosisAuditResult:
     inspection_issues: list[DiagnisisIssue] = field(default_factory=list)
     treatment_issues: list[DiagnisisIssue] = field(default_factory=list)
     guideline_file_id: str | None = None
+    sources: str | None = None
 
     @property
     def all_issues(self) -> list[DiagnisisIssue]:
@@ -45,6 +46,7 @@ class DiagnosisAuditResult:
 
         return {
             "guideline_file_id": self.guideline_file_id,
+            "sources": self.sources,
             "anamnesis": _issue_list(self.anamnesis_issues),
             "inspection": _issue_list(self.inspection_issues),
             "treatment": _issue_list(self.treatment_issues),

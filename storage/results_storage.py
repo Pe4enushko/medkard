@@ -24,7 +24,13 @@ def _deserialize_diagnosis(raw: list[dict]) -> list[DiagnosisResult]:
             )
             for item in entry.get("issues", [])
         ]
-        results.append(DiagnosisResult(icd_code=entry.get("icd_code", ""), issues=issues))
+        results.append(
+            DiagnosisResult(
+                icd_code=entry.get("icd_code", ""),
+                issues=issues,
+                sources=entry.get("sources"),
+            )
+        )
     return results
 
 
@@ -43,6 +49,7 @@ def _serialize_diagnosis(diagnosis: list[DiagnosisResult]) -> str:
     return json.dumps([
         {
             "icd_code": dr.icd_code,
+            "sources": dr.sources,
             "issues": [
                 {
                     "issue": iss.issue,

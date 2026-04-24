@@ -94,7 +94,7 @@ async def validate_visit(
             {"role": "user", "content": visit_text},
         ],
         extra_body={"guided_json": _JSON_SCHEMA},
-        temperature=0.2,
+        temperature=0.4,
     )
 
     finish_reason = completion.choices[0].finish_reason

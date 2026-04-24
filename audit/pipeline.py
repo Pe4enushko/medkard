@@ -159,6 +159,7 @@ class AuditPipeline:
                 DiagnosisResult(
                     icd_code=dx_code,
                     issues=diag_result.all_issues,
+                    sources=diag_result.sources,
                 )
             )
 

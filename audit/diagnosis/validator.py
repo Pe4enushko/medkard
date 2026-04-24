@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,12 @@ _ANAMNESIS_PROMPT: str = _load_prompt("anamnesis_checker.txt")
 _INSPECTION_PROMPT: str = _load_prompt("inspection_checker.txt")
 _TREATMENT_PROMPT: str = _load_prompt("treatment_checker.txt")
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class _CheckerRun:
+    issues: list[DiagnisisIssue]
+    sources: str | None = None
 
 
 def _parse_inspection_data(raw_visit: dict[str, Any]) -> str:
@@ -110,42 +117,25 @@ def _parse_issues(output: str) -> list[DiagnisisIssue]:
     return issues
 
 
-def _format_message_for_log(message: Any, idx: int) -> str:
-    if isinstance(message, tuple) and len(message) == 2:
-        role, content = message
-        return f"{idx}. {role}\n{content}"
+def _extract_tool_sources(messages: list[Any], checker_label: str) -> str | None:
+    parts: list[str] = []
+    for idx, message in enumerate(messages, start=1):
+        message_type = getattr(message, "type", None)
+        if message_type != "tool":
+            continue
 
-    message_type = getattr(message, "type", None) or message.__class__.__name__
-    content = getattr(message, "content", "")
-    tool_calls = getattr(message, "tool_calls", None) or []
-    tool_call_id = getattr(message, "tool_call_id", None)
-    name = getattr(message, "name", None)
+        content = str(getattr(message, "content", "") or "").strip()
+        if not content:
+            continue
 
-    header_parts = [f"{idx}. {message_type}"]
-    if name:
-        header_parts.append(f"name={name}")
-    if tool_call_id:
-        header_parts.append(f"tool_call_id={tool_call_id}")
+        name = getattr(message, "name", None) or "tool"
+        tool_call_id = getattr(message, "tool_call_id", None)
+        title = f"{checker_label}: {name}"
+        if tool_call_id:
+            title = f"{title} ({tool_call_id})"
+        parts.append(f"--- {title} #{idx} ---\n{content}")
 
-    lines = [" | ".join(header_parts)]
-    if content:
-        lines.append(str(content))
-    if tool_calls:
-        lines.append("tool_calls:")
-        for call in tool_calls:
-            call_name = call.get("name") if isinstance(call, dict) else getattr(call, "name", "")
-            call_args = call.get("args") if isinstance(call, dict) else getattr(call, "args", "")
-            lines.append(f"  - {call_name}: {call_args}")
-
-    return "\n".join(lines)
-
-
-def _log_checker_messages(checker_label: str, system_prompt: str, messages: list[Any]) -> None:
-    formatted_messages = "\n\n".join(
-        [_format_message_for_log(("system", system_prompt), 0)]
-        + [_format_message_for_log(message, idx) for idx, message in enumerate(messages, start=1)]
-    )
-    logger.info("[checker:%s] LLM message trace:\n%s", checker_label, formatted_messages)
+    return "\n\n".join(parts) or None
 
 
 async def _run_checker(
@@ -153,13 +143,12 @@ async def _run_checker(
     tools: list,
     human_message: str,
     checker_label: str = "checker",
-) -> list[DiagnisisIssue]:
+) -> _CheckerRun:
     tool_names = [t.name for t in tools]
     logger.debug("[checker:%s] START — tools=%s", checker_label, tool_names)
     logger.debug("[checker:%s] system_prompt:\n%s", checker_label, system_prompt)
     agent = create_checker_agent(system_prompt, tools)
     result = await agent.ainvoke({"messages": [("user", human_message)]})
-    _log_checker_messages(checker_label, system_prompt, result["messages"])
     last_msg = result["messages"][-1]
     raw_answer = last_msg.content
     finish_reason = (getattr(last_msg, "response_metadata", {}) or {}).get("finish_reason")
@@ -173,7 +162,10 @@ async def _run_checker(
     logger.debug("[checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
     logger.debug("[checker:%s] parsed %d issue(s)", checker_label, len(issues))
-    return issues
+    return _CheckerRun(
+        issues=issues,
+        sources=_extract_tool_sources(result["messages"], checker_label),
+    )
 
 
 class DiagnosisValidator:
@@ -217,6 +209,7 @@ class DiagnosisValidator:
         anamnesis_issues: list[DiagnisisIssue] = []
         inspection_issues: list[DiagnisisIssue] = []
         treatment_issues: list[DiagnisisIssue] = []
+        sources: str | None = None
 
         if file_id:
             patient_info = "\n".join(f"{k}: {v}" for k, v in patient.items() if v is not None)
@@ -231,7 +224,7 @@ class DiagnosisValidator:
             logger.debug("[diagnosis] human_message sent to checkers:\n%s", human_message)
             logger.info("[diagnosis] launching anamnesis / inspection / treatment checkers in parallel")
 
-            anamnesis_issues, inspection_issues, treatment_issues = await asyncio.gather(
+            anamnesis_run, inspection_run, treatment_run = await asyncio.gather(
                 _run_checker(
                     _ANAMNESIS_PROMPT,
                     get_anamnesis_tools_for(file_id),
@@ -251,6 +244,15 @@ class DiagnosisValidator:
                     checker_label="treatment",
                 ),
             )
+            anamnesis_issues = anamnesis_run.issues
+            inspection_issues = inspection_run.issues
+            treatment_issues = treatment_run.issues
+            source_parts = [
+                run.sources
+                for run in (anamnesis_run, inspection_run, treatment_run)
+                if run.sources
+            ]
+            sources = "\n\n".join(source_parts) or None
             logger.info(
                 "[diagnosis] checkers done — anamnesis=%d inspection=%d treatment=%d",
                 len(anamnesis_issues), len(inspection_issues), len(treatment_issues),
@@ -266,4 +268,5 @@ class DiagnosisValidator:
             inspection_issues=inspection_issues,
             treatment_issues=treatment_issues,
             guideline_file_id=file_id,
+            sources=sources,
         )

@@ -76,7 +76,7 @@ async def decide_file_id(
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        temperature=0,
+        temperature=0.4,
     )
 
     logger.debug("[decider] LLM response:\n%s", resp.model_dump_json(indent=2))

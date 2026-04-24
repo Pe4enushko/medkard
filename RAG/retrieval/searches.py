@@ -6,20 +6,23 @@ Use Doc._format_chunk() to render them for LLM prompts.
 
 Public API
 ----------
-search_by_file_id(file_id, query, top_k)
+search_by_file_id(file_id, query)
     Hybrid search restricted to a single clinical-guideline document.
 
-search_anamnesis(file_id, query, top_k)
+search_anamnesis(file_id, query)
     Anamnesis / complaints chunks (section contains «анамнез» or «жалоб»).
 
-search_inspection(file_id, query, top_k)
+search_inspection(file_id, query)
     Investigations / lab-results chunks (section contains «исследов»).
 
-search_treatment(file_id, query, top_k)
+search_treatment(file_id, query)
     Treatment chunks (section contains «лечен»).
 """
 
 from __future__ import annotations
+
+import json
+import logging
 
 import numpy as np
 
@@ -32,6 +35,8 @@ from RAG.retrieval.vector_store import (
     _rrf,
 )
 
+logger = logging.getLogger(__name__)
+
 # ── SQL fragments ─────────────────────────────────────────────────────────────
 _SELECT_COLS = """
     id::text,
@@ -43,6 +48,7 @@ _SELECT_COLS = """
 """
 
 _VECTOR_COL = "fact_q_embedding"  # use fact embeddings for all targeted searches
+TARGETED_TOP_K = 2
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -97,17 +103,29 @@ async def _vector_search_filtered(
 async def _hybrid_filtered(
     query: str,
     file_id: str,
-    top_k: int,
     section_filter: str | None = None,
 ) -> list[dict]:
     """Core hybrid search (vector + BM25 + RRF) with file_id and optional section filter."""
+    logger.info(
+        "[retrieval] hybrid_filtered START file_id=%s section_filter=%s top_k=%d query=%r",
+        file_id,
+        section_filter,
+        TARGETED_TOP_K,
+        query,
+    )
     embedding = await embed(query)
-    n_candidates = top_k * CANDIDATES_FACTOR
+    n_candidates = TARGETED_TOP_K * CANDIDATES_FACTOR
 
     candidates = await _vector_search_filtered(
         embedding, file_id, n_candidates, section_filter
     )
     if not candidates:
+        logger.info(
+            "[retrieval] hybrid_filtered returned no candidates file_id=%s section_filter=%s query=%r",
+            file_id,
+            section_filter,
+            query,
+        )
         return []
 
     vector_ranking = [c["id"] for c in candidates]
@@ -115,7 +133,7 @@ async def _hybrid_filtered(
     rrf_scores = _rrf([vector_ranking, bm25_ranking], k=RRF_K)
 
     by_id = {c["id"]: c for c in candidates}
-    ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
+    ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:TARGETED_TOP_K]
 
     results = []
     for doc_id, score in ranked:
@@ -124,7 +142,60 @@ async def _hybrid_filtered(
         row["rrf_score"] = score
         results.append(row)
 
+    _log_retrieved_chunks(
+        query=query,
+        file_id=file_id,
+        section_filter=section_filter,
+        results=results,
+    )
     return results
+
+
+def _log_retrieved_chunks(
+    query: str,
+    file_id: str,
+    section_filter: str | None,
+    results: list[dict],
+) -> None:
+    lines = [
+        "[retrieval] hybrid_filtered retrieved chunks",
+        f"file_id: {file_id}",
+        f"section_filter: {section_filter or '—'}",
+        f"query: {query}",
+        f"count: {len(results)}",
+    ]
+
+    for idx, row in enumerate(results, start=1):
+        metadata = _metadata_dict(row.get("metadata"))
+        section = metadata.get("section") or "—"
+        title = metadata.get("title") or metadata.get("doc_title") or "—"
+        score = row.get("rrf_score")
+        score_text = f"{score:.6f}" if isinstance(score, float) else str(score)
+        lines.extend(
+            [
+                "",
+                f"--- chunk {idx} ---",
+                f"id: {row.get('id', '—')}",
+                f"rrf_score: {score_text}",
+                f"title: {title}",
+                f"section: {section}",
+                str(row.get("chunk") or ""),
+            ]
+        )
+
+    logger.info("%s", "\n".join(lines))
+
+
+def _metadata_dict(raw_metadata: object) -> dict:
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+    if isinstance(raw_metadata, str):
+        try:
+            parsed = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 # ── Public functions ──────────────────────────────────────────────────────────
@@ -132,26 +203,23 @@ async def _hybrid_filtered(
 async def search_by_file_id(
     file_id: str,
     query: str,
-    top_k: int = 5,
 ) -> list[dict]:
     """Hybrid search restricted to a single document (by file_id).
 
     Args:
         file_id: ID of the clinical guideline document to search within.
         query:   Natural-language search query.
-        top_k:   Number of results to return.
 
     Returns:
         List of result dicts with keys: id, chunk, metadata, fact_q,
         procedure_q, constraint_q, rrf_score.
     """
-    return await _hybrid_filtered(query, file_id, top_k)
+    return await _hybrid_filtered(query, file_id)
 
 
 async def search_anamnesis(
     file_id: str,
     query: str,
-    top_k: int = 5,
 ) -> list[dict]:
     """Search anamnesis and complaints sections within a document.
 
@@ -159,13 +227,12 @@ async def search_anamnesis(
 
     Returns raw result dicts (no formatting).
     """
-    return await _hybrid_filtered(query, file_id, top_k, section_filter="жалоб")
+    return await _hybrid_filtered(query, file_id, section_filter="жалоб")
 
 
 async def search_inspection(
     file_id: str,
     query: str,
-    top_k: int = 5,
 ) -> list[dict]:
     """Search investigation / diagnostic criteria sections within a document.
 
@@ -173,13 +240,12 @@ async def search_inspection(
 
     Returns raw result dicts (no formatting).
     """
-    return await _hybrid_filtered(query, file_id, top_k, section_filter="исследов")
+    return await _hybrid_filtered(query, file_id, section_filter="исследов")
 
 
 async def search_treatment(
     file_id: str,
     query: str,
-    top_k: int = 5,
 ) -> list[dict]:
     """Search treatment sections within a document.
 
@@ -187,4 +253,4 @@ async def search_treatment(
 
     Returns raw result dicts (no formatting).
     """
-    return await _hybrid_filtered(query, file_id, top_k, section_filter="лечен")
+    return await _hybrid_filtered(query, file_id, section_filter="лечен")

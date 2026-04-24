@@ -70,6 +70,7 @@ class DiagnosisResult:
 
     icd_code: str
     issues: list[DiagnisisIssue] = field(default_factory=list)
+    sources: str | None = None
 
     def pretty_format(self) -> str:
         if not self.issues:
