@@ -9,11 +9,14 @@ class IssueSource:
 
     doc_title: str          # Manifest «Наименование» value
     section: str | None = None  # TOC section title, if known
+    cite: str | None = None
 
     def pretty_format(self) -> str:
         s = f"      source: {self.doc_title}"
         if self.section:
             s += f" / {self.section}"
+        if self.cite:
+            s += f" — {self.cite}"
         return s
 
 
@@ -70,7 +73,6 @@ class DiagnosisResult:
 
     icd_code: str
     issues: list[DiagnisisIssue] = field(default_factory=list)
-    sources: str | None = None
 
     def pretty_format(self) -> str:
         if not self.issues:

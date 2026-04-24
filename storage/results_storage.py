@@ -18,19 +18,17 @@ def _deserialize_diagnosis(raw: list[dict]) -> list[DiagnosisResult]:
             DiagnisisIssue(
                 issue=item["issue"],
                 sources=[
-                    IssueSource(doc_title=s["doc_title"], section=s.get("section"))
+                    IssueSource(
+                        doc_title=s["doc_title"],
+                        section=s.get("section"),
+                        cite=s.get("cite"),
+                    )
                     for s in item.get("sources", [])
                 ],
             )
             for item in entry.get("issues", [])
         ]
-        results.append(
-            DiagnosisResult(
-                icd_code=entry.get("icd_code", ""),
-                issues=issues,
-                sources=entry.get("sources"),
-            )
-        )
+        results.append(DiagnosisResult(icd_code=entry.get("icd_code", ""), issues=issues))
     return results
 
 
@@ -49,7 +47,6 @@ def _serialize_diagnosis(diagnosis: list[DiagnosisResult]) -> str:
     return json.dumps([
         {
             "icd_code": dr.icd_code,
-            "sources": dr.sources,
             "issues": [
                 {
                     "issue": iss.issue,
@@ -57,6 +54,7 @@ def _serialize_diagnosis(diagnosis: list[DiagnosisResult]) -> str:
                         {
                             "doc_title": s.doc_title,
                             **({"section": s.section} if s.section is not None else {}),
+                            **({"cite": s.cite} if s.cite is not None else {}),
                         }
                         for s in iss.sources
                     ],

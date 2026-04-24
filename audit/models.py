@@ -25,7 +25,6 @@ class DiagnosisAuditResult:
     inspection_issues: list[DiagnisisIssue] = field(default_factory=list)
     treatment_issues: list[DiagnisisIssue] = field(default_factory=list)
     guideline_file_id: str | None = None
-    sources: str | None = None
 
     @property
     def all_issues(self) -> list[DiagnisisIssue]:
@@ -37,7 +36,11 @@ class DiagnosisAuditResult:
                 {
                     "issue": iss.issue,
                     "sources": [
-                        {"doc_title": s.doc_title, "section": s.section}
+                        {
+                            "doc_title": s.doc_title,
+                            "section": s.section,
+                            "cite": s.cite,
+                        }
                         for s in iss.sources
                     ],
                 }
@@ -46,13 +49,15 @@ class DiagnosisAuditResult:
 
         return {
             "guideline_file_id": self.guideline_file_id,
-            "sources": self.sources,
             "anamnesis": _issue_list(self.anamnesis_issues),
             "inspection": _issue_list(self.inspection_issues),
             "treatment": _issue_list(self.treatment_issues),
         }
 
     def pretty_format(self) -> str:
+        if self.guideline_file_id is None:
+            return "Для такого МКБ кода нет прямых клинических рекоммендаций"
+
         def _section(label: str, issues: list[DiagnisisIssue]) -> str:
             if not issues:
                 return f"  {label}: OK"

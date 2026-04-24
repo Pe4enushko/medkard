@@ -52,7 +52,6 @@ _TREATMENT_PROMPT: str = _load_prompt("treatment_checker.txt")
 @dataclass
 class _CheckerRun:
     issues: list[DiagnisisIssue]
-    sources: str | None = None
 
 
 def _parse_inspection_data(raw_visit: dict[str, Any]) -> str:
@@ -109,33 +108,13 @@ def _parse_issues(output: str) -> list[DiagnisisIssue]:
             IssueSource(
                 doc_title=s.get("doc_title", ""),
                 section=s.get("section"),
+                cite=s.get("cite"),
             )
             for s in item.get("sources", [])
             if isinstance(s, dict)
         ]
         issues.append(DiagnisisIssue(issue=issue_text, sources=sources))
     return issues
-
-
-def _extract_tool_sources(messages: list[Any], checker_label: str) -> str | None:
-    parts: list[str] = []
-    for idx, message in enumerate(messages, start=1):
-        message_role = getattr(message, "role", None)
-        if message_role != "tool":
-            continue
-
-        content = str(getattr(message, "content", "") or "").strip()
-        if not content:
-            continue
-
-        name = getattr(message, "name", None) or "tool"
-        tool_call_id = getattr(message, "tool_call_id", None)
-        title = f"{checker_label}: {name}"
-        if tool_call_id:
-            title = f"{title} ({tool_call_id})"
-        parts.append(f"--- {title} #{idx} ---\n{content}")
-
-    return "\n\n".join(parts) or None
 
 
 async def _run_checker(
@@ -161,10 +140,7 @@ async def _run_checker(
     logger.info("🤖 [checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
     logger.debug("[checker:%s] parsed %d issue(s)", checker_label, len(issues))
-    return _CheckerRun(
-        issues=issues,
-        sources=_extract_tool_sources(result["messages"], checker_label),
-    )
+    return _CheckerRun(issues=issues)
 
 
 class DiagnosisValidator:
@@ -200,7 +176,6 @@ class DiagnosisValidator:
         anamnesis_issues: list[DiagnisisIssue] = []
         inspection_issues: list[DiagnisisIssue] = []
         treatment_issues: list[DiagnisisIssue] = []
-        sources: str | None = None
 
         if file_id:
             patient_info = "\n".join(f"{k}: {v}" for k, v in patient.items() if v is not None)
@@ -238,24 +213,19 @@ class DiagnosisValidator:
             anamnesis_issues = anamnesis_run.issues
             inspection_issues = inspection_run.issues
             treatment_issues = treatment_run.issues
-            # Getting sources
-            source_parts = [
-                run.sources
-                for run in (anamnesis_run, inspection_run, treatment_run)
-                if run.sources
-            ]
-            sources = "\n\n".join(source_parts) or None
             logger.info(
                 "[diagnosis] checkers done — anamnesis=%d inspection=%d treatment=%d",
                 len(anamnesis_issues), len(inspection_issues), len(treatment_issues),
             )
         else:
-            logger.warning("[diagnosis] no guideline file_id — skipping checker agents for dx=%s", dx_code)
+            logger.warning(
+                "[diagnosis] dx=%s — Для такого МКБ кода нет прямых клинических рекоммендаций",
+                dx_code,
+            )
 
         return DiagnosisAuditResult(
             anamnesis_issues=anamnesis_issues,
             inspection_issues=inspection_issues,
             treatment_issues=treatment_issues,
             guideline_file_id=file_id,
-            sources=sources,
         )

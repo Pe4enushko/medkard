@@ -1,11 +1,10 @@
 """
 excel.py — append audit results to an xlsx workbook.
 
-Each row contains four columns with human-readable text:
+Each row contains three columns with human-readable text:
   - ``input``            — raw visit payload (source JSON from 1C)
   - ``formal_structure`` — FormalStructureResult
   - ``diagnosis``        — DiagnosisAuditResult
-  - ``sources``          — raw tool results used by the diagnosis checker
 
 Usage::
     from parsers.excel import AuditExcelWriter
@@ -32,7 +31,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from audit.models import DiagnosisAuditResult, FormalStructureResult
 
-_HEADERS = ["input", "formal_structure", "diagnosis", "sources"]
+_HEADERS = ["input", "formal_structure", "diagnosis"]
 logger = logging.getLogger(__name__)
 
 
@@ -111,6 +110,8 @@ class AuditExcelWriter:
         else:
             wb = Workbook()
             ws = wb.active
+        if ws.cell(row=1, column=4).value == "sources":
+            ws.delete_cols(4, 1)
         for idx, header in enumerate(_HEADERS, start=1):
             ws.cell(row=1, column=idx, value=header)
         return wb, ws  # type: ignore[return-value]
@@ -133,7 +134,6 @@ class AuditExcelWriter:
                 _pretty(visit),
                 _pretty(formal),
                 _pretty(diagnosis),
-                diagnosis.sources or "",
             ]
             wb, ws = self._open_or_create()
             ws.append(row)
