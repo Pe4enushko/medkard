@@ -80,31 +80,16 @@ class FormalValidator:
         Returns:
             A :class:`VisitType` enum member.
         """
-        try:
-            name: str = visit["Услуги"][0]["Наименование"].lower()
-            if "первичн" in name:
-                return VisitType.PRIMARY
-            if "повторн" in name:
-                return VisitType.REPEAT
-            if "профилактическ" in name:
-                return VisitType.PROPHYLACTIC
-            raise ValueError(f"Unrecognised service name: {name!r}")
-        except (KeyError, IndexError, AttributeError, ValueError) as exc:
-            logger.warning(
-                "[formal] rule-based visit type detection failed (%s) — falling back to LLM", exc
-            )
-
-        label = await VisitClassifier().classify(visit)
-        visit_type = _LLM_LABEL_TO_TYPE.get(label or "")
-        if visit_type is None:
-            logger.error(
-                "[formal] LLM could not determine visit type (returned %r) — defaulting to OTHER",
-                label,
-            )
-            return VisitType.OTHER
-
-        logger.info("[formal] LLM identified visit type: %s", visit_type.name)
-        return visit_type
+        
+        name: str = visit["Услуги"][0]["Наименование"].lower()
+        if "первичн" in name:
+            return VisitType.PRIMARY
+        if "повторн" in name:
+            return VisitType.REPEAT
+        if "профилактическ" in name:
+            return VisitType.PROPHYLACTIC
+        
+        return VisitType.OTHER # fallback
 
     def get_rules(self, visit_type: VisitType) -> list[dict]:
         """Return the subset of rules applicable to the given visit type.
