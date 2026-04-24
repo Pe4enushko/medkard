@@ -43,8 +43,7 @@ class VisitClassifier:
                 {"role": "system", "content": _PROMPT},
                 {"role": "user", "content": json.dumps(visit, ensure_ascii=False, indent=2)},
             ],
-            temperature=0,
-            max_tokens=10,
+            temperature=0
         )
 
         answer = resp.choices[0].message.content.strip().lower()

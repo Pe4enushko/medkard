@@ -228,4 +228,5 @@ class DiagnosisValidator:
             inspection_issues=inspection_issues,
             treatment_issues=treatment_issues,
             guideline_file_id=file_id,
+            icd_code=dx_code,
         )
