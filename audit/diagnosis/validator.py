@@ -120,8 +120,8 @@ def _parse_issues(output: str) -> list[DiagnisisIssue]:
 def _extract_tool_sources(messages: list[Any], checker_label: str) -> str | None:
     parts: list[str] = []
     for idx, message in enumerate(messages, start=1):
-        message_type = getattr(message, "type", None)
-        if message_type != "tool":
+        message_role = getattr(message, "role", None)
+        if message_role != "tool":
             continue
 
         content = str(getattr(message, "content", "") or "").strip()
@@ -247,6 +247,7 @@ class DiagnosisValidator:
             anamnesis_issues = anamnesis_run.issues
             inspection_issues = inspection_run.issues
             treatment_issues = treatment_run.issues
+            # Getting sources
             source_parts = [
                 run.sources
                 for run in (anamnesis_run, inspection_run, treatment_run)
