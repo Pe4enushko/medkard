@@ -97,7 +97,6 @@ class AuditPipeline:
         priem = visit.get("Прием") or {}
         visit_id = priem.get("GUID") or priem.get("DATE") or "unknown"
         logger.debug("[pipeline] _audit_visit START — visit_id=%s", visit_id)
-        logger.debug("[pipeline] visit input:\n%s", json.dumps(visit, ensure_ascii=False, indent=2))
 
         # ── Formal structure (once per visit) ─────────────────────────────────
         logger.info("📋 [pipeline] running FormalValidator for visit %s", visit_id)
@@ -132,8 +131,9 @@ class AuditPipeline:
                 visit_id, dx_idx + 1, len(diagnoses), dx_code,
             )
             logger.debug(
-                "[pipeline] diagnosis input:\n%s",
-                json.dumps(diagnosis, ensure_ascii=False, indent=2),
+                "[pipeline] diagnosis input code=%s name=%s",
+                dx_code,
+                diagnosis.get("НаименованиеМКБ"),
             )
             diag_result = await diag_validator.validate_diagnosis(diagnosis)
             logger.info(
@@ -144,11 +144,6 @@ class AuditPipeline:
                 len(diag_result.inspection_issues),
                 len(diag_result.treatment_issues),
             )
-            logger.debug(
-                "[pipeline] DiagnosisAuditResult:\n%s",
-                diag_result.pretty_format(),
-            )
-
             self._excel.append(
                 visit=visit,
                 formal=formal_result,
@@ -168,5 +163,5 @@ class AuditPipeline:
             formal=formal_result,
             diagnosis=diagnosis_results,
         )
-        logger.debug("[pipeline] _audit_visit END — visit_id=%s\n%s", visit_id, result.pretty_format())
+        logger.debug("[pipeline] _audit_visit END — visit_id=%s", visit_id)
         return result

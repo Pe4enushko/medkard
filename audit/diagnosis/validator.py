@@ -146,7 +146,6 @@ async def _run_checker(
 ) -> _CheckerRun:
     tool_names = [t.name for t in tools]
     logger.debug("[checker:%s] START — tools=%s", checker_label, tool_names)
-    logger.debug("[checker:%s] system_prompt:\n%s", checker_label, system_prompt)
     agent = create_checker_agent(system_prompt, tools)
     result = await agent.ainvoke({"messages": [("user", human_message)]})
     last_msg = result["messages"][-1]
@@ -194,14 +193,6 @@ class DiagnosisValidator:
         patient: dict = self._visit.get("Пациент", {})
         dx_code = diagnosis.get("КодМКБ", "?")
         logger.info("[diagnosis] validate_diagnosis START — dx=%s", dx_code)
-        logger.debug(
-            "[diagnosis] diagnosis input:\n%s",
-            json.dumps(diagnosis, ensure_ascii=False, indent=2),
-        )
-        logger.debug(
-            "[diagnosis] patient context:\n%s",
-            json.dumps(patient, ensure_ascii=False, indent=2),
-        )
 
         file_id = await self._clinic_recs.pick_recs(patient, diagnosis)
         logger.info("[diagnosis] guideline file_id picked: %s", file_id)
@@ -221,7 +212,7 @@ class DiagnosisValidator:
                 "## Клинический контекст (данные осмотра)\n"
                 f"{_parse_inspection_data(self._visit)}"
             )
-            logger.debug("[diagnosis] human_message sent to checkers:\n%s", human_message)
+            logger.info("📨 [diagnosis] checker user prompt for dx=%s:\n%s", dx_code, human_message)
             logger.info("[diagnosis] launching anamnesis / inspection / treatment checkers in parallel")
 
             anamnesis_run, inspection_run, treatment_run = await asyncio.gather(
@@ -258,9 +249,6 @@ class DiagnosisValidator:
                 "[diagnosis] checkers done — anamnesis=%d inspection=%d treatment=%d",
                 len(anamnesis_issues), len(inspection_issues), len(treatment_issues),
             )
-            logger.debug("[diagnosis] anamnesis_issues: %s", anamnesis_issues)
-            logger.debug("[diagnosis] inspection_issues: %s", inspection_issues)
-            logger.debug("[diagnosis] treatment_issues: %s", treatment_issues)
         else:
             logger.warning("[diagnosis] no guideline file_id — skipping checker agents for dx=%s", dx_code)
 
