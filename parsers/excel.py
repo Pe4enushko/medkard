@@ -138,9 +138,9 @@ class AuditExcelWriter:
             wb, ws = self._open_or_create()
             ws.append(row)
             wb.save(self._path)
-            logger.info("EXCEL APPEND OK path=%s", self._path)
+            logger.info("📊 EXCEL APPEND OK path=%s", self._path)
         except Exception:
-            logger.exception("EXCEL APPEND FAILED path=%s", self._path)
+            logger.exception("📊 EXCEL APPEND FAILED path=%s", self._path)
             raise
 
     def rows_count(self) -> int:

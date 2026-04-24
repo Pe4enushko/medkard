@@ -99,10 +99,10 @@ class ResultsStorage(BaseStorage):
                 )
                 row = await cur.fetchone()
             result.id = row["id"]
-            logger.info("DB INSERT OK id=%s", row["id"])
+            logger.info("💾 DB INSERT OK id=%s", row["id"])
             return row["id"]
         except Exception:
-            logger.exception("DB INSERT FAILED")
+            logger.exception("💾 DB INSERT FAILED")
             raise
 
     # ── Reads ─────────────────────────────────────────────────────────────────

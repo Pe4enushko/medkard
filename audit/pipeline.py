@@ -83,7 +83,7 @@ class AuditPipeline:
         for idx, visit in enumerate(appointments):
             priem: dict = visit.get("Прием") or {}
             visit_id = priem.get("GUID") or priem.get("DATE") or f"#{idx + 1}"
-            logger.info("Auditing visit %s (%d/%d)", visit_id, idx + 1, len(appointments))
+            logger.info("🩺 Auditing visit %s (%d/%d)", visit_id, idx + 1, len(appointments))
 
             visit_result = await self._audit_visit(visit)
             results.append(visit_result)
@@ -100,7 +100,7 @@ class AuditPipeline:
         logger.debug("[pipeline] visit input:\n%s", json.dumps(visit, ensure_ascii=False, indent=2))
 
         # ── Formal structure (once per visit) ─────────────────────────────────
-        logger.info("[pipeline] running FormalValidator for visit %s", visit_id)
+        logger.info("📋 [pipeline] running FormalValidator for visit %s", visit_id)
         formal_raw = await FormalValidator().validate(visit)
         formal_result = FormalStructureResult(
             findings=[
@@ -116,7 +116,7 @@ class AuditPipeline:
         logger.debug("[pipeline] diagnoses found: %d", len(diagnoses))
 
         if not diagnoses:
-            logger.info("[pipeline] visit %s has no diagnoses — skipping DiagnosisValidator", visit_id)
+            logger.info("🧬 [pipeline] visit %s has no diagnoses — skipping DiagnosisValidator", visit_id)
             empty_diag = DiagnosisAuditResult()
             self._excel.append(visit=visit, formal=formal_result, diagnosis=empty_diag)
             return Result(input=visit, formal=formal_result, diagnosis=[])
@@ -128,7 +128,7 @@ class AuditPipeline:
         for dx_idx, diagnosis in enumerate(diagnoses):
             dx_code = diagnosis.get("КодМКБ", f"#{dx_idx + 1}")
             logger.info(
-                "[pipeline] DiagnosisValidator — visit %s, diagnosis %d/%d (%s)",
+                "🧬 [pipeline] DiagnosisValidator — visit %s, diagnosis %d/%d (%s)",
                 visit_id, dx_idx + 1, len(diagnoses), dx_code,
             )
             logger.debug(

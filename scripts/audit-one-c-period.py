@@ -76,7 +76,7 @@ def _load_or_fetch_one_c_payload(datebegin: str, dateend: str) -> Any:
 
 
 async def main() -> None:
-    log.info("Starting period audit: datebegin=%s dateend=%s", DATEBEGIN, DATEEND)
+    log.info("🩺 Starting period audit: datebegin=%s dateend=%s", DATEBEGIN, DATEEND)
 
     # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────────
     payload = _load_or_fetch_one_c_payload(datebegin=DATEBEGIN, dateend=DATEEND)
@@ -89,8 +89,9 @@ async def main() -> None:
     # ── 3. Persist results to DB ──────────────────────────────────────────────
     async with ResultsStorage() as storage:
         for idx, result in enumerate(results, start=1):
+            log.info("💾 Persisting result %d/%d", idx, len(results))
             result_id = await storage.insert(result)
-            log.info("Persisted result %d/%d id=%s", idx, len(results), result_id)
+            log.info("💾 Persisted result %d/%d id=%s", idx, len(results), result_id)
 
     log.info("Audit complete. Log: %s", LOG_FILE)
 
