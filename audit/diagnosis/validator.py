@@ -110,24 +110,69 @@ def _parse_issues(output: str) -> list[DiagnisisIssue]:
     return issues
 
 
-async def _run_checker(system_prompt: str, tools: list, human_message: str) -> list[DiagnisisIssue]:
+def _format_message_for_log(message: Any, idx: int) -> str:
+    if isinstance(message, tuple) and len(message) == 2:
+        role, content = message
+        return f"{idx}. {role}\n{content}"
+
+    message_type = getattr(message, "type", None) or message.__class__.__name__
+    content = getattr(message, "content", "")
+    tool_calls = getattr(message, "tool_calls", None) or []
+    tool_call_id = getattr(message, "tool_call_id", None)
+    name = getattr(message, "name", None)
+
+    header_parts = [f"{idx}. {message_type}"]
+    if name:
+        header_parts.append(f"name={name}")
+    if tool_call_id:
+        header_parts.append(f"tool_call_id={tool_call_id}")
+
+    lines = [" | ".join(header_parts)]
+    if content:
+        lines.append(str(content))
+    if tool_calls:
+        lines.append("tool_calls:")
+        for call in tool_calls:
+            call_name = call.get("name") if isinstance(call, dict) else getattr(call, "name", "")
+            call_args = call.get("args") if isinstance(call, dict) else getattr(call, "args", "")
+            lines.append(f"  - {call_name}: {call_args}")
+
+    return "\n".join(lines)
+
+
+def _log_checker_messages(checker_label: str, system_prompt: str, messages: list[Any]) -> None:
+    formatted_messages = "\n\n".join(
+        [_format_message_for_log(("system", system_prompt), 0)]
+        + [_format_message_for_log(message, idx) for idx, message in enumerate(messages, start=1)]
+    )
+    logger.info("[checker:%s] LLM message trace:\n%s", checker_label, formatted_messages)
+
+
+async def _run_checker(
+    system_prompt: str,
+    tools: list,
+    human_message: str,
+    checker_label: str = "checker",
+) -> list[DiagnisisIssue]:
     tool_names = [t.name for t in tools]
-    logger.debug("[checker] START — tools=%s", tool_names)
-    logger.debug("[checker] system_prompt:\n%s", system_prompt)
+    logger.debug("[checker:%s] START — tools=%s", checker_label, tool_names)
+    logger.debug("[checker:%s] system_prompt:\n%s", checker_label, system_prompt)
     agent = create_checker_agent(system_prompt, tools)
     result = await agent.ainvoke({"messages": [("user", human_message)]})
+    _log_checker_messages(checker_label, system_prompt, result["messages"])
     last_msg = result["messages"][-1]
     raw_answer = last_msg.content
     finish_reason = (getattr(last_msg, "response_metadata", {}) or {}).get("finish_reason")
     if finish_reason and finish_reason != "stop":
         logger.error(
-            "[checker] unexpected finish_reason=%r; response_metadata: %s",
+            "[checker:%s] unexpected finish_reason=%r; response_metadata: %s",
+            checker_label,
             finish_reason,
             getattr(last_msg, "response_metadata", {}),
         )
-    logger.debug("[checker] raw LLM answer:\n%s", raw_answer)
+    logger.debug("[checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
-    logger.debug("[checker] parsed %d issue(s)", len(issues))
+    logger.debug("[checker:%s] parsed %d issue(s)", checker_label, len(issues))
     return issues
 
 
@@ -187,9 +232,24 @@ class DiagnosisValidator:
             logger.info("[diagnosis] launching anamnesis / inspection / treatment checkers in parallel")
 
             anamnesis_issues, inspection_issues, treatment_issues = await asyncio.gather(
-                _run_checker(_ANAMNESIS_PROMPT, get_anamnesis_tools_for(file_id), human_message),
-                _run_checker(_INSPECTION_PROMPT, get_inspection_tools_for(file_id), human_message),
-                _run_checker(_TREATMENT_PROMPT, get_treatment_tools_for(file_id), human_message),
+                _run_checker(
+                    _ANAMNESIS_PROMPT,
+                    get_anamnesis_tools_for(file_id),
+                    human_message,
+                    checker_label="anamnesis",
+                ),
+                _run_checker(
+                    _INSPECTION_PROMPT,
+                    get_inspection_tools_for(file_id),
+                    human_message,
+                    checker_label="inspection",
+                ),
+                _run_checker(
+                    _TREATMENT_PROMPT,
+                    get_treatment_tools_for(file_id),
+                    human_message,
+                    checker_label="treatment",
+                ),
             )
             logger.info(
                 "[diagnosis] checkers done — anamnesis=%d inspection=%d treatment=%d",
@@ -207,4 +267,3 @@ class DiagnosisValidator:
             treatment_issues=treatment_issues,
             guideline_file_id=file_id,
         )
-

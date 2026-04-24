@@ -1,10 +1,10 @@
 """
 excel.py — append audit results to an xlsx workbook.
 
-Each row contains three columns with pretty-printed JSON:
+Each row contains three columns with human-readable text:
   - ``input``            — raw visit payload (source JSON from 1C)
-  - ``formal_structure`` — FormalStructureResult as JSON
-  - ``diagnosis``        — DiagnosisAuditResult as JSON
+  - ``formal_structure`` — FormalStructureResult
+  - ``diagnosis``        — DiagnosisAuditResult
 
 Usage::
     from parsers.excel import AuditExcelWriter
@@ -20,7 +20,7 @@ Usage::
 
 from __future__ import annotations
 
-import json
+from dataclasses import asdict, is_dataclass
 import logging
 from pathlib import Path
 from typing import Any
@@ -36,7 +36,61 @@ logger = logging.getLogger(__name__)
 
 
 def _pretty(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, indent=2)
+    if hasattr(obj, "pretty_format") and callable(obj.pretty_format):
+        return obj.pretty_format()
+
+    if is_dataclass(obj):
+        obj = asdict(obj)
+
+    return _format_value(obj)
+
+
+def _format_value(value: Any, indent: int = 0) -> str:
+    prefix = " " * indent
+
+    if is_dataclass(value):
+        value = asdict(value)
+
+    if isinstance(value, dict):
+        if not value:
+            return f"{prefix}—"
+
+        lines: list[str] = []
+        for key, item in value.items():
+            label = str(key)
+            if _is_scalar(item):
+                lines.append(f"{prefix}{label}: {_format_scalar(item)}")
+            else:
+                lines.append(f"{prefix}{label}:")
+                lines.append(_format_value(item, indent + 2))
+        return "\n".join(lines)
+
+    if isinstance(value, list):
+        if not value:
+            return f"{prefix}—"
+
+        lines: list[str] = []
+        for idx, item in enumerate(value, start=1):
+            if _is_scalar(item):
+                lines.append(f"{prefix}{idx}. {_format_scalar(item)}")
+            else:
+                lines.append(f"{prefix}{idx}.")
+                lines.append(_format_value(item, indent + 2))
+        return "\n".join(lines)
+
+    return f"{prefix}{_format_scalar(value)}"
+
+
+def _is_scalar(value: Any) -> bool:
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
+def _format_scalar(value: Any) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, bool):
+        return "да" if value else "нет"
+    return str(value)
 
 
 class AuditExcelWriter:
@@ -75,8 +129,8 @@ class AuditExcelWriter:
         try:
             row = [
                 _pretty(visit),
-                _pretty(formal.to_dict()),
-                _pretty(diagnosis.to_dict()),
+                _pretty(formal),
+                _pretty(diagnosis),
             ]
             wb, ws = self._open_or_create()
             ws.append(row)
@@ -95,4 +149,3 @@ class AuditExcelWriter:
             return wb.active.max_row
         finally:
             wb.close()
-
