@@ -13,10 +13,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+import openpyxl
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -32,6 +35,10 @@ DATEEND   = "24.04.2026"
 EXCEL_PATH         = ROOT / "audit_results.xlsx"
 DATA_SNAPSHOTS_DIR = ROOT / "data_snapshots"
 LOGS_DIR           = ROOT / "logs"
+
+GUID_RE = re.compile(
+    r"\bGUID:\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b"
+)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 DATA_SNAPSHOTS_DIR.mkdir(exist_ok=True)
@@ -75,16 +82,54 @@ def _load_or_fetch_one_c_payload(datebegin: str, dateend: str) -> Any:
     return payload
 
 
+def _extract_guid_from_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = GUID_RE.search(value)
+    return match.group(1).lower() if match else None
+
+
+def _load_done_guids_from_excel(path: Path) -> set[str]:
+    """Read GUID values from column A of an existing audit workbook."""
+    if not path.exists():
+        log.info("No existing Excel output found at %s", path)
+        return set()
+
+    done: set[str] = set()
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        for row_idx, (column_a,) in enumerate(
+            ws.iter_rows(min_row=2, min_col=1, max_col=1, values_only=True),
+            start=2,
+        ):
+            guid = _extract_guid_from_text(column_a)
+            if guid:
+                done.add(guid)
+            elif column_a:
+                log.debug("No GUID found in Excel row %d column A", row_idx)
+    finally:
+        wb.close()
+
+    log.info("Loaded %d already audited GUID(s) from %s", len(done), path)
+    return done
+
+
 async def main() -> None:
     log.info("🩺 Starting period audit: datebegin=%s dateend=%s", DATEBEGIN, DATEEND)
 
     # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────────
     payload = _load_or_fetch_one_c_payload(datebegin=DATEBEGIN, dateend=DATEEND)
+    done_guids = _load_done_guids_from_excel(EXCEL_PATH)
 
     # ── 2. Run full pipeline with raw payload ─────────────────────────────────
     pipeline = AuditPipeline(excel_path=EXCEL_PATH)
-    results = await pipeline.run(payload)
+    results = await pipeline.run(payload, done_guids=done_guids)
     log.info("Pipeline done: %d result(s)", len(results))
+
+    if not results:
+        log.info("Nothing to persist; all visits may already be present in %s", EXCEL_PATH)
+        return
 
     # ── 3. Persist results to DB ──────────────────────────────────────────────
     async with ResultsStorage() as storage:

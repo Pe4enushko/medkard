@@ -61,6 +61,8 @@ class DiagnosisAuditResult:
             code = f" ({self.icd_code})" if self.icd_code else ""
             return f"Для такого МКБ кода нет прямых клинических рекоммендаций{code}"
 
+        code = self.icd_code or "—"
+
         def _section(label: str, issues: list[DiagnisisIssue]) -> str:
             if not issues:
                 return f"  {label}: OK"
@@ -69,9 +71,9 @@ class DiagnosisAuditResult:
             return "\n".join(lines)
 
         parts = [
-            f"DiagnosisAuditResult(guideline={self.guideline_file_id})",
-            _section("Anamnesis", self.anamnesis_issues),
-            _section("Inspection", self.inspection_issues),
-            _section("Treatment", self.treatment_issues),
+            f"Результат аудита диагноза(icd_code={code}, номер клин.рек.={self.guideline_file_id})",
+            _section("Анамнез", self.anamnesis_issues),
+            _section("Осмотр", self.inspection_issues),
+            _section("Лечение", self.treatment_issues),
         ]
         return "\n".join(parts)

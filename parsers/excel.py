@@ -4,7 +4,7 @@ excel.py — append audit results to an xlsx workbook.
 Each row contains three columns with human-readable text:
   - ``input``            — raw visit payload (source JSON from 1C)
   - ``formal_structure`` — FormalStructureResult
-  - ``diagnosis``        — DiagnosisAuditResult
+  - ``diagnosis``        — DiagnosisAuditResult or a list of them
 
 Usage::
     from parsers.excel import AuditExcelWriter
@@ -38,6 +38,17 @@ logger = logging.getLogger(__name__)
 def _pretty(obj: Any) -> str:
     if hasattr(obj, "pretty_format") and callable(obj.pretty_format):
         return obj.pretty_format()
+
+    if isinstance(obj, list) and all(
+        hasattr(item, "pretty_format") and callable(item.pretty_format)
+        for item in obj
+    ):
+        if not obj:
+            return "—"
+        return "\n\n".join(
+            f"{idx}.\n{item.pretty_format()}"
+            for idx, item in enumerate(obj, start=1)
+        )
 
     if is_dataclass(obj):
         obj = asdict(obj)
@@ -120,14 +131,14 @@ class AuditExcelWriter:
         self,
         visit: dict[str, Any],
         formal: FormalStructureResult,
-        diagnosis: DiagnosisAuditResult,
+        diagnosis: DiagnosisAuditResult | list[DiagnosisAuditResult],
     ) -> None:
         """Append one result row and save the workbook.
 
         Args:
             visit:     Raw visit dict (source JSON from 1C).
             formal:    Formal-structure audit result.
-            diagnosis: Diagnosis audit result (all three checker agents).
+            diagnosis: Diagnosis audit result(s) for this visit.
         """
         try:
             row = [
