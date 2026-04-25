@@ -24,81 +24,21 @@ from __future__ import annotations
 import json
 import logging
 
-import numpy as np
-
 from RAG.retrieval.embeddings import embed
 from RAG.retrieval.vector_store import (
     CANDIDATES_FACTOR,
     RRF_K,
     _bm25_rank,
-    _get_pool,
     _rrf,
+    _vector_search_filtered,
 )
 
 logger = logging.getLogger(__name__)
 
-# ── SQL fragments ─────────────────────────────────────────────────────────────
-_SELECT_COLS = """
-    id::text,
-    chunk,
-    metadata,
-    fact_q,
-    procedure_q,
-    constraint_q
-"""
-
-_VECTOR_COL = "fact_q_embedding"  # use fact embeddings for all targeted searches
-TARGETED_TOP_K = 2
+TARGETED_TOP_K = 4
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
-
-async def _vector_search_filtered(
-    embedding: list[float],
-    file_id: str,
-    limit: int,
-    section_filter: str | None = None,
-) -> list[dict]:
-    """Fetch rows by cosine distance with mandatory file_id filter.
-
-    Args:
-        embedding:      Query embedding vector.
-        file_id:        Restrict to this file_id value.
-        limit:          Maximum rows to return.
-        section_filter: If given, adds ``ILIKE '%<section_filter>%'`` on
-                        ``metadata->>'section'``.
-    """
-    pool = await _get_pool()
-    vec = np.array(embedding, dtype=np.float32)
-
-    where_clauses = [
-        f"{_VECTOR_COL} IS NOT NULL",
-        "file_id = $2",
-    ]
-    params: list = [vec, file_id]
-
-    if section_filter:
-        params.append(f"%{section_filter}%")
-        where_clauses.append(
-            f"lower(metadata->>'section') LIKE ${len(params)}"
-        )
-
-    where_sql = " AND ".join(where_clauses)
-
-    rows = await pool.fetch(
-        f"""
-        SELECT {_SELECT_COLS},
-               {_VECTOR_COL} <=> $1 AS distance
-        FROM docs
-        WHERE {where_sql}
-        ORDER BY distance ASC
-        LIMIT ${len(params) + 1}
-        """,
-        *params,
-        limit,
-    )
-    return [dict(r) for r in rows]
-
 
 async def _hybrid_filtered(
     query: str,

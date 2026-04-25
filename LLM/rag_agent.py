@@ -86,7 +86,7 @@ def create_checker_agent(
     llm = ChatOpenAI(
         model=MODEL,
         base_url=os.environ.get("OPENAI_BASE_URL") or None,
-        temperature=0.4,
+        temperature=0.7,
     )
 
     return create_agent(

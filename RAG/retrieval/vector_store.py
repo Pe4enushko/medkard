@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 # ── Configurable ──────────────────────────────────────────────────────────────
 # How many vector-search candidates to fetch before BM25 reranking.
 # Actual returned results = top_k;  candidates fetched = top_k * CANDIDATES_FACTOR.
-CANDIDATES_FACTOR: int = 10
+CANDIDATES_FACTOR: int = 6
 # RRF constant: higher = rankings are more stable; lower = more weight on top results.
-RRF_K: int = 60
+RRF_K: int = 50
 # ─────────────────────────────────────────────────────────────────────────────
 
 QueryType = Literal["fact", "procedure", "constraint"]
@@ -50,6 +50,19 @@ _EMBEDDING_COL: dict[QueryType, str] = {
     "procedure":  "procedure_q_embedding",
     "constraint": "constraint_q_embedding",
 }
+
+_SELECT_COLS = """
+    id::text,
+    chunk,
+    metadata,
+    fact_q,
+    procedure_q,
+    constraint_q
+"""
+
+_EXCLUDED_CHUNK_PHRASES = (
+    "Список литературы",
+)
 
 _pool: asyncpg.Pool | None = None
 _segmenter: Segmenter = Segmenter()
@@ -93,6 +106,13 @@ async def close_pool() -> None:
 
 # ── Vector search ─────────────────────────────────────────────────────────────
 
+def _chunk_text_exclusion_clauses() -> list[str]:
+    return [
+        f"chunk NOT LIKE '%{phrase}%'"
+        for phrase in _EXCLUDED_CHUNK_PHRASES
+    ]
+
+
 async def _vector_search(
     embedding: list[float],
     col: str,
@@ -101,22 +121,58 @@ async def _vector_search(
     """Fetch rows closest to *embedding* in *col* using cosine distance."""
     pool = await _get_pool()
     vec = np.array(embedding, dtype=np.float32)
+    where_sql = " AND ".join([f"{col} IS NOT NULL", *_chunk_text_exclusion_clauses()])
     rows = await pool.fetch(
         f"""
-        SELECT
-            id::text,
-            chunk,
-            metadata,
-            fact_q,
-            procedure_q,
-            constraint_q,
+        SELECT {_SELECT_COLS},
             {col} <=> $1 AS distance
         FROM docs
-        WHERE {col} IS NOT NULL
+        WHERE {where_sql}
         ORDER BY distance ASC
         LIMIT $2
         """,
         vec,
+        limit,
+    )
+    return [dict(r) for r in rows]
+
+
+async def _vector_search_filtered(
+    embedding: list[float],
+    file_id: str,
+    limit: int,
+    section_filter: str | None = None,
+    col: str = "fact_q_embedding",
+) -> list[dict]:
+    """Fetch rows by cosine distance with file_id, optional section, and text filters."""
+    pool = await _get_pool()
+    vec = np.array(embedding, dtype=np.float32)
+
+    where_clauses = [
+        f"{col} IS NOT NULL",
+        *_chunk_text_exclusion_clauses(),
+        "file_id = $2",
+    ]
+    params: list = [vec, file_id]
+
+    if section_filter:
+        params.append(f"%{section_filter}%")
+        where_clauses.append(
+            f"lower(metadata->>'section') LIKE ${len(params)}"
+        )
+
+    where_sql = " AND ".join(where_clauses)
+
+    rows = await pool.fetch(
+        f"""
+        SELECT {_SELECT_COLS},
+               {col} <=> $1 AS distance
+        FROM docs
+        WHERE {where_sql}
+        ORDER BY distance ASC
+        LIMIT ${len(params) + 1}
+        """,
+        *params,
         limit,
     )
     return [dict(r) for r in rows]

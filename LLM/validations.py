@@ -93,8 +93,8 @@ async def validate_visit(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": visit_text},
         ],
-        extra_body={"guided_json": _JSON_SCHEMA},
-        temperature=0.4,
+        temperature=0.7,
+        #extra_body={"guided_json": _JSON_SCHEMA},
     )
 
     finish_reason = completion.choices[0].finish_reason
