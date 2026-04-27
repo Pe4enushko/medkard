@@ -56,15 +56,6 @@ def _visit_guid(visit: dict[str, Any]) -> str | None:
     return str(guid).lower() if guid else None
 
 
-def _chunked(items: list[tuple[int, dict[str, Any]]], num_batches: int) -> list[list[tuple[int, dict[str, Any]]]]:
-    if num_batches < 1:
-        raise ValueError("num_batches must be >= 1")
-    if not items:
-        return []
-
-    batch_size = max(1, (len(items) + num_batches - 1) // num_batches)
-    return [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
-
 
 class AuditPipeline:
     """Run the full audit pipeline over a batch of visits.
@@ -118,39 +109,30 @@ class AuditPipeline:
         num_batches: int,
         done_guids: set[str] | None = None,
     ) -> list[Result]:
-        """Audit appointments like :meth:`run`, processing each batch concurrently.
+        """Audit appointments like :meth:`run`, with at most *num_batches* running simultaneously.
 
         Args:
             raw_input: JSON payload — a list of visit dicts, a wrapper dict,
                        or a raw JSON string of either shape.
-            num_batches: Number of chunks to split pending appointments into.
-                         Visits inside each chunk run concurrently.
+            num_batches: Maximum number of visits processed concurrently.
             done_guids: Optional set of visit GUIDs already audited. Matching
                         visits are filtered out before batch processing starts.
         """
         appointments = _split_appointments(raw_input)
         pending, skipped = self._filter_pending_appointments(appointments, done_guids)
-        results: list[Result] = []
 
-        batches = _chunked(pending, num_batches)
-        for batch_idx, batch in enumerate(batches, start=1):
-            logger.info(
-                "🩺 Auditing async batch %d/%d (%d visit(s))",
-                batch_idx,
-                len(batches),
-                len(batch),
-            )
-            for idx, visit in batch:
-                priem: dict = visit.get("Прием") or {}
-                visit_id = priem.get("GUID") or priem.get("DATE") or f"#{idx + 1}"
+        sem = asyncio.Semaphore(num_batches)
+
+        async def _audit_with_sem(idx: int, visit: dict[str, Any]) -> Result:
+            priem: dict = visit.get("Прием") or {}
+            visit_id = priem.get("GUID") or priem.get("DATE") or f"#{idx + 1}"
+            async with sem:
                 logger.info("🩺 Auditing visit %s (%d/%d)", visit_id, idx + 1, len(appointments))
-            batch_results = await asyncio.gather(
-                *[
-                    self._audit_visit(visit)
-                    for _, visit in batch
-                ]
-            )
-            results.extend(batch_results)
+                return await self._audit_visit(visit)
+
+        results: list[Result] = list(
+            await asyncio.gather(*[_audit_with_sem(idx, visit) for idx, visit in pending])
+        )
 
         self._log_queue_summary(appointments, done_guids, skipped, len(results))
         return results

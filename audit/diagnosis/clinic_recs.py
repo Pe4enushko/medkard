@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from LLM.decider import decide_file_id
+from LLM.icd_prefix_picker import IcdPrefixPicker
 
 # Path to manifest — resolved relative to the project root.
 _MANIFEST_PATH: Path = Path(__file__).resolve().parent.parent.parent / "manifest.csv"
@@ -37,10 +38,24 @@ class ClinicRecs:
 
     def __init__(self, manifest_path: Path = _MANIFEST_PATH) -> None:
         self._manifest_path = manifest_path
+        self._prefix_picker = IcdPrefixPicker()
 
     def _load_manifest(self) -> list[dict[str, str]]:
         with open(self._manifest_path, newline="", encoding="utf-8") as fh:
             return list(csv.DictReader(fh))
+
+    def _find_matching_rows_by_prefix(self, prefix: str) -> list[dict[str, str]]:
+        """Return manifest rows where any МКБ-10 code starts with *prefix*."""
+        rows = self._load_manifest()
+        matched: list[dict[str, str]] = []
+        for row in rows:
+            raw_codes: str = row.get(_ICD_COLUMN, "")
+            cell_codes = [c.strip().upper() for c in raw_codes.split(",")]
+            if any(c.split(".")[0] == prefix for c in cell_codes):
+                fid = row.get(_ID_COLUMN, "").strip()
+                if fid:
+                    matched.append(row)
+        return matched
 
     def _find_matching_rows(self, normalised_code: str) -> list[dict[str, str]]:
         """Return manifest rows whose МКБ-10 cell contains *normalised_code*."""
@@ -79,6 +94,12 @@ class ClinicRecs:
         matched = self._find_matching_rows(normalised)
 
         if not matched:
+            # ── Prefix fallback: strip .(\d+) subcategory (J20.9 → J20) ─────
+            prefix = normalised.split(".")[0]
+            if prefix != normalised:
+                matched = self._find_matching_rows_by_prefix(prefix)
+                if matched:
+                    return await self._prefix_picker.pick(patient, diagnosis, matched)
             return None
 
         if len(matched) == 1:
