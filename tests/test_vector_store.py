@@ -41,6 +41,7 @@ def _rand_vec() -> list[float]:
 @pytest_asyncio.fixture
 async def seeded_docs():
     """Insert 3 test Doc rows; yield their IDs; delete them on teardown."""
+    # mock data
     docs = [
         Doc(
             file_id="test_file_1",
