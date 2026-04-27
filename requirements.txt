@@ -3,12 +3,23 @@ openai
 instructor
 pydantic
 
+# LangChain (RAG agent)
+langchain
+langchain-openai
+langchain-core
+
 # Sentence-transformers (optional: only needed when EMBEDDING_PROVIDER=st)
 sentence-transformers
+sentence-transformers[onnx-gpu]
+optimum
+
+# FastEmbed (optional: only needed when EMBEDDING_PROVIDER=fastembed)
+fastembed
 
 # PDF ingestion
 pymupdf
 tabula-py
+langchain-text-splitters
 
 # Vector store (asyncpg path)
 asyncpg
@@ -25,6 +36,7 @@ numpy
 
 # Utilities
 python-dotenv
+openpyxl
 
 # Tests
 pytest

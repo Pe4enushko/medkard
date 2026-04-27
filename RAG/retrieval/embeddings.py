@@ -2,14 +2,18 @@
 
 The provider is selected at startup via the EMBEDDING_PROVIDER env var:
 
-  openai  — AsyncOpenAI-compatible REST API (default).
-            Uses EMBEDDING_BASE_URL (falls back to the official endpoint) and
-            OPENAI_API_KEY.  Set EMBEDDING_BASE_URL for self-hosted models
-            (e.g. vLLM, Ollama).
+  openai      — AsyncOpenAI-compatible REST API (default).
+                Uses EMBEDDING_BASE_URL (falls back to the official endpoint) and
+                OPENAI_API_KEY.  Set EMBEDDING_BASE_URL for self-hosted models
+                (e.g. vLLM, Ollama).
 
-  st      — sentence-transformers (local inference, no network call).
-            Loads EMBEDDING_MODEL at first call and runs encode() in a thread
-            executor to keep the async interface non-blocking.
+  st          — sentence-transformers (local inference, no network call).
+                Loads EMBEDDING_MODEL at first call and runs encode() in a thread
+                executor to keep the async interface non-blocking.
+
+  fastembed   — fastembed (local ONNX inference, no network call).
+                Loads EMBEDDING_MODEL at first call and runs embed() in a thread
+                executor to keep the async interface non-blocking.
 """
 
 from __future__ import annotations
@@ -20,6 +24,8 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 
 from dotenv import load_dotenv
+from fastembed import TextEmbedding
+from fastembed.common.model_description import ModelSource, PoolingType
 
 load_dotenv()
 
@@ -69,7 +75,7 @@ class SentenceTransformersAdapter(EmbeddingAdapter):
         if self._model is None:
             from sentence_transformers import SentenceTransformer  # lazy import
 
-            self._model = SentenceTransformer(EMBEDDING_MODEL)
+            self._model = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
         return self._model
 
     async def embed(self, text: str) -> list[float]:
@@ -81,12 +87,52 @@ class SentenceTransformersAdapter(EmbeddingAdapter):
         )
 
 
+class FastEmbedAdapter(EmbeddingAdapter):
+    """Local inference via fastembed (ONNX runtime, runs in a thread executor)."""
+
+    _model = None  # lazy-initialised TextEmbedding
+    def __init__(self):
+        super().__init__()
+        try:
+            TextEmbedding.add_custom_model(
+                    model="onnx-community/Qwen3-Embedding-0.6B-ONNX",
+                    sources=ModelSource(hf="onnx-community/Qwen3-Embedding-0.6B-ONNX"),
+                    additional_files=["model.onnx_data"],
+                    pooling=PoolingType.MEAN,
+                    normalization=True,
+                    # Для Qwen3-0.6B размер эмбеддинга 1536 (проверьте в config.json на HF)
+                    dim=1024, 
+                    description="Qwen3 Embedding 0.6B ONNX version")
+        except:
+            pass  # модель уже добавлена, можно игнорировать ошибку
+
+    def _get_model(self):
+        if self._model is None:
+            from fastembed import TextEmbedding  # lazy import
+
+            self._model = TextEmbedding(
+                model_name=EMBEDDING_MODEL,
+                providers=["CPUExecutionProvider"]
+            )
+        return self._model
+
+    async def embed(self, text: str) -> list[float]:
+        model = self._get_model()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: next(iter(model.embed([text]))).tolist(),
+        )
+
+
 @lru_cache(maxsize=1)
 def get_adapter() -> EmbeddingAdapter:
     """Return the singleton adapter chosen by EMBEDDING_PROVIDER env var."""
     provider = os.environ.get("EMBEDDING_PROVIDER", "openai").strip().lower()
     if provider == "st":
         return SentenceTransformersAdapter()
+    if provider == "fastembed":
+        return FastEmbedAdapter()
     return OpenAIEmbeddingAdapter()
 
 

@@ -13,9 +13,12 @@ Chunk shape:
         "metadata": {
             "ID": str,                 # original manifest ID / filename stem
             # ... all other manifest columns
-            "page": int,               # 0-based page index
-            "section": str | None,     # TOC section title covering this page
             "content_type": "text" | "table",
+            # text-only:
+            "section": str | None,     # numbered section title (e.g. "1.1 Title"),
+                                       # extracted by regex from the document text;
+                                       # None when no numbered sections are found
+            "chunk_index": int,        # ordinal of this chunk across the whole document
             # table-only:
             "table_index": int,        # ordinal of the table on the page
             "chunk_index": int,        # ordinal of this row-batch within the table
@@ -25,18 +28,48 @@ Chunk shape:
 
 import csv
 import json
+import re
 from pathlib import Path
 from typing import Generator, Iterator
 
 import fitz  # pymupdf
 import tabula
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # ── Configurable ─────────────────────────────────────────────────────────────
-TABLE_ROW_CHUNK_SIZE: int = 6   # max rows per table chunk yielded to the pipeline
-PDFS_DIR: Path = Path("pdfs")
+TABLE_ROW_CHUNK_SIZE: int = 8   # max rows per table chunk yielded to the pipeline
+TEXT_CHUNK_SIZE: int = 2000     # characters per text chunk
+TEXT_CHUNK_OVERLAP: int = 200   # character overlap between consecutive text chunks
+
+# Regex that matches numbered sections like "1.1 Title" 
+# ignoring fake sections indicated by more than 2 dots in text (so we ignore trailing dots from ToC but match titles containing just some dots).
+_SECTION_PATTERN: re.Pattern = re.compile(
+    r'^('
+    r'\d+\.\d+\s+'
+    r'(?=[^\n]*[A-Za-zА-Яа-я])'
+    r'(?![^\n]*\.{2,})'
+    r'.*?'
+    r')(?=^\d+\.\d+\s+|\Z)',
+    re.MULTILINE | re.DOTALL
+)
+_SECTION_TITLE_PATTERN: re.Pattern = re.compile(
+    r'^('
+    r'\d+\.\d+\s+'
+    r'(?=[^\n]*[A-Za-zА-Яа-я])'
+    r'(?![^\n]*\.{2,})'
+    r'[^\n]+'
+    r')',
+    re.MULTILINE
+)
+PDFS_DIR: Path = Path("../pdfs")
 MANIFEST_PATH: Path = Path("manifest.csv")
 PDF_EXTENSION: str = ".pdf"
 # ─────────────────────────────────────────────────────────────────────────────
+
+_text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=TEXT_CHUNK_SIZE,
+    chunk_overlap=TEXT_CHUNK_OVERLAP,
+)
 
 
 def _section_for_page(sorted_toc: list[tuple[str, int]], page_idx: int) -> str | None:
@@ -84,6 +117,28 @@ def _split_rows(rows: list[dict], chunk_size: int) -> list[list[dict]]:
     return [rows[i : i + chunk_size] for i in range(0, len(rows), chunk_size)]
 
 
+def _split_into_sections(text: str) -> list[tuple[str | None, str]]:
+    """Split *text* into numbered sections (e.g. 1.1, 2.3) using regex.
+
+    Returns a list of (section_title, section_text) pairs.  If no numbered
+    sections are found the whole text is returned as a single entry with
+    title ``None``.
+    """
+    matches = _SECTION_PATTERN.findall(text)
+    if not matches:
+        return [(None, text)]
+
+    result: list[tuple[str | None, str]] = []
+    for section_text in matches:
+        section_text = section_text.strip()
+        if not section_text:
+            continue
+        m = _SECTION_TITLE_PATTERN.match(section_text)
+        title: str | None = m.group(1).strip() if m else None
+        result.append((title, section_text))
+    return result
+
+
 class PDFContentReader:
     """Lazy reader for a single PDF document.
 
@@ -110,37 +165,65 @@ class PDFContentReader:
                 key=lambda x: x[1],
             )
 
+        # Pages strictly before the first content section (title page, printed TOC,
+        # etc.) are skipped entirely — they are not useful for retrieval.
+        first_content_page: int = sorted_toc[0][1] if sorted_toc else 0
+
         # ── Detect table bounding boxes per page ──────────────────────
         # Stored as {page_idx: [(x0, y0, x1, y1), ...]}
         table_pages: dict[int, list[tuple]] = {}
         for page_idx in range(len(doc)):
+            if page_idx < first_content_page:
+                continue
             found = doc[page_idx].find_tables()
             if found.tables:
                 table_pages[page_idx] = [t.bbox for t in found.tables]
 
-        # ── Text chunks ───────────────────────────────────────────────
+        # ── Collect full document text (all content pages, non-table clips) ──
+        full_parts: list[str] = []
         for page_idx in range(len(doc)):
+            if page_idx < first_content_page:
+                continue
             page = doc[page_idx]
-            section = _section_for_page(sorted_toc, page_idx)
-            base_meta = {
-                **self.metadata,
-                "page": page_idx,
-                "section": section,
-                "content_type": "text",
-            }
-
             bboxes = table_pages.get(page_idx, [])
             clips = _non_table_clips(page.rect, bboxes)
-
-            parts: list[str] = []
             for clip_rect in clips:
                 fragment = page.get_text("text", clip=clip_rect).strip()
                 if fragment:
-                    parts.append(fragment)
+                    full_parts.append(fragment)
 
-            page_text = "\n".join(parts).strip()
-            if page_text:
-                yield {"type": "text", "content": page_text, "metadata": base_meta}
+        full_text = "\n".join(full_parts).strip()
+
+        # ── Strip TOC / title pages ───────────────────────────────────
+        # PDFs typically contain "Список сокращений" twice: once in the
+        # printed table of contents and once as the actual section heading.
+        # Everything up to (and including) the second match is front matter
+        # and should be discarded.
+        _ABBR = "Список сокращений"
+        first = full_text.find(_ABBR)
+        if first != -1:
+            second = full_text.find(_ABBR, first + len(_ABBR))
+            if second != -1:
+                full_text = full_text[second:].strip()
+
+        # ── Text chunks — split by numbered sections, then chunk within each ──
+        if full_text:
+            sections = _split_into_sections(full_text)
+            chunk_counter = 0
+            for section_title, section_text in sections:
+                sub_chunks = _text_splitter.split_text(section_text)
+                for sub_chunk in sub_chunks:
+                    yield {
+                        "type": "text",
+                        "content": sub_chunk,
+                        "metadata": {
+                            **self.metadata,
+                            "section": section_title,
+                            "content_type": "text",
+                            "chunk_index": chunk_counter,
+                        },
+                    }
+                    chunk_counter += 1
 
         # ── Table chunks ──────────────────────────────────────────────
         for page_idx, bboxes in table_pages.items():

@@ -3,50 +3,66 @@ ResultsStorage — async psycopg3 interface for the *results* table.
 """
 
 import json
+import logging
 
 from .base import BaseStorage
-from .models import ClinicalSource, Result, Source
+from .models import DiagnosisResult, FormalFinding, FormalStructureResult, DiagnisisIssue, IssueSource, Result
+
+logger = logging.getLogger(__name__)
+
+
+def _deserialize_diagnosis(raw: list[dict]) -> list[DiagnosisResult]:
+    results = []
+    for entry in (raw or []):
+        issues = [
+            DiagnisisIssue(
+                issue=item["issue"],
+                sources=[
+                    IssueSource(
+                        doc_title=s["doc_title"],
+                        section=s.get("section"),
+                        cite=s.get("cite"),
+                    )
+                    for s in item.get("sources", [])
+                ],
+            )
+            for item in entry.get("issues", [])
+        ]
+        results.append(DiagnosisResult(icd_code=entry.get("icd_code", ""), issues=issues))
+    return results
 
 
 def _row_to_result(row: dict) -> Result:
-    clinical_sources = [
-        ClinicalSource(
-            flag=cs["flag"],
-            sources=[
-                Source(
-                    file=s["file"],
-                    file_metadata=s["file_metadata"],
-                    page=s["page"],
-                    section=s.get("section"),
-                )
-                for s in cs.get("sources", [])
-            ],
-        )
-        for cs in (row.get("clinical_sources") or [])
-    ]
     return Result(
         id=row["id"],
         input=row["input"],
-        flags=row["flags"],
-        clinical_sources=clinical_sources,
+        formal=FormalStructureResult(
+            findings=[FormalFinding(flag=f, issue="") for f in (row.get("flags") or [])]
+        ),
+        diagnosis=_deserialize_diagnosis(row.get("issues") or []),
     )
 
 
-def _serialize_clinical_sources(clinical_sources: list[ClinicalSource]) -> str:
+def _serialize_diagnosis(diagnosis: list[DiagnosisResult]) -> str:
     return json.dumps([
         {
-            "flag": cs.flag,
-            "sources": [
+            "icd_code": dr.icd_code,
+            "issues": [
                 {
-                    "file": s.file,
-                    "file_metadata": s.file_metadata,
-                    "page": s.page,
-                    **( {"section": s.section} if s.section is not None else {}),
+                    "issue": iss.issue,
+                    "sources": [
+                        {
+                            "doc_title": s.doc_title,
+                            **({"section": s.section} if s.section is not None else {}),
+                            **({"cite": s.cite} if s.cite is not None else {}),
+                        }
+                        for s in iss.sources
+                    ],
                 }
-                for s in cs.sources
+                for iss in dr.issues
             ],
         }
-        for cs in clinical_sources
+        for dr in diagnosis
     ])
 
 
@@ -65,22 +81,27 @@ class ResultsStorage(BaseStorage):
 
     async def insert(self, result: Result) -> str:
         """Insert a Result and return its UUID. Also sets result.id."""
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                """
-                INSERT INTO results (input, flags, clinical_sources)
-                VALUES (%(input)s, %(flags)s, %(clinical_sources)s)
-                RETURNING id::text
-                """,
-                {
-                    "input": json.dumps(result.input),
-                    "flags": result.flags,
-                    "clinical_sources": _serialize_clinical_sources(result.clinical_sources),
-                },
-            )
-            row = await cur.fetchone()
-        result.id = row["id"]
-        return row["id"]
+        try:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    """
+                    INSERT INTO results (input, flags, issues)
+                    VALUES (%(input)s, %(flags)s, %(issues)s)
+                    RETURNING id::text
+                    """,
+                    {
+                        "input": json.dumps(result.input),
+                        "flags": result.formal.flags,
+                        "issues": _serialize_diagnosis(result.diagnosis),
+                    },
+                )
+                row = await cur.fetchone()
+            result.id = row["id"]
+            logger.info("💾 DB INSERT OK id=%s", row["id"])
+            return row["id"]
+        except Exception:
+            logger.exception("💾 DB INSERT FAILED")
+            raise
 
     # ── Reads ─────────────────────────────────────────────────────────────────
 
@@ -89,7 +110,7 @@ class ResultsStorage(BaseStorage):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
-                SELECT id::text, input, flags, clinical_sources
+                SELECT id::text, input, flags, issues
                 FROM results
                 WHERE id = %(id)s::uuid
                 """,
@@ -103,7 +124,7 @@ class ResultsStorage(BaseStorage):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
-                SELECT id::text, input, flags, clinical_sources
+                SELECT id::text, input, flags, issues
                 FROM results
                 WHERE %(flag)s = ANY(flags)
                 ORDER BY id
