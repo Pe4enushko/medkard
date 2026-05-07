@@ -81,15 +81,24 @@ class FormalValidator:
             A :class:`VisitType` enum member.
         """
         
-        name: str = visit["Услуги"][0]["Наименование"].lower()
+        services: list = visit.get("Услуги") or []
+        if not services:
+            logger.warning("[formal] visit has empty or missing Услуги — defaulting to OTHER")
+            return VisitType.OTHER
+
+        name: str = (services[0].get("Наименование") or "").lower()
+        if not name:
+            logger.warning("[formal] first service has no Наименование — defaulting to OTHER")
+            return VisitType.OTHER
+
         if "первичн" in name:
             return VisitType.PRIMARY
         if "повторн" in name:
             return VisitType.REPEAT
         if "профилактическ" in name:
             return VisitType.PROPHYLACTIC
-        
-        return VisitType.OTHER # fallback
+
+        return VisitType.OTHER
 
     def get_rules(self, visit_type: VisitType) -> list[dict]:
         """Return the subset of rules applicable to the given visit type.
