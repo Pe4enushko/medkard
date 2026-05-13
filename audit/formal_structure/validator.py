@@ -274,7 +274,8 @@ class FormalValidator:
         visit_types = await self.get_visit_types(visit)
         logger.debug("[formal] visit_types resolved: %s", {vt.name for vt in visit_types})
 
-        patient_age: int | None = (visit.get("Пациент") or {}).get("AGE")
+        _raw_age = (visit.get("Пациент") or {}).get("AGE")
+        patient_age: int | None = int(_raw_age) if isinstance(_raw_age, str) and _raw_age.strip().isdigit() else (_raw_age if isinstance(_raw_age, int) else None)
         rules = self.get_rules(visit_types, patient_age)
         logger.debug("[formal] applicable rules (%d): %s", len(rules), [r.get("flag_code") for r in rules])
 
