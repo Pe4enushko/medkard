@@ -36,7 +36,7 @@ IGNORE_ICD: list[str] = _args.ignore_icd
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DATEBEGIN = (datetime.now() - timedelta(days=_args.days)).strftime("%d.%m.%Y")
-DATEEND   = "24.04.2026"
+DATEEND   = datetime.now().strftime("%d.%m.%Y")
 
 EXCEL_PATH         = Path(_args.excel)
 DATA_SNAPSHOTS_DIR = ROOT / "data_snapshots"
