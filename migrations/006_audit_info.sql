@@ -1,2 +1,0 @@
--- Migration 006: intentionally empty — audit_info table was removed.
--- Metrics are stored per-card in done_cards instead.
