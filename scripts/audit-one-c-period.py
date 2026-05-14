@@ -84,7 +84,18 @@ def _load_or_fetch_one_c_payload(datebegin: str, dateend: str) -> Any:
     return payload
 
 
+def _confirm_period(datebegin: str, dateend: str) -> None:
+    if not _args.days:
+        return
+    print(f"Period: {datebegin} — {dateend}  ({_args.days} day(s) back)")
+    answer = input("Proceed? [y/N] ").strip().lower()
+    if answer != "y":
+        print("Aborted.")
+        sys.exit(0)
+
+
 async def main() -> None:
+    _confirm_period(DATEBEGIN, DATEEND)
     log.info("🩺 Starting period audit: datebegin=%s dateend=%s", DATEBEGIN, DATEEND)
 
     # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────────
