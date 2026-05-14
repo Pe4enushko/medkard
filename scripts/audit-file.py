@@ -4,7 +4,12 @@ Load appointments from a JSON file in the project root, run the full audit
 pipeline, then export results to Excel.
 
 Run from project root:
-    python scripts/audit-file.py
+    python scripts/audit-file.py [--file PATH] [--excel PATH] [--num-batches N]
+
+Options:
+    --file         Input JSON file (default: data.json)
+    --excel        Output xlsx file (default: audit_results.xlsx)
+    --num-batches  Max concurrent visits processed at a time (default: 5)
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from audit.pipeline import AuditPipeline
 _parser = argparse.ArgumentParser()
 _parser.add_argument("--file", default=str(ROOT / "data.json"), metavar="PATH", help="Input JSON file (default: data.json)")
 _parser.add_argument("--excel", default=str(ROOT / "audit_results.xlsx"), metavar="PATH", help="Output xlsx file (default: audit_results.xlsx)")
+_parser.add_argument("--num-batches", type=int, default=5, metavar="N", help="Max concurrent visits processed at a time (default: 5)")
 _args = _parser.parse_args()
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -63,7 +69,7 @@ async def main() -> None:
 
     # ── 1. Run pipeline — each card is persisted to DB on completion ──────────
     async with AuditPipeline() as pipeline:
-        pairs = await pipeline.run(payload)
+        pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches)
     log.info("Pipeline done: %d result(s)", len(pairs))
 
     if not pairs:

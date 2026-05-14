@@ -4,7 +4,13 @@ Fetch appointments from 1C for a configured period, save the raw JSON
 snapshot, run the full audit pipeline, then export results to Excel.
 
 Run from project root:
-    python scripts/audit-one-c-period.py
+    python scripts/audit-one-c-period.py [--days N] [--ignore-icd CODE ...] [--excel PATH] [--num-batches N]
+
+Options:
+    --days         Shift datebegin N days back from today (default: 0)
+    --ignore-icd   ICD codes to ignore, e.g. Z00.0 J06.9
+    --excel        Output xlsx file (default: audit_results.xlsx)
+    --num-batches  Max concurrent visits processed at a time (default: 5)
 """
 
 from __future__ import annotations
@@ -28,8 +34,10 @@ from integrations.one_c import OneCClient
 # ── Args ──────────────────────────────────────────────────────────────────────
 _parser = argparse.ArgumentParser()
 _parser.add_argument("--days", type=int, default=0, help="Shift datebegin N days back from today")
+_parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
 _parser.add_argument("--ignore-icd", nargs="*", default=[], metavar="CODE", help="ICD codes to ignore (e.g. Z00.0 J06.9)")
 _parser.add_argument("--excel", default=str(ROOT / "audit_results.xlsx"), metavar="PATH", help="Output xlsx file (default: audit_results.xlsx)")
+_parser.add_argument("--num-batches", type=int, default=5, metavar="N", help="Max concurrent visits processed at a time (default: 5)")
 _args = _parser.parse_args()
 
 IGNORE_ICD: list[str] = _args.ignore_icd
@@ -85,9 +93,9 @@ def _load_or_fetch_one_c_payload(datebegin: str, dateend: str) -> Any:
 
 
 def _confirm_period(datebegin: str, dateend: str) -> None:
-    if not _args.days:
+    print(f"Period: {datebegin} — {dateend}")
+    if _args.y:
         return
-    print(f"Period: {datebegin} — {dateend}  ({_args.days} day(s) back)")
     answer = input("Proceed? [y/N] ").strip().lower()
     if answer != "y":
         print("Aborted.")
@@ -103,7 +111,7 @@ async def main() -> None:
 
     # ── 2. Run pipeline — each card is persisted to DB on completion ──────────
     async with AuditPipeline() as pipeline:
-        pairs = await pipeline.run_batched(payload, ignore_icd=IGNORE_ICD or None)
+        pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches, ignore_icd=IGNORE_ICD or None)
     log.info("Pipeline done: %d result(s)", len(pairs))
 
     if not pairs:
