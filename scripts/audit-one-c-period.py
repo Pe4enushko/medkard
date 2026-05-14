@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 from audit.excel_formatter import ExcelFormatter
 from audit.pipeline import AuditPipeline
 from integrations.one_c import OneCClient
+from RAG.retrieval.vector_store import close_pool
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 _parser = argparse.ArgumentParser()
@@ -136,4 +137,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    finally:
+        asyncio.run(close_pool())
