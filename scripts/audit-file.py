@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Load appointments from a JSON file in the project root, run the full audit
-pipeline, then persist every result to DB and Excel.
+pipeline, then export results to Excel.
 
 Run from project root:
     python scripts/audit-file.py
@@ -9,31 +9,31 @@ Run from project root:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import logging
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
-import openpyxl
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from audit.excel_formatter import ExcelFormatter
 from audit.pipeline import AuditPipeline
-from storage import ResultsStorage
+from storage import DoneCardsStorage
+
+# ── Args ──────────────────────────────────────────────────────────────────────
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--file", default=str(ROOT / "data.json"), metavar="PATH", help="Input JSON file (default: data.json)")
+_parser.add_argument("--excel", default=str(ROOT / "audit_results.xlsx"), metavar="PATH", help="Output xlsx file (default: audit_results.xlsx)")
+_args = _parser.parse_args()
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DATA_FILE  = ROOT / "data.json"
-
-EXCEL_PATH = ROOT / "audit_results.xlsx"
+DATA_FILE  = Path(_args.file)
+EXCEL_PATH = Path(_args.excel)
 LOGS_DIR   = ROOT / "logs"
-
-GUID_RE = re.compile(
-    r"\bGUID:\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b"
-)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOGS_DIR.mkdir(exist_ok=True)
@@ -52,39 +52,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def _extract_guid_from_text(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    match = GUID_RE.search(value)
-    return match.group(1).lower() if match else None
-
-
-def _load_done_guids_from_excel(path: Path) -> set[str]:
-    """Read GUID values from column A of an existing audit workbook."""
-    if not path.exists():
-        log.info("No existing Excel output found at %s", path)
-        return set()
-
-    done: set[str] = set()
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    try:
-        ws = wb.active
-        for row_idx, (column_a,) in enumerate(
-            ws.iter_rows(min_row=2, min_col=1, max_col=1, values_only=True),
-            start=2,
-        ):
-            guid = _extract_guid_from_text(column_a)
-            if guid:
-                done.add(guid)
-            elif column_a:
-                log.debug("No GUID found in Excel row %d column A", row_idx)
-    finally:
-        wb.close()
-
-    log.info("Loaded %d already audited GUID(s) from %s", len(done), path)
-    return done
-
-
 async def main() -> None:
     if not DATA_FILE.exists():
         log.error("Data file not found: %s", DATA_FILE)
@@ -94,23 +61,34 @@ async def main() -> None:
     raw = json.loads(DATA_FILE.read_text(encoding="utf-8"))
     # MDSdata format: [{"appointments": [...]}] — unwrap the outer list
     payload = raw[0] if isinstance(raw, list) else raw
-    done_guids = _load_done_guids_from_excel(EXCEL_PATH)
 
-    # ── Run full pipeline ─────────────────────────────────────────────────────
-    pipeline = AuditPipeline(excel_path=EXCEL_PATH)
-    results = await pipeline.run(payload, done_guids=done_guids)
-    log.info("Pipeline done: %d result(s)", len(results))
+    # ── 1. Load done GUIDs from DB (authoritative) ────────────────────────────
+    async with DoneCardsStorage() as storage:
+        done_guids = await storage.get_done_guids()
+    log.info("Loaded %d done GUID(s) from DB", len(done_guids))
 
-    if not results:
-        log.info("Nothing to persist; all visits may already be present in %s", EXCEL_PATH)
+    # ── 2. Run pipeline — each card is persisted to DB on completion ──────────
+    async with AuditPipeline() as pipeline:
+        pairs = await pipeline.run(payload, done_guids=done_guids)
+    log.info("Pipeline done: %d result(s)", len(pairs))
+
+    if not pairs:
+        log.info("Nothing new to export; all visits already in DB")
         return
 
-    # ── Persist results to DB ─────────────────────────────────────────────────
-    async with ResultsStorage() as storage:
-        for idx, result in enumerate(results, start=1):
-            log.info("Persisting result %d/%d", idx, len(results))
-            result_id = await storage.insert(result)
-            log.info("Persisted result %d/%d id=%s", idx, len(results), result_id)
+    # ── 3. Export new cards from DB to Excel ──────────────────────────────────
+    new_guids = {
+        str((result.input.get("Прием") or {}).get("GUID") or "").lower()
+        for result, _ in pairs
+    }
+    new_guids.discard("")
+
+    if new_guids:
+        async with ExcelFormatter(EXCEL_PATH) as fmt:
+            written = await fmt.export_guids(new_guids)
+        log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)
+    else:
+        log.info("📊 No guid-bearing cards to export; skipping Excel write")
 
     log.info("Audit complete. Log: %s", LOG_FILE)
 

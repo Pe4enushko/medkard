@@ -92,6 +92,7 @@ class Result:
 
     # Assigned by the database on insert; None before insertion.
     id: str | None = None
+    token_count: int = 0
 
     def pretty_format(self) -> str:
         lines = [f"Result(id={self.id})"]

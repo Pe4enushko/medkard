@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Fetch appointments from 1C for a configured period, save the raw JSON
-snapshot, run the full audit pipeline, then persist every result to DB
-and Excel.
+snapshot, run the full audit pipeline, then export results to Excel.
 
 Run from project root:
     python scripts/audit-one-c-period.py
@@ -10,35 +9,39 @@ Run from project root:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import logging
-import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-
-import openpyxl
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from audit.excel_formatter import ExcelFormatter
 from audit.pipeline import AuditPipeline
 from integrations.one_c import OneCClient
-from storage import ResultsStorage
+from storage import DoneCardsStorage
+
+# ── Args ──────────────────────────────────────────────────────────────────────
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--days", type=int, default=0, help="Shift datebegin N days back from today")
+_parser.add_argument("--ignore-icd", nargs="*", default=[], metavar="CODE", help="ICD codes to ignore (e.g. Z00.0 J06.9)")
+_parser.add_argument("--excel", default=str(ROOT / "audit_results.xlsx"), metavar="PATH", help="Output xlsx file (default: audit_results.xlsx)")
+_args = _parser.parse_args()
+
+IGNORE_ICD: list[str] = _args.ignore_icd
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DATEBEGIN = "17.04.2026"
+DATEBEGIN = (datetime.now() - timedelta(days=_args.days)).strftime("%d.%m.%Y")
 DATEEND   = "24.04.2026"
 
-EXCEL_PATH         = ROOT / "audit_results.xlsx"
+EXCEL_PATH         = Path(_args.excel)
 DATA_SNAPSHOTS_DIR = ROOT / "data_snapshots"
 LOGS_DIR           = ROOT / "logs"
-
-GUID_RE = re.compile(
-    r"\bGUID:\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b"
-)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 DATA_SNAPSHOTS_DIR.mkdir(exist_ok=True)
@@ -82,61 +85,39 @@ def _load_or_fetch_one_c_payload(datebegin: str, dateend: str) -> Any:
     return payload
 
 
-def _extract_guid_from_text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    match = GUID_RE.search(value)
-    return match.group(1).lower() if match else None
-
-
-def _load_done_guids_from_excel(path: Path) -> set[str]:
-    """Read GUID values from column A of an existing audit workbook."""
-    if not path.exists():
-        log.info("No existing Excel output found at %s", path)
-        return set()
-
-    done: set[str] = set()
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    try:
-        ws = wb.active
-        for row_idx, (column_a,) in enumerate(
-            ws.iter_rows(min_row=2, min_col=1, max_col=1, values_only=True),
-            start=2,
-        ):
-            guid = _extract_guid_from_text(column_a)
-            if guid:
-                done.add(guid)
-            elif column_a:
-                log.debug("No GUID found in Excel row %d column A", row_idx)
-    finally:
-        wb.close()
-
-    log.info("Loaded %d already audited GUID(s) from %s", len(done), path)
-    return done
-
-
 async def main() -> None:
     log.info("🩺 Starting period audit: datebegin=%s dateend=%s", DATEBEGIN, DATEEND)
 
     # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────────
     payload = _load_or_fetch_one_c_payload(datebegin=DATEBEGIN, dateend=DATEEND)
-    done_guids = _load_done_guids_from_excel(EXCEL_PATH)
 
-    # ── 2. Run full pipeline with raw payload ─────────────────────────────────
-    pipeline = AuditPipeline(excel_path=EXCEL_PATH)
-    results = await pipeline.run(payload, done_guids=done_guids)
-    log.info("Pipeline done: %d result(s)", len(results))
+    # ── 2. Load done GUIDs from DB (authoritative) ────────────────────────────
+    async with DoneCardsStorage() as storage:
+        done_guids = await storage.get_done_guids()
+    log.info("Loaded %d done GUID(s) from DB", len(done_guids))
 
-    if not results:
-        log.info("Nothing to persist; all visits may already be present in %s", EXCEL_PATH)
+    # ── 3. Run pipeline — each card is persisted to DB on completion ──────────
+    async with AuditPipeline() as pipeline:
+        pairs = await pipeline.run_batched(payload, done_guids=done_guids, ignore_icd=IGNORE_ICD or None)
+    log.info("Pipeline done: %d result(s)", len(pairs))
+
+    if not pairs:
+        log.info("Nothing new to export; all visits already in DB")
         return
 
-    # ── 3. Persist results to DB ──────────────────────────────────────────────
-    async with ResultsStorage() as storage:
-        for idx, result in enumerate(results, start=1):
-            log.info("💾 Persisting result %d/%d", idx, len(results))
-            result_id = await storage.insert(result)
-            log.info("💾 Persisted result %d/%d id=%s", idx, len(results), result_id)
+    # ── 4. Export new cards from DB to Excel ──────────────────────────────────
+    new_guids = {
+        str((result.input.get("Прием") or {}).get("GUID") or "").lower()
+        for result, _ in pairs
+    }
+    new_guids.discard("")
+
+    if new_guids:
+        async with ExcelFormatter(EXCEL_PATH) as fmt:
+            written = await fmt.export_guids(new_guids)
+        log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)
+    else:
+        log.info("📊 No guid-bearing cards to export; skipping Excel write")
 
     log.info("Audit complete. Log: %s", LOG_FILE)
 

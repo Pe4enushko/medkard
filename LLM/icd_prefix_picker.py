@@ -85,10 +85,11 @@ class IcdPrefixPicker:
                 resp.model_dump_json(indent=2),
             )
 
+        tokens = resp.usage.total_tokens if resp.usage else 0
         raw = resp.choices[0].message.content
         logger.debug("[icd_prefix_picker] raw answer: %s", raw)
         chosen = raw.strip().strip('"').strip("'")
         if chosen.lower() == "none":
-            return None
+            return None, tokens
         valid_ids = {row.get("ID", "") for row in candidates}
-        return chosen if chosen in valid_ids else None
+        return (chosen if chosen in valid_ids else None), tokens

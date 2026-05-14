@@ -89,7 +89,7 @@ async def decide_file_id(
             resp.model_dump_json(indent=2),
         )
     logger.debug("[decider] raw LLM answer: %s", raw_content)
+    tokens = resp.usage.total_tokens if resp.usage else 0
     chosen = raw_content.strip().strip('"').strip("'")
-    # Validate it is actually one of the candidate IDs
     valid_ids = {row.get("ID", "") for row in candidates}
-    return chosen if chosen in valid_ids else None
+    return (chosen if chosen in valid_ids else None), tokens

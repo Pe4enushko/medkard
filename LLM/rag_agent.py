@@ -23,6 +23,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
+from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 
 from RAG.retrieval.embeddings import embed
@@ -67,6 +68,15 @@ async def retrieve(query: str) -> str:
         parts.append(f"{header}\n{chunk}")
 
     return "\n\n---\n\n".join(parts)
+
+
+def _sum_agent_tokens(result: dict) -> int:
+    """Sum total_tokens across all AIMessage objects in an agent.ainvoke result."""
+    total = 0
+    for msg in result.get("messages", []):
+        if isinstance(msg, AIMessage) and msg.usage_metadata:
+            total += msg.usage_metadata.get("total_tokens", 0)
+    return total
 
 
 def create_checker_agent(

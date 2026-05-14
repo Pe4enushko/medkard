@@ -29,7 +29,7 @@ import openpyxl
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-from audit.models import DiagnosisAuditResult, FormalStructureResult
+from audit.models import FormalStructureResult
 
 _HEADERS = ["input", "formal_structure", "diagnosis"]
 logger = logging.getLogger(__name__)
@@ -131,7 +131,7 @@ class AuditExcelWriter:
         self,
         visit: dict[str, Any],
         formal: FormalStructureResult,
-        diagnosis: DiagnosisAuditResult | list[DiagnosisAuditResult],
+        diagnosis: Any,
     ) -> None:
         """Append one result row and save the workbook.
 

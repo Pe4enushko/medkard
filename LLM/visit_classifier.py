@@ -46,10 +46,11 @@ class VisitClassifier:
             temperature=0.7
         )
 
+        tokens = resp.usage.total_tokens if resp.usage else 0
         answer = resp.choices[0].message.content.strip().lower()
         if answer not in _VALID_LABELS:
             logger.warning("[visit_classifier] unrecognised label %r", answer)
-            return None
+            return None, tokens
 
         logger.info("[visit_classifier] classified as %r", answer)
-        return answer
+        return answer, tokens

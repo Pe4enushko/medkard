@@ -74,22 +74,21 @@ class ClinicRecs:
         self,
         patient: dict[str, Any],
         diagnosis: dict[str, Any],
-    ) -> str | None:
-        """Return the most relevant guideline file_id for *diagnosis*.
+    ) -> tuple[str | None, int]:
+        """Return (file_id, tokens) for *diagnosis*.
 
         Args:
             patient:   Patient info dict (e.g. ``{"Возраст": ..., "Пол": ...}``).
             diagnosis: Diagnosis dict with at least ``КодМКБ`` key.
 
         Returns:
-            A single manifest ``ID`` string, or ``None`` when no match exists or
-            when the ICD code is in the skip list (e.g. Z00.1).
+            A tuple of (manifest ID string or None, total LLM tokens spent).
         """
         icd_raw: str = diagnosis.get("КодМКБ", "")
         normalised = icd_raw.strip().upper()
 
         if not normalised or normalised in _SKIP_CODES:
-            return None
+            return None, 0
 
         matched = self._find_matching_rows(normalised)
 
@@ -100,10 +99,10 @@ class ClinicRecs:
                 matched = self._find_matching_rows_by_prefix(prefix)
                 if matched:
                     return await self._prefix_picker.pick(patient, diagnosis, matched)
-            return None
+            return None, 0
 
         if len(matched) == 1:
-            return matched[0].get(_ID_COLUMN, "").strip()
+            return matched[0].get(_ID_COLUMN, "").strip(), 0
 
         # ── Multiple candidates: BM25 token-overlap first ─────────────────────
         diag_name: str = diagnosis.get("НаименованиеМКБ", "").lower()
@@ -118,7 +117,7 @@ class ClinicRecs:
         if best_score > 0:
             # Unique winner — return its file_id without an LLM call.
             best_row = matched[scores.index(best_score)]
-            return best_row.get(_ID_COLUMN, "").strip() or None
+            return best_row.get(_ID_COLUMN, "").strip() or None, 0
 
         # ── BM25 impossible (all zero) — fall back to LLM decider ────────────
         return await decide_file_id(patient, diagnosis, matched)

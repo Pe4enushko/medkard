@@ -25,7 +25,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from LLM.rag_agent import create_checker_agent
+from LLM.rag_agent import _sum_agent_tokens, create_checker_agent
 from LLM.tools import (
     get_anamnesis_tools_for,
     get_inspection_tools_for,
@@ -122,11 +122,12 @@ async def _run_checker(
     tools: list,
     human_message: str,
     checker_label: str = "checker",
-) -> _CheckerRun:
+) -> tuple[_CheckerRun, int]:
     tool_names = [t.name for t in tools]
     logger.debug("[checker:%s] START — tools=%s", checker_label, tool_names)
     agent = create_checker_agent(system_prompt, tools)
     result = await agent.ainvoke({"messages": [("user", human_message)]})
+    tokens = _sum_agent_tokens(result)
     last_msg = result["messages"][-1]
     raw_answer = last_msg.content
     finish_reason = (getattr(last_msg, "response_metadata", {}) or {}).get("finish_reason")
@@ -139,8 +140,8 @@ async def _run_checker(
         )
     logger.info("🤖 [checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
-    logger.debug("[checker:%s] parsed %d issue(s)", checker_label, len(issues))
-    return _CheckerRun(issues=issues)
+    logger.debug("[checker:%s] parsed %d issue(s), tokens=%d", checker_label, len(issues), tokens)
+    return _CheckerRun(issues=issues), tokens
 
 
 class DiagnosisValidator:
@@ -157,25 +158,27 @@ class DiagnosisValidator:
     async def validate_diagnosis(
         self,
         diagnosis: dict[str, Any],
-    ) -> DiagnosisAuditResult:
+    ) -> tuple[DiagnosisAuditResult, int]:
         """Run anamnesis / inspection / treatment checker agents for *diagnosis*.
 
         Args:
             diagnosis: A single entry from the visit's «Диагнозы» list.
 
         Returns:
-            :class:`DiagnosisAuditResult` with issues grouped by checker type.
+            (DiagnosisAuditResult, total_tokens) where total_tokens covers
+            guideline lookup and all three checker agents.
         """
         patient: dict = self._visit.get("Пациент", {})
         dx_code = diagnosis.get("КодМКБ", "?")
         logger.info("[diagnosis] validate_diagnosis START — dx=%s", dx_code)
 
-        file_id = await self._clinic_recs.pick_recs(patient, diagnosis)
+        file_id, clinic_tokens = await self._clinic_recs.pick_recs(patient, diagnosis)
         logger.info("[diagnosis] guideline file_id picked: %s", file_id)
 
         anamnesis_issues: list[DiagnisisIssue] = []
         inspection_issues: list[DiagnisisIssue] = []
         treatment_issues: list[DiagnisisIssue] = []
+        checker_tokens = 0
 
         if file_id:
             patient_info = "\n".join(f"{k}: {v}" for k, v in patient.items() if v is not None)
@@ -190,7 +193,7 @@ class DiagnosisValidator:
             logger.info("📨 [diagnosis] checker user prompt for dx=%s:\n%s", dx_code, human_message)
             logger.info("[diagnosis] launching anamnesis / inspection / treatment checkers in parallel")
 
-            anamnesis_run, inspection_run, treatment_run = await asyncio.gather(
+            (anamnesis_run, a_tokens), (inspection_run, i_tokens), (treatment_run, t_tokens) = await asyncio.gather(
                 _run_checker(
                     _ANAMNESIS_PROMPT,
                     get_anamnesis_tools_for(file_id),
@@ -213,9 +216,10 @@ class DiagnosisValidator:
             anamnesis_issues = anamnesis_run.issues
             inspection_issues = inspection_run.issues
             treatment_issues = treatment_run.issues
+            checker_tokens = a_tokens + i_tokens + t_tokens
             logger.info(
-                "[diagnosis] checkers done — anamnesis=%d inspection=%d treatment=%d",
-                len(anamnesis_issues), len(inspection_issues), len(treatment_issues),
+                "[diagnosis] checkers done — anamnesis=%d inspection=%d treatment=%d tokens=%d",
+                len(anamnesis_issues), len(inspection_issues), len(treatment_issues), checker_tokens,
             )
         else:
             logger.warning(
@@ -223,10 +227,11 @@ class DiagnosisValidator:
                 dx_code,
             )
 
+        total_tokens = clinic_tokens + checker_tokens
         return DiagnosisAuditResult(
             anamnesis_issues=anamnesis_issues,
             inspection_issues=inspection_issues,
             treatment_issues=treatment_issues,
             guideline_file_id=file_id,
             icd_code=dx_code,
-        )
+        ), total_tokens

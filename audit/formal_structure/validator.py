@@ -256,7 +256,7 @@ class FormalValidator:
     async def validate(
         self,
         visit: dict[str, Any],
-    ) -> list[dict[str, str]]:
+    ) -> tuple[list[dict[str, str]], int]:
         """Validate a visit record against the applicable formal-structure rules.
 
         1. Determines all visit types via ``get_visit_types``.
@@ -268,8 +268,8 @@ class FormalValidator:
             visit: Raw visit dict (as parsed from the source JSON).
 
         Returns:
-            List of finding dicts: ``[{"flag": ..., "issue": ...}, ...]``.
-            Empty list means no formal-structure defects were detected.
+            (findings, tokens) — findings is a list of ``{"flag": ..., "issue": ...}``
+            dicts; tokens is the total LLM token count for this call.
         """
         visit_types = await self.get_visit_types(visit)
         logger.debug("[formal] visit_types resolved: %s", {vt.name for vt in visit_types})
@@ -281,12 +281,12 @@ class FormalValidator:
 
         system_prompt = self._render_prompt(rules)
 
-        findings = await validate_visit(system_prompt, visit)
-        logger.info("[formal] LLM returned %d finding(s): %s", len(findings), findings)
+        findings, tokens = await validate_visit(system_prompt, visit)
+        logger.info("[formal] LLM returned %d finding(s), tokens=%d: %s", len(findings), tokens, findings)
 
         contradiction = self._check_nmu_keyword_contradiction(visit)
         if contradiction:
             logger.warning("[formal] NMU/keyword contradiction: %s", contradiction["issue"])
             findings.append(contradiction)
 
-        return findings
+        return findings, tokens

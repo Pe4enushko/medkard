@@ -105,4 +105,5 @@ async def validate_visit(
             completion.model_dump_json(indent=2),
         )
     logger.debug("[validations] raw LLM answer: %s", result.model_dump_json(indent=2))
-    return [{"flag": f.flag, "issue": f.issue} for f in result.findings]
+    tokens = completion.usage.total_tokens if completion.usage else 0
+    return [{"flag": f.flag, "issue": f.issue} for f in result.findings], tokens
