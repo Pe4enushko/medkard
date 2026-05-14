@@ -133,21 +133,23 @@ class DoneCardsStorage(BaseStorage):
             logger.exception("💾 done_cards UPSERT FAILED guid=%s", card_guid)
             raise
 
-    async def upsert_ignored(self, *, card_guid: str) -> str:
+    async def upsert_ignored(self, *, card_guid: str, card_data: str) -> str:
         """Insert or update a done_cards row for an ICD-ignored card.
 
-        Only card_guid is stored; all audit columns are left NULL.
+        Stores card_guid and raw input; all audit columns are left NULL.
         """
         try:
             async with self._pool.connection() as conn:
                 cur = await conn.execute(
                     """
-                    INSERT INTO done_cards (card_guid, ignored)
-                    VALUES (%(guid)s, TRUE)
-                    ON CONFLICT (card_guid) DO UPDATE SET ignored = TRUE
+                    INSERT INTO done_cards (card_guid, card_data, ignored)
+                    VALUES (%(guid)s, %(data)s::jsonb, TRUE)
+                    ON CONFLICT (card_guid) DO UPDATE SET
+                        card_data = EXCLUDED.card_data,
+                        ignored   = TRUE
                     RETURNING id::text
                     """,
-                    {"guid": card_guid},
+                    {"guid": card_guid, "data": card_data},
                 )
                 row = await cur.fetchone()
             row_id: str = row["id"]

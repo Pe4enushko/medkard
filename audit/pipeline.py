@@ -116,7 +116,10 @@ class AuditPipeline:
 
         if ignored_visits and self._done_cards is not None:
             await asyncio.gather(*[
-                self._done_cards.upsert_ignored(card_guid=_visit_guid(v))
+                self._done_cards.upsert_ignored(
+                    card_guid=_visit_guid(v),
+                    card_data=json.dumps(v, ensure_ascii=False),
+                )
                 for v in ignored_visits
                 if _visit_guid(v)
             ])
