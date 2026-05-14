@@ -1,10 +1,11 @@
--- Migration 005: view for per-date token and time metrics.
+-- Migration 007: view for per-date token and time metrics.
 --
 -- visit_date      — parsed from card_data->'Прием'->>'DATE' (format DD.MM.YYYY)
 -- total_cards     — all cards for the date (including ignored)
 -- ignored_cards   — cards skipped due to ICD ignore-list
--- total/avg token and time columns — non-ignored cards only
+-- token columns   — non-ignored cards only
 -- wall_clock_sec  — max(finished_at) - min(started_at) per date (actual elapsed time)
+-- avg_time_sec    — wall_clock_sec / audited cards (non-ignored)
 
 CREATE OR REPLACE VIEW done_cards_metrics AS
 SELECT
@@ -13,14 +14,14 @@ SELECT
     count(*) FILTER (WHERE ignored = TRUE)                          AS ignored_cards,
     sum(token_count)   FILTER (WHERE ignored = FALSE)               AS total_tokens,
     round(avg(token_count) FILTER (WHERE ignored = FALSE))          AS avg_tokens,
-    sum(time_ms)       FILTER (WHERE ignored = FALSE)               AS total_time_ms,
-    round(sum(time_ms) FILTER (WHERE ignored = FALSE) / 1000.0, 2) AS total_time_sec,
-    round(avg(time_ms)     FILTER (WHERE ignored = FALSE))          AS avg_time_ms,
-    round(avg(time_ms)     FILTER (WHERE ignored = FALSE) / 1000.0, 2) AS avg_time_sec,
     round(extract(epoch FROM (
         max(finished_at) FILTER (WHERE ignored = FALSE) -
         min(started_at)  FILTER (WHERE ignored = FALSE)
-    ))::numeric, 2)                                                 AS wall_clock_sec
+    ))::numeric, 2)                                                 AS wall_clock_sec,
+    round(extract(epoch FROM (
+        max(finished_at) FILTER (WHERE ignored = FALSE) -
+        min(started_at)  FILTER (WHERE ignored = FALSE)
+    ))::numeric / nullif(count(*) FILTER (WHERE ignored = FALSE), 0), 2) AS avg_time_sec
 FROM done_cards
 GROUP BY visit_date
 ORDER BY visit_date;

@@ -107,37 +107,37 @@ async def main() -> None:
     _confirm_period(DATEBEGIN, DATEEND)
     log.info("🩺 Starting period audit: datebegin=%s dateend=%s", DATEBEGIN, DATEEND)
 
-    # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────────
-    payload = _load_or_fetch_one_c_payload(datebegin=DATEBEGIN, dateend=DATEEND)
+    try:
+        # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────
+        payload = _load_or_fetch_one_c_payload(datebegin=DATEBEGIN, dateend=DATEEND)
 
-    # ── 2. Run pipeline — each card is persisted to DB on completion ──────────
-    async with AuditPipeline() as pipeline:
-        pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches, ignore_icd=IGNORE_ICD or None)
-    log.info("Pipeline done: %d result(s)", len(pairs))
+        # ── 2. Run pipeline — each card is persisted to DB on completion ──────
+        async with AuditPipeline() as pipeline:
+            pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches, ignore_icd=IGNORE_ICD or None)
+        log.info("Pipeline done: %d result(s)", len(pairs))
 
-    if not pairs:
-        log.info("Nothing new to export; all visits already in DB")
-        return
+        if not pairs:
+            log.info("Nothing new to export; all visits already in DB")
+            return
 
-    # ── 3. Export new cards from DB to Excel ──────────────────────────────────
-    new_guids = {
-        str((result.input.get("Прием") or {}).get("GUID") or "").lower()
-        for result, _ in pairs
-    }
-    new_guids.discard("")
+        # ── 3. Export new cards from DB to Excel ──────────────────────────────
+        new_guids = {
+            str((result.input.get("Прием") or {}).get("GUID") or "").lower()
+            for result, _ in pairs
+        }
+        new_guids.discard("")
 
-    if new_guids:
-        async with ExcelFormatter(EXCEL_PATH) as fmt:
-            written = await fmt.export_guids(new_guids)
-        log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)
-    else:
-        log.info("📊 No guid-bearing cards to export; skipping Excel write")
+        if new_guids:
+            async with ExcelFormatter(EXCEL_PATH) as fmt:
+                written = await fmt.export_guids(new_guids)
+            log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)
+        else:
+            log.info("📊 No guid-bearing cards to export; skipping Excel write")
 
-    log.info("Audit complete. Log: %s", LOG_FILE)
+        log.info("Audit complete. Log: %s", LOG_FILE)
+    finally:
+        await close_pool()
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    finally:
-        asyncio.run(close_pool())
+    asyncio.run(main())
