@@ -17,14 +17,33 @@ from .models.result import DiagnosisResult, FormalStructureResult
 logger = logging.getLogger(__name__)
 
 
-def _formal_text(formal: FormalStructureResult) -> str:
-    return formal.pretty_format()
+def _formal_json(formal: FormalStructureResult) -> str:
+    return json.dumps(
+        [{"flag": f.flag, "issue": f.issue} for f in formal.findings],
+        ensure_ascii=False,
+    )
 
 
-def _diag_text(diagnosis: list[DiagnosisResult]) -> str:
-    if not diagnosis:
-        return "Diagnoses: none"
-    return "\n".join(dr.pretty_format() for dr in diagnosis)
+def _diag_json(diagnosis: list[DiagnosisResult]) -> str:
+    return json.dumps(
+        [
+            {
+                "icd_code": dr.icd_code,
+                "issues": [
+                    {
+                        "issue": iss.issue,
+                        "sources": [
+                            {"doc_title": s.doc_title, "section": s.section, "cite": s.cite}
+                            for s in iss.sources
+                        ],
+                    }
+                    for iss in dr.issues
+                ],
+            }
+            for dr in diagnosis
+        ],
+        ensure_ascii=False,
+    )
 
 
 class DoneCardsStorage(BaseStorage):
@@ -58,8 +77,8 @@ class DoneCardsStorage(BaseStorage):
         all fields are updated in place. Cards without a guid are always
         inserted as new rows.
         """
-        formal_text = _formal_text(formal)
-        diag_text = _diag_text(diagnosis)
+        formal_json = _formal_json(formal)
+        diag_json = _diag_json(diagnosis)
 
         try:
             async with self._pool.connection() as conn:
@@ -69,7 +88,7 @@ class DoneCardsStorage(BaseStorage):
                         INSERT INTO done_cards
                             (card_guid, card_data, formal_result, diag_result, token_count, time_ms, ignored)
                         VALUES
-                            (%(guid)s, %(data)s, %(formal)s, %(diag)s, %(tokens)s, %(ms)s, FALSE)
+                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, FALSE)
                         ON CONFLICT (card_guid) DO UPDATE SET
                             card_data     = EXCLUDED.card_data,
                             formal_result = EXCLUDED.formal_result,
@@ -82,8 +101,8 @@ class DoneCardsStorage(BaseStorage):
                         {
                             "guid":   card_guid,
                             "data":   card_data,
-                            "formal": formal_text,
-                            "diag":   diag_text,
+                            "formal": formal_json,
+                            "diag":   diag_json,
                             "tokens": token_count,
                             "ms":     time_ms,
                         },
@@ -94,13 +113,13 @@ class DoneCardsStorage(BaseStorage):
                         INSERT INTO done_cards
                             (card_guid, card_data, formal_result, diag_result, token_count, time_ms, ignored)
                         VALUES
-                            (NULL, %(data)s, %(formal)s, %(diag)s, %(tokens)s, %(ms)s, FALSE)
+                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, FALSE)
                         RETURNING id::text
                         """,
                         {
                             "data":   card_data,
-                            "formal": formal_text,
-                            "diag":   diag_text,
+                            "formal": formal_json,
+                            "diag":   diag_json,
                             "tokens": token_count,
                             "ms":     time_ms,
                         },

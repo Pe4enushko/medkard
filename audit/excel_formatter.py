@@ -16,7 +16,6 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -28,29 +27,31 @@ from storage.models.result import DiagnosisResult, FormalFinding, FormalStructur
 logger = logging.getLogger(__name__)
 
 
-def _parse_formal(text: str) -> FormalStructureResult:
-    """Reconstruct a minimal FormalStructureResult from its pretty_format text."""
-    findings: list[FormalFinding] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("[") and "]" in line:
-            bracket_end = line.index("]")
-            flag = line[1:bracket_end]
-            issue = line[bracket_end + 1:].strip().lstrip(": ")
-            findings.append(FormalFinding(flag=flag, issue=issue))
-    return FormalStructureResult(findings=findings)
+def _parse_formal(data: list[dict]) -> FormalStructureResult:
+    return FormalStructureResult(
+        findings=[FormalFinding(flag=f["flag"], issue=f.get("issue", "")) for f in (data or [])]
+    )
 
 
-def _parse_diagnosis(text: str) -> list[DiagnosisResult]:
-    """Reconstruct DiagnosisResult list from pretty_format text (best-effort)."""
-    results: list[DiagnosisResult] = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and "]" in stripped and not stripped.startswith("[•"):
-            bracket_end = stripped.index("]")
-            code = stripped[1:bracket_end]
-            if code and code != "•":
-                results.append(DiagnosisResult(icd_code=code))
+def _parse_diagnosis(data: list[dict]) -> list[DiagnosisResult]:
+    from storage.models.result import DiagnisisIssue, IssueSource
+    results = []
+    for entry in (data or []):
+        issues = [
+            DiagnisisIssue(
+                issue=iss["issue"],
+                sources=[
+                    IssueSource(
+                        doc_title=s["doc_title"],
+                        section=s.get("section"),
+                        cite=s.get("cite"),
+                    )
+                    for s in iss.get("sources", [])
+                ],
+            )
+            for iss in entry.get("issues", [])
+        ]
+        results.append(DiagnosisResult(icd_code=entry["icd_code"], issues=issues))
     return results
 
 
@@ -148,7 +149,7 @@ class ExcelFormatter:
             if guid and guid in existing:
                 logger.debug("📊 skipping already exported card guid=%s", guid)
                 continue
-            visit = json.loads(row["card_data"])
+            visit = row["card_data"]
             formal = _parse_formal(row["formal_result"])
             diagnosis = _parse_diagnosis(row["diag_result"])
             self._excel.append(visit=visit, formal=formal, diagnosis=diagnosis)
