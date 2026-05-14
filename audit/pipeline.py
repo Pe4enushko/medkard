@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from audit.diagnosis.validator import DiagnosisValidator
@@ -220,6 +221,7 @@ class AuditPipeline:
         logger.debug("[pipeline] _audit_visit START — visit_id=%s", visit_id)
 
         t_start = time.monotonic()
+        dt_start = datetime.now(timezone.utc)
 
         # ── Formal structure (once per visit) ─────────────────────────────────
         logger.info("📋 [pipeline] running FormalValidator for visit %s", visit_id)
@@ -245,6 +247,8 @@ class AuditPipeline:
                 formal=formal_result, diagnosis=[],
                 time_ms=int((time.monotonic() - t_start) * 1000),
                 token_count=formal_tokens,
+                started_at=dt_start,
+                finished_at=datetime.now(timezone.utc),
             )
             return Result(input=visit, formal=formal_result, diagnosis=[], token_count=formal_tokens)
 
@@ -283,12 +287,15 @@ class AuditPipeline:
             )
 
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
+        dt_finish = datetime.now(timezone.utc)
 
         await self._upsert_done_card(
             visit=visit, card_guid=card_guid,
             formal=formal_result, diagnosis=diagnosis_results,
             time_ms=elapsed_ms,
             token_count=total_tokens,
+            started_at=dt_start,
+            finished_at=dt_finish,
         )
 
         result = Result(
@@ -308,6 +315,8 @@ class AuditPipeline:
         formal: FormalStructureResult,
         diagnosis: list[DiagnosisResult],
         time_ms: int,
+        started_at: datetime,
+        finished_at: datetime,
         token_count: int = 0,
     ) -> None:
         if self._done_cards is None:
@@ -320,4 +329,6 @@ class AuditPipeline:
             diagnosis=diagnosis,
             token_count=token_count,
             time_ms=time_ms,
+            started_at=started_at,
+            finished_at=finished_at,
         )

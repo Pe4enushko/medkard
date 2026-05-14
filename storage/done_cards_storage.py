@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 
 from .base import BaseStorage
 from .models.result import DiagnosisResult, FormalStructureResult
@@ -69,6 +70,8 @@ class DoneCardsStorage(BaseStorage):
         diagnosis: list[DiagnosisResult],
         token_count: int,
         time_ms: int,
+        started_at: datetime,
+        finished_at: datetime,
         card_guid: str | None = None,
     ) -> str:
         """Insert or update a done_cards row and return its UUID.
@@ -86,42 +89,48 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, ignored)
+                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, started_at, finished_at, ignored)
                         VALUES
-                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, FALSE)
+                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE)
                         ON CONFLICT (card_guid) DO UPDATE SET
                             card_data     = EXCLUDED.card_data,
                             formal_result = EXCLUDED.formal_result,
                             diag_result   = EXCLUDED.diag_result,
                             token_count   = EXCLUDED.token_count,
                             time_ms       = EXCLUDED.time_ms,
+                            started_at    = EXCLUDED.started_at,
+                            finished_at   = EXCLUDED.finished_at,
                             ignored       = FALSE
                         RETURNING id::text
                         """,
                         {
-                            "guid":   card_guid,
-                            "data":   card_data,
-                            "formal": formal_json,
-                            "diag":   diag_json,
-                            "tokens": token_count,
-                            "ms":     time_ms,
+                            "guid":        card_guid,
+                            "data":        card_data,
+                            "formal":      formal_json,
+                            "diag":        diag_json,
+                            "tokens":      token_count,
+                            "ms":          time_ms,
+                            "started_at":  started_at,
+                            "finished_at": finished_at,
                         },
                     )
                 else:
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, ignored)
+                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, started_at, finished_at, ignored)
                         VALUES
-                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, FALSE)
+                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE)
                         RETURNING id::text
                         """,
                         {
-                            "data":   card_data,
-                            "formal": formal_json,
-                            "diag":   diag_json,
-                            "tokens": token_count,
-                            "ms":     time_ms,
+                            "data":        card_data,
+                            "formal":      formal_json,
+                            "diag":        diag_json,
+                            "tokens":      token_count,
+                            "ms":          time_ms,
+                            "started_at":  started_at,
+                            "finished_at": finished_at,
                         },
                     )
 

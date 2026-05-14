@@ -92,7 +92,7 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
 async def _get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(_dsn(), init=_init_conn)
+        _pool = await asyncpg.create_pool(_dsn(), init=_init_conn, min_size=2, max_size=5)
     return _pool
 
 

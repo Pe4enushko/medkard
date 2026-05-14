@@ -36,6 +36,8 @@ class BaseStorage:
     async def __aenter__(self) -> "BaseStorage":
         self._pool: AsyncConnectionPool = AsyncConnectionPool(
             conninfo=_conninfo(),
+            min_size=1,
+            max_size=3,
             open=False,
             configure=self._configure,
             kwargs={"row_factory": psycopg.rows.dict_row},
