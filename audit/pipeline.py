@@ -99,8 +99,8 @@ class AuditPipeline:
             raw_input:   JSON payload — a list of visit dicts, a wrapper dict,
                          or a raw JSON string of either shape.
             num_batches: Maximum number of visits processed concurrently (default 5).
-            done_guids:  Optional set of visit GUIDs already audited. Matching
-                         visits are filtered out before processing starts.
+            done_guids:  Set of visit GUIDs already audited. If omitted, loaded
+                         from the DB automatically.
             ignore_icd:  Optional list of ICD codes. A visit is skipped only if
                          every one of its diagnoses is in this list.
 
@@ -108,8 +108,18 @@ class AuditPipeline:
             List of ``(Result, elapsed_ms)`` pairs — one per audited visit,
             where ``elapsed_ms`` is the wall-clock time for that card in milliseconds.
         """
+        if done_guids is None:
+            done_guids = await self._done_cards.get_done_guids()
+
         appointments = _split_appointments(raw_input)
-        pending, skipped_done, skipped_icd = self._filter_pending_appointments(appointments, done_guids, ignore_icd)
+        pending, ignored_visits, skipped_done, skipped_icd = self._filter_pending_appointments(appointments, done_guids, ignore_icd)
+
+        if ignored_visits and self._done_cards is not None:
+            await asyncio.gather(*[
+                self._done_cards.upsert_ignored(card_guid=_visit_guid(v))
+                for v in ignored_visits
+                if _visit_guid(v)
+            ])
 
         sem = asyncio.Semaphore(num_batches)
 
@@ -138,11 +148,12 @@ class AuditPipeline:
         appointments: list[dict[str, Any]],
         done_guids: set[str] | None,
         ignore_icd: list[str] | None = None,
-    ) -> tuple[list[tuple[int, dict[str, Any]]], int, int]:
-        """Return (pending, skipped_done, skipped_icd)."""
+    ) -> tuple[list[tuple[int, dict[str, Any]]], list[dict[str, Any]], int, int]:
+        """Return (pending, ignored_visits, skipped_done, skipped_icd)."""
         normalized_done_guids = {str(guid).lower() for guid in (done_guids or set())}
         normalized_ignore_icd = {code.upper() for code in (ignore_icd or [])}
         pending: list[tuple[int, dict[str, Any]]] = []
+        ignored_visits: list[dict[str, Any]] = []
         skipped_done = 0
         skipped_icd = 0
 
@@ -174,11 +185,12 @@ class AuditPipeline:
                         "🩺 Skipping visit %s — all diagnoses %s are in ignore_icd list",
                         visit_id, dx_codes,
                     )
+                    ignored_visits.append(visit)
                     continue
 
             pending.append((idx, visit))
 
-        return pending, skipped_done, skipped_icd
+        return pending, ignored_visits, skipped_done, skipped_icd
 
     def _log_queue_summary(
         self,

@@ -24,7 +24,6 @@ sys.path.insert(0, str(ROOT))
 from audit.excel_formatter import ExcelFormatter
 from audit.pipeline import AuditPipeline
 from integrations.one_c import OneCClient
-from storage import DoneCardsStorage
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 _parser = argparse.ArgumentParser()
@@ -91,21 +90,16 @@ async def main() -> None:
     # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────────
     payload = _load_or_fetch_one_c_payload(datebegin=DATEBEGIN, dateend=DATEEND)
 
-    # ── 2. Load done GUIDs from DB (authoritative) ────────────────────────────
-    async with DoneCardsStorage() as storage:
-        done_guids = await storage.get_done_guids()
-    log.info("Loaded %d done GUID(s) from DB", len(done_guids))
-
-    # ── 3. Run pipeline — each card is persisted to DB on completion ──────────
+    # ── 2. Run pipeline — each card is persisted to DB on completion ──────────
     async with AuditPipeline() as pipeline:
-        pairs = await pipeline.run_batched(payload, done_guids=done_guids, ignore_icd=IGNORE_ICD or None)
+        pairs = await pipeline.run_batched(payload, ignore_icd=IGNORE_ICD or None)
     log.info("Pipeline done: %d result(s)", len(pairs))
 
     if not pairs:
         log.info("Nothing new to export; all visits already in DB")
         return
 
-    # ── 4. Export new cards from DB to Excel ──────────────────────────────────
+    # ── 3. Export new cards from DB to Excel ──────────────────────────────────
     new_guids = {
         str((result.input.get("Прием") or {}).get("GUID") or "").lower()
         for result, _ in pairs

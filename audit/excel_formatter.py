@@ -73,6 +73,45 @@ class _DoneCardsReader(BaseStorage):
             return await cur.fetchall()
 
 
+def _existing_guids_in_excel(excel: AuditExcelWriter) -> set[str]:
+    """Return the set of appointment GUIDs already present in the Excel sheet.
+
+    Each input cell contains the pretty-formatted visit dict; the GUID appears
+    as the value of the «GUID» key somewhere in that text.
+    """
+    import openpyxl
+
+    path = excel._path
+    if not path.exists():
+        return set()
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        existing: set[str] = set()
+        input_col = None
+        for cell in ws[1]:
+            if cell.value == "input":
+                input_col = cell.column
+                break
+        if input_col is None:
+            return set()
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            cell_value = row[input_col - 1]
+            if not cell_value:
+                continue
+            for line in str(cell_value).splitlines():
+                stripped = line.strip()
+                if stripped.startswith("GUID:"):
+                    guid = stripped[len("GUID:"):].strip().lower()
+                    if guid:
+                        existing.add(guid)
+                    break
+        return existing
+    finally:
+        wb.close()
+
+
 class ExcelFormatter:
     """Async context-manager that exports done_cards rows to an xlsx file.
 
@@ -102,11 +141,18 @@ class ExcelFormatter:
         return self._write_rows(rows)
 
     def _write_rows(self, rows: list[dict[str, Any]]) -> int:
+        existing = _existing_guids_in_excel(self._excel)
+        written = 0
         for row in rows:
+            guid = (row["card_guid"] or "").lower()
+            if guid and guid in existing:
+                logger.debug("📊 skipping already exported card guid=%s", guid)
+                continue
             visit = json.loads(row["card_data"])
             formal = _parse_formal(row["formal_result"])
             diagnosis = _parse_diagnosis(row["diag_result"])
             self._excel.append(visit=visit, formal=formal, diagnosis=diagnosis)
-            logger.debug("📊 exported card id=%s guid=%s", row["id"], row["card_guid"])
-        logger.info("📊 ExcelFormatter exported %d row(s)", len(rows))
-        return len(rows)
+            logger.debug("📊 exported card id=%s guid=%s", row["id"], guid)
+            written += 1
+        logger.info("📊 ExcelFormatter exported %d row(s)", written)
+        return written

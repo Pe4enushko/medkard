@@ -67,15 +67,16 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms)
+                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, ignored)
                         VALUES
-                            (%(guid)s, %(data)s, %(formal)s, %(diag)s, %(tokens)s, %(ms)s)
+                            (%(guid)s, %(data)s, %(formal)s, %(diag)s, %(tokens)s, %(ms)s, FALSE)
                         ON CONFLICT (card_guid) DO UPDATE SET
-                            card_data    = EXCLUDED.card_data,
+                            card_data     = EXCLUDED.card_data,
                             formal_result = EXCLUDED.formal_result,
-                            diag_result  = EXCLUDED.diag_result,
-                            token_count  = EXCLUDED.token_count,
-                            time_ms      = EXCLUDED.time_ms
+                            diag_result   = EXCLUDED.diag_result,
+                            token_count   = EXCLUDED.token_count,
+                            time_ms       = EXCLUDED.time_ms,
+                            ignored       = FALSE
                         RETURNING id::text
                         """,
                         {
@@ -91,9 +92,9 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms)
+                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, ignored)
                         VALUES
-                            (NULL, %(data)s, %(formal)s, %(diag)s, %(tokens)s, %(ms)s)
+                            (NULL, %(data)s, %(formal)s, %(diag)s, %(tokens)s, %(ms)s, FALSE)
                         RETURNING id::text
                         """,
                         {
@@ -113,8 +114,32 @@ class DoneCardsStorage(BaseStorage):
             logger.exception("💾 done_cards UPSERT FAILED guid=%s", card_guid)
             raise
 
+    async def upsert_ignored(self, *, card_guid: str) -> str:
+        """Insert or update a done_cards row for an ICD-ignored card.
+
+        Only card_guid is stored; all audit columns are left NULL.
+        """
+        try:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    """
+                    INSERT INTO done_cards (card_guid, ignored)
+                    VALUES (%(guid)s, TRUE)
+                    ON CONFLICT (card_guid) DO UPDATE SET ignored = TRUE
+                    RETURNING id::text
+                    """,
+                    {"guid": card_guid},
+                )
+                row = await cur.fetchone()
+            row_id: str = row["id"]
+            logger.info("💾 done_cards UPSERT_IGNORED OK id=%s guid=%s", row_id, card_guid)
+            return row_id
+        except Exception:
+            logger.exception("💾 done_cards UPSERT_IGNORED FAILED guid=%s", card_guid)
+            raise
+
     async def get_done_guids(self) -> set[str]:
-        """Return the set of all non-null card_guid values in done_cards."""
+        """Return the set of all non-null card_guid values in done_cards (including ignored)."""
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT card_guid FROM done_cards WHERE card_guid IS NOT NULL"
