@@ -73,6 +73,7 @@ class DoneCardsStorage(BaseStorage):
         started_at: datetime,
         finished_at: datetime,
         card_guid: str | None = None,
+        organization_id: str | None = None,
     ) -> str:
         """Insert or update a done_cards row and return its UUID.
 
@@ -89,18 +90,19 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, started_at, finished_at, ignored)
+                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, started_at, finished_at, ignored, organization_id)
                         VALUES
-                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE)
+                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s)
                         ON CONFLICT (card_guid) DO UPDATE SET
-                            card_data     = EXCLUDED.card_data,
-                            formal_result = EXCLUDED.formal_result,
-                            diag_result   = EXCLUDED.diag_result,
-                            token_count   = EXCLUDED.token_count,
-                            time_ms       = EXCLUDED.time_ms,
-                            started_at    = EXCLUDED.started_at,
-                            finished_at   = EXCLUDED.finished_at,
-                            ignored       = FALSE
+                            card_data       = EXCLUDED.card_data,
+                            formal_result   = EXCLUDED.formal_result,
+                            diag_result     = EXCLUDED.diag_result,
+                            token_count     = EXCLUDED.token_count,
+                            time_ms         = EXCLUDED.time_ms,
+                            started_at      = EXCLUDED.started_at,
+                            finished_at     = EXCLUDED.finished_at,
+                            ignored         = FALSE,
+                            organization_id = EXCLUDED.organization_id
                         RETURNING id::text
                         """,
                         {
@@ -112,15 +114,16 @@ class DoneCardsStorage(BaseStorage):
                             "ms":          time_ms,
                             "started_at":  started_at,
                             "finished_at": finished_at,
+                            "org_id":      organization_id,
                         },
                     )
                 else:
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, started_at, finished_at, ignored)
+                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, started_at, finished_at, ignored, organization_id)
                         VALUES
-                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE)
+                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s)
                         RETURNING id::text
                         """,
                         {
@@ -131,6 +134,7 @@ class DoneCardsStorage(BaseStorage):
                             "ms":          time_ms,
                             "started_at":  started_at,
                             "finished_at": finished_at,
+                            "org_id":      organization_id,
                         },
                     )
 
@@ -142,7 +146,13 @@ class DoneCardsStorage(BaseStorage):
             logger.exception("💾 done_cards UPSERT FAILED guid=%s", card_guid)
             raise
 
-    async def upsert_ignored(self, *, card_guid: str, card_data: str) -> str:
+    async def upsert_ignored(
+        self,
+        *,
+        card_guid: str,
+        card_data: str,
+        organization_id: str | None = None,
+    ) -> str:
         """Insert or update a done_cards row for an ICD-ignored card.
 
         Stores card_guid and raw input; all audit columns are left NULL.
@@ -151,14 +161,15 @@ class DoneCardsStorage(BaseStorage):
             async with self._pool.connection() as conn:
                 cur = await conn.execute(
                     """
-                    INSERT INTO done_cards (card_guid, card_data, ignored)
-                    VALUES (%(guid)s, %(data)s::jsonb, TRUE)
+                    INSERT INTO done_cards (card_guid, card_data, ignored, organization_id)
+                    VALUES (%(guid)s, %(data)s::jsonb, TRUE, %(org_id)s)
                     ON CONFLICT (card_guid) DO UPDATE SET
-                        card_data = EXCLUDED.card_data,
-                        ignored   = TRUE
+                        card_data       = EXCLUDED.card_data,
+                        ignored         = TRUE,
+                        organization_id = EXCLUDED.organization_id
                     RETURNING id::text
                     """,
-                    {"guid": card_guid, "data": card_data},
+                    {"guid": card_guid, "data": card_data, "org_id": organization_id},
                 )
                 row = await cur.fetchone()
             row_id: str = row["id"]

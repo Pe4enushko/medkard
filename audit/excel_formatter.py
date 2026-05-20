@@ -16,6 +16,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -56,22 +57,29 @@ def _parse_diagnosis(data: list[dict]) -> list[DiagnosisResult]:
 
 
 class _DoneCardsReader(BaseStorage):
+    @staticmethod
+    def _decode_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for row in rows:
+            if isinstance(row["card_data"], str):
+                row["card_data"] = json.loads(row["card_data"])
+        return rows
+
     async def fetch_all(self) -> list[dict[str, Any]]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, card_guid, card_data, formal_result, diag_result "
+                "SELECT id, card_guid, card_data::text, formal_result, diag_result "
                 "FROM done_cards ORDER BY id"
             )
-            return await cur.fetchall()
+            return self._decode_rows(await cur.fetchall())
 
     async def fetch_by_guids(self, guids: set[str]) -> list[dict[str, Any]]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, card_guid, card_data, formal_result, diag_result "
+                "SELECT id, card_guid, card_data::text, formal_result, diag_result "
                 "FROM done_cards WHERE card_guid = ANY(%(guids)s) ORDER BY id",
                 {"guids": list(guids)},
             )
-            return await cur.fetchall()
+            return self._decode_rows(await cur.fetchall())
 
 
 def _existing_guids_in_excel(excel: AuditExcelWriter) -> set[str]:

@@ -65,7 +65,8 @@ class AuditPipeline:
     separately by audit.excel_formatter.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, organization_id: str | None = None) -> None:
+        self._organization_id = organization_id
         self._done_cards: DoneCardsStorage | None = None
 
     async def __aenter__(self) -> "AuditPipeline":
@@ -120,6 +121,7 @@ class AuditPipeline:
                 self._done_cards.upsert_ignored(
                     card_guid=_visit_guid(v),
                     card_data=json.dumps(v, ensure_ascii=False),
+                    organization_id=self._organization_id,
                 )
                 for v in ignored_visits
                 if _visit_guid(v)
@@ -331,4 +333,5 @@ class AuditPipeline:
             time_ms=time_ms,
             started_at=started_at,
             finished_at=finished_at,
+            organization_id=self._organization_id,
         )
