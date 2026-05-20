@@ -26,8 +26,9 @@ CREATE TABLE IF NOT EXISTS dietary_supplements (
     country_of_manufacture  TEXT,
     scope_of_application    TEXT,
     label_info              TEXT,
-    registered_at           DATE
+    registered_at           DATE,
+    product_name_tsv        TSVECTOR GENERATED ALWAYS AS (to_tsvector('russian', product_name)) STORED
 );
 
-CREATE INDEX IF NOT EXISTS dietary_supplements_product_name_trgm_idx
-    ON dietary_supplements USING GIN (product_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS dietary_supplements_product_name_tsv_idx
+    ON dietary_supplements USING GIN (product_name_tsv);

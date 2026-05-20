@@ -31,7 +31,11 @@ from RAG.retrieval.searches import (
     search_inspection,
     search_treatment,
 )
+from storage.dietary_supplements_storage import DietarySupplementsStorage
+from storage.drugs_storage import DrugsStorage
+from storage.models.dietary_supplement import DietarySupplement
 from storage.models.doc import Doc
+from storage.models.drug import Drug
 
 
 # ── Input schema (query only — file_id is bound at construction) ─────────────
@@ -67,6 +71,41 @@ def _format_results(results: list[dict]) -> str:
         parts.append(f"--- Источник {i} ---\n{doc._format_chunk()}")
 
     return "\n\n".join(parts)
+
+
+# ── Drug lookup helpers ───────────────────────────────────────────────────────
+
+_DRUG_SCORE_THRESHOLD = 0.85
+
+
+def _format_drug(drug: Drug) -> str:
+    parts = [f"Торговое название: {drug.trade_name}"]
+    if drug.inn_name:
+        parts.append(f"МНН: {drug.inn_name}")
+    if drug.dosage_form:
+        parts.append(f"Форма выпуска: {drug.dosage_form}")
+    if drug.dosage:
+        parts.append(f"Дозировка: {drug.dosage}")
+    if drug.patient_exclusions:
+        parts.append(f"Противопоказания: {drug.patient_exclusions}")
+    return "\n".join(parts)
+
+
+def _format_supplement(s: DietarySupplement) -> str:
+    parts = [f"Наименование: {s.product_name}"]
+    if s.registration_number:
+        parts.append(f"Рег. номер: {s.registration_number}")
+    if s.status:
+        parts.append(f"Статус: {s.status}")
+    if s.manufacturer_name:
+        parts.append(f"Производитель: {s.manufacturer_name}")
+    if s.country_of_manufacture:
+        parts.append(f"Страна: {s.country_of_manufacture}")
+    if s.scope_of_application:
+        parts.append(f"Область применения: {s.scope_of_application}")
+    if s.registered_at:
+        parts.append(f"Дата регистрации: {s.registered_at}")
+    return "\n".join(parts)
 
 
 # ── Tool classes (file_id set as instance attribute) ──────────────────────────
@@ -147,15 +186,56 @@ class SearchTreatmentTool(BaseTool):
         raise NotImplementedError("Use async invocation (_arun).")
 
 
+class SearchMedicineTool(BaseTool):
+    """Look up a drug or dietary supplement by name."""
+
+    name: str = "search_medicine"
+    description: str = (
+        "Look up a drug or dietary supplement by trade name or INN. "
+        "First searches the drugs registry (trigram, threshold 0.85); "
+        "if nothing found, falls back to the dietary supplements registry (full-text). "
+        "Use when you need to verify whether a prescribed substance is a registered drug or supplement."
+    )
+    args_schema: Type[BaseModel] = _QueryInput
+
+    async def _arun(self, query: str) -> str:  # type: ignore[override]
+        async with DrugsStorage() as drugs_storage:
+            inn_matches = await drugs_storage.search_by_inn(query)
+            if inn_matches:
+                inn_name = inn_matches[0].inn_name
+                return f'В реестре наименование было определено как действующее вещество "{inn_name}"'
+
+            drugs = await drugs_storage.search(query, threshold=_DRUG_SCORE_THRESHOLD)
+
+        if drugs:
+            lines = [f"Найдено в реестре лекарственных препаратов ({len(drugs)}):\n"]
+            lines += [f"--- {i} ---\n{_format_drug(d)}" for i, d in enumerate(drugs, 1)]
+            return "\n\n".join(lines)
+
+        async with DietarySupplementsStorage() as supps_storage:
+            supplements = await supps_storage.search(query)
+
+        if supplements:
+            lines = [f"Найдено в реестре БАД ({len(supplements)}):\n"]
+            lines += [f"--- {i} ---\n{_format_supplement(s)}" for i, s in enumerate(supplements, 1)]
+            return "\n\n".join(lines)
+
+        return "Препарат или БАД не найден в реестрах."
+
+    def _run(self, query: str) -> str:  # type: ignore[override]
+        raise NotImplementedError("Use async invocation (_arun).")
+
+
 # ── Public factories ──────────────────────────────────────────────────────────
 
 def get_tools_for(file_id: str) -> list[BaseTool]:
-    """Return all four search tools with *file_id* bound as a class attribute."""
+    """Return all search tools with *file_id* bound as a class attribute."""
     return [
         SearchGuidelineTool(file_id=file_id),
         SearchAnamnesisTool(file_id=file_id),
         SearchInspectionTool(file_id=file_id),
         SearchTreatmentTool(file_id=file_id),
+        SearchMedicineTool(),
     ]
 
 
@@ -180,4 +260,5 @@ def get_treatment_tools_for(file_id: str) -> list[BaseTool]:
     return [
         SearchTreatmentTool(file_id=file_id),
         SearchGuidelineTool(file_id=file_id),
+        SearchMedicineTool(),
     ]

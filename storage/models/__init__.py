@@ -1,4 +1,10 @@
 from .doc import Doc
-from .result import DiagnosisResult, FormalFinding, FormalStructureResult, DiagnisisIssue, IssueSource, Result
+from .dietary_supplement import DietarySupplement
+from .drug import Drug
+from .result import DiagnosisResult, DiagnisisIssue, FormalFinding, FormalStructureResult, IssueSource, Result
 
-__all__ = ["Doc", "DiagnosisResult", "FormalFinding", "FormalStructureResult", "DiagnisisIssue", "IssueSource", "Result"]
+__all__ = [
+    "Doc",
+    "Drug", "DietarySupplement",
+    "DiagnosisResult", "DiagnisisIssue", "FormalFinding", "FormalStructureResult", "IssueSource", "Result",
+]
