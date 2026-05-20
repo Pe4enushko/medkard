@@ -53,7 +53,6 @@ echo "Seeding drugs from '$DRUGS_CSV' ..."
 # Columns: Торговое наименование, МНН, Лекарственная форма, Дозировка, Исключение отдельных групп пациентов
 psql_cmd <<SQL
 TRUNCATE TABLE drugs RESTART IDENTITY;
-
 CREATE TEMP TABLE drugs_staging (
     trade_name         TEXT,
     inn_name           TEXT,
@@ -61,10 +60,11 @@ CREATE TEMP TABLE drugs_staging (
     dosage             TEXT,
     patient_exclusions TEXT
 );
+SQL
 
-\COPY drugs_staging FROM '$DRUGS_CSV'
-    WITH (FORMAT csv, HEADER true, DELIMITER ',', ENCODING 'UTF8', QUOTE '"');
+psql_cmd -c "\COPY drugs_staging FROM '$DRUGS_CSV' WITH (FORMAT csv, HEADER true, DELIMITER ',', ENCODING 'UTF8', QUOTE '\"')"
 
+psql_cmd <<SQL
 INSERT INTO drugs (trade_name, inn_name, dosage_form, dosage, patient_exclusions)
 SELECT
     NULLIF(TRIM(trade_name), ''),
@@ -74,7 +74,6 @@ SELECT
     NULLIF(TRIM(patient_exclusions), '')
 FROM drugs_staging
 WHERE TRIM(trade_name) <> '';
-
 DROP TABLE drugs_staging;
 SQL
 
@@ -93,7 +92,6 @@ echo "Seeding dietary_supplements from '$SUPPLEMENTS_CSV' ..."
 #   16 Информация на этикетке    → label_info
 psql_cmd <<SQL
 TRUNCATE TABLE dietary_supplements RESTART IDENTITY;
-
 CREATE TEMP TABLE supplements_staging (
     col01 TEXT, col02 TEXT, col03 TEXT, col04 TEXT, col05 TEXT,
     col06 TEXT, col07 TEXT, col08 TEXT, col09 TEXT, col10 TEXT,
@@ -104,10 +102,11 @@ CREATE TEMP TABLE supplements_staging (
     col31 TEXT, col32 TEXT, col33 TEXT, col34 TEXT, col35 TEXT,
     col36 TEXT, col37 TEXT, col38 TEXT, col39 TEXT
 );
+SQL
 
-\COPY supplements_staging FROM '$SUPPLEMENTS_CSV'
-    WITH (FORMAT csv, HEADER true, DELIMITER ';', ENCODING 'UTF8', QUOTE '"');
+psql_cmd -c "\COPY supplements_staging FROM '$SUPPLEMENTS_CSV' WITH (FORMAT csv, HEADER true, DELIMITER ';', ENCODING 'UTF8', QUOTE '\"')"
 
+psql_cmd <<SQL
 INSERT INTO dietary_supplements (
     registration_number, status, registered_at,
     product_name, manufacturer_name, country_of_manufacture,
@@ -124,7 +123,6 @@ SELECT
     NULLIF(TRIM(col16), '')
 FROM supplements_staging
 WHERE TRIM(col05) <> '';
-
 DROP TABLE supplements_staging;
 SQL
 
