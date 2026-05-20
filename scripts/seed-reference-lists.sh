@@ -100,6 +100,8 @@ psql_cmd -f "$DRUGS_SQL"
 echo "Seeding dietary_supplements from '$SUPPLEMENTS_CSV' ..."
 
 cat > "$SUPPS_SQL" <<SQL
+SET datestyle = 'DMY';
+
 TRUNCATE TABLE dietary_supplements RESTART IDENTITY;
 
 CREATE TEMP TABLE supplements_staging (
