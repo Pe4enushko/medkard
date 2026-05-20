@@ -4,6 +4,9 @@
 # PDFs (source data — not committed)
 pdfs/
 
+# Reference list CSVs (large files — seed via scripts/seed-reference-lists.sh)
+Dietary supplements.csv
+
 # Logs
 logs/
 
