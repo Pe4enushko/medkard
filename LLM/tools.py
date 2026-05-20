@@ -20,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import logging
 from typing import Type
 
 from langchain_core.tools import BaseTool
@@ -36,6 +37,8 @@ from storage.drugs_storage import DrugsStorage
 from storage.models.dietary_supplement import DietarySupplement
 from storage.models.doc import Doc
 from storage.models.drug import Drug
+
+logger = logging.getLogger(__name__)
 
 
 # ── Input schema (query only — file_id is bound at construction) ─────────────
@@ -203,11 +206,29 @@ class SearchMedicineTool(BaseTool):
             inn_matches = await drugs_storage.search_by_inn(query)
             if inn_matches:
                 inn_name = inn_matches[0].inn_name
+                logger.info(
+                    '💊 Medicine lookup for "%s": found INN "%s". Not searching for drugs anymore.',
+                    query,
+                    inn_name,
+                )
                 return f'В реестре наименование было определено как действующее вещество "{inn_name}"'
 
             drugs = await drugs_storage.search(query, threshold=_DRUG_SCORE_THRESHOLD)
 
         if drugs:
+            logger.info(
+                '💊 Medicine lookup for "%s": found %d drug(s)',
+                query,
+                len(drugs),
+            )
+            for i, drug in enumerate(drugs, 1):
+                logger.info(
+                    '💊 Drug finding %d for "%s": trade_name="%s", inn="%s"',
+                    i,
+                    query,
+                    drug.trade_name,
+                    drug.inn_name,
+                )
             lines = [f"Найдено в реестре лекарственных препаратов ({len(drugs)}):\n"]
             lines += [f"--- {i} ---\n{_format_drug(d)}" for i, d in enumerate(drugs, 1)]
             return "\n\n".join(lines)
@@ -216,10 +237,24 @@ class SearchMedicineTool(BaseTool):
             supplements = await supps_storage.search(query)
 
         if supplements:
+            logger.info(
+                '💊 Medicine lookup for "%s": found %d dietary supplement(s)',
+                query,
+                len(supplements),
+            )
+            for i, supplement in enumerate(supplements, 1):
+                logger.info(
+                    '💊 Dietary supplement finding %d for "%s": product_name="%s", registration_number="%s"',
+                    i,
+                    query,
+                    supplement.product_name,
+                    supplement.registration_number,
+                )
             lines = [f"Найдено в реестре БАД ({len(supplements)}):\n"]
             lines += [f"--- {i} ---\n{_format_supplement(s)}" for i, s in enumerate(supplements, 1)]
             return "\n\n".join(lines)
 
+        logger.info('💊 Medicine lookup for "%s": no registry findings', query)
         return "Препарат или БАД не найден в реестрах."
 
     def _run(self, query: str) -> str:  # type: ignore[override]
