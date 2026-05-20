@@ -12,9 +12,11 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
-while IFS='=' read -r key value; do
-    [[ "$key" =~ ^[[:space:]]*# ]] && continue
-    [[ -z "$key" ]] && continue
+while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// /}" ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
     key="${key// /}"
     export "$key=$value"
 done < "$ENV_FILE"
@@ -47,12 +49,19 @@ psql_cmd() {
         "$@"
 }
 
-echo "Seeding drugs from '$DRUGS_CSV' ..."
+DRUGS_SQL=$(mktemp /tmp/seed-drugs-XXXXXX.sql)
+SUPPS_SQL=$(mktemp /tmp/seed-supps-XXXXXX.sql)
+trap 'rm -f "$DRUGS_SQL" "$SUPPS_SQL"' EXIT
 
+# ── drugs ─────────────────────────────────────────────────────────────────────
 # drugs CSV: comma-separated, UTF-8, has header row.
 # Columns: Торговое наименование, МНН, Лекарственная форма, Дозировка, Исключение отдельных групп пациентов
-psql_cmd <<SQL
+
+echo "Seeding drugs from '$DRUGS_CSV' ..."
+
+cat > "$DRUGS_SQL" <<SQL
 TRUNCATE TABLE drugs RESTART IDENTITY;
+
 CREATE TEMP TABLE drugs_staging (
     trade_name         TEXT,
     inn_name           TEXT,
@@ -60,11 +69,9 @@ CREATE TEMP TABLE drugs_staging (
     dosage             TEXT,
     patient_exclusions TEXT
 );
-SQL
 
-psql_cmd -c "\COPY drugs_staging FROM '$DRUGS_CSV' WITH (FORMAT csv, HEADER true, DELIMITER ',', ENCODING 'UTF8', QUOTE '\"')"
+\COPY drugs_staging FROM '$DRUGS_CSV' WITH (FORMAT csv, HEADER true, DELIMITER ',', ENCODING 'UTF8', QUOTE '"')
 
-psql_cmd <<SQL
 INSERT INTO drugs (trade_name, inn_name, dosage_form, dosage, patient_exclusions)
 SELECT
     NULLIF(TRIM(trade_name), ''),
@@ -74,13 +81,12 @@ SELECT
     NULLIF(TRIM(patient_exclusions), '')
 FROM drugs_staging
 WHERE TRIM(trade_name) <> '';
-DROP TABLE drugs_staging;
 SQL
 
-echo "Seeding dietary_supplements from '$SUPPLEMENTS_CSV' ..."
+psql_cmd -f "$DRUGS_SQL"
 
+# ── dietary_supplements ───────────────────────────────────────────────────────
 # Dietary supplements CSV: semicolon-separated, UTF-8, has header row.
-# We load all columns into a wide staging table, then pick the ones we store.
 # Source column positions (1-based):
 #   1  Номер свидетельства       → registration_number
 #   2  Статус                    → status
@@ -90,8 +96,12 @@ echo "Seeding dietary_supplements from '$SUPPLEMENTS_CSV' ..."
 #   8  Страна изготовителя       → country_of_manufacture
 #   13 Область применения        → scope_of_application
 #   16 Информация на этикетке    → label_info
-psql_cmd <<SQL
+
+echo "Seeding dietary_supplements from '$SUPPLEMENTS_CSV' ..."
+
+cat > "$SUPPS_SQL" <<SQL
 TRUNCATE TABLE dietary_supplements RESTART IDENTITY;
+
 CREATE TEMP TABLE supplements_staging (
     col01 TEXT, col02 TEXT, col03 TEXT, col04 TEXT, col05 TEXT,
     col06 TEXT, col07 TEXT, col08 TEXT, col09 TEXT, col10 TEXT,
@@ -102,11 +112,9 @@ CREATE TEMP TABLE supplements_staging (
     col31 TEXT, col32 TEXT, col33 TEXT, col34 TEXT, col35 TEXT,
     col36 TEXT, col37 TEXT, col38 TEXT, col39 TEXT
 );
-SQL
 
-psql_cmd -c "\COPY supplements_staging FROM '$SUPPLEMENTS_CSV' WITH (FORMAT csv, HEADER true, DELIMITER ';', ENCODING 'UTF8', QUOTE '\"')"
+\COPY supplements_staging FROM '$SUPPLEMENTS_CSV' WITH (FORMAT csv, HEADER true, DELIMITER ';', ENCODING 'UTF8', QUOTE '"')
 
-psql_cmd <<SQL
 INSERT INTO dietary_supplements (
     registration_number, status, registered_at,
     product_name, manufacturer_name, country_of_manufacture,
@@ -123,8 +131,9 @@ SELECT
     NULLIF(TRIM(col16), '')
 FROM supplements_staging
 WHERE TRIM(col05) <> '';
-DROP TABLE supplements_staging;
 SQL
+
+psql_cmd -f "$SUPPS_SQL"
 
 echo "Done. Rows loaded:"
 psql_cmd -c "SELECT 'drugs' AS tbl, COUNT(*) FROM drugs UNION ALL SELECT 'dietary_supplements', COUNT(*) FROM dietary_supplements;"
