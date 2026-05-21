@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,11 +36,11 @@ def _parse_formal(data: list[dict]) -> FormalStructureResult:
 
 
 def _parse_diagnosis(data: list[dict]) -> list[DiagnosisResult]:
-    from storage.models.result import DiagnisisIssue, IssueSource
+    from storage.models.result import DiagnosisIssue, IssueSource
     results = []
     for entry in (data or []):
         issues = [
-            DiagnisisIssue(
+            DiagnosisIssue(
                 issue=iss["issue"],
                 sources=[
                     IssueSource(
@@ -78,6 +79,20 @@ class _DoneCardsReader(BaseStorage):
                 "SELECT id, card_guid, card_data::text, formal_result, diag_result "
                 "FROM done_cards WHERE card_guid = ANY(%(guids)s) ORDER BY id",
                 {"guids": list(guids)},
+            )
+            return self._decode_rows(await cur.fetchall())
+
+    async def fetch_by_period(
+        self, date_from: datetime, date_to: datetime
+    ) -> list[dict[str, Any]]:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT id, card_guid, card_data::text, formal_result, diag_result "
+                "FROM done_cards "
+                "WHERE ignored = FALSE "
+                "  AND finished_at >= %(from)s AND finished_at < %(to)s "
+                "ORDER BY finished_at",
+                {"from": date_from, "to": date_to},
             )
             return self._decode_rows(await cur.fetchall())
 
@@ -142,6 +157,11 @@ class ExcelFormatter:
     async def export_all(self) -> int:
         """Write every done_cards row to Excel. Returns number of rows written."""
         rows = await self._reader.fetch_all()
+        return self._write_rows(rows)
+
+    async def export_period(self, date_from: datetime, date_to: datetime) -> int:
+        """Write done_cards rows whose finished_at falls in [date_from, date_to)."""
+        rows = await self._reader.fetch_by_period(date_from, date_to)
         return self._write_rows(rows)
 
     async def export_guids(self, guids: set[str]) -> int:

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 # FormalFinding and FormalStructureResult live in storage.models.result to avoid
 # circular imports; re-exported here for convenience.
-from storage.models.result import DiagnosisResult, FormalFinding, FormalStructureResult, DiagnisisIssue
+from storage.models.result import DiagnosisResult, FormalFinding, FormalStructureResult, DiagnosisIssue
 
 __all__ = ["DiagnosisResult", "FormalFinding", "FormalStructureResult", "DiagnosisAuditResult"]
 
@@ -21,18 +21,18 @@ __all__ = ["DiagnosisResult", "FormalFinding", "FormalStructureResult", "Diagnos
 class DiagnosisAuditResult:
     """Issues found by the three checker agents for a single diagnosis."""
 
-    anamnesis_issues: list[DiagnisisIssue] = field(default_factory=list)
-    inspection_issues: list[DiagnisisIssue] = field(default_factory=list)
-    treatment_issues: list[DiagnisisIssue] = field(default_factory=list)
+    anamnesis_issues: list[DiagnosisIssue] = field(default_factory=list)
+    inspection_issues: list[DiagnosisIssue] = field(default_factory=list)
+    treatment_issues: list[DiagnosisIssue] = field(default_factory=list)
     guideline_file_id: str | None = None
     icd_code: str | None = None
 
     @property
-    def all_issues(self) -> list[DiagnisisIssue]:
+    def all_issues(self) -> list[DiagnosisIssue]:
         return self.anamnesis_issues + self.inspection_issues + self.treatment_issues
 
     def to_dict(self) -> dict:
-        def _issue_list(issues: list[DiagnisisIssue]) -> list[dict]:
+        def _issue_list(issues: list[DiagnosisIssue]) -> list[dict]:
             return [
                 {
                     "issue": iss.issue,
@@ -63,7 +63,7 @@ class DiagnosisAuditResult:
 
         code = self.icd_code or "—"
 
-        def _section(label: str, issues: list[DiagnisisIssue]) -> str:
+        def _section(label: str, issues: list[DiagnosisIssue]) -> str:
             if not issues:
                 return f"  {label}: OK"
             lines = [f"  {label}:"]
