@@ -70,7 +70,7 @@ class DrugsStorage(BaseStorage):
                 ids.append(row["id"])
         return ids
 
-    async def search(self, query: str, limit: int = 3, threshold: float = 0.3) -> list[Drug]:
+    async def search(self, query: str, limit: int = 6, threshold: float = 0.3) -> list[Drug]:
         """Trigram similarity search on trade_name only.
 
         Only rows whose similarity score meets *threshold* are returned.
@@ -91,7 +91,7 @@ class DrugsStorage(BaseStorage):
             rows = await cur.fetchall()
         return [_row_to_drug(r) for r in rows]
 
-    async def search_by_inn(self, query: str, limit: int = 1) -> list[Drug]:
+    async def search_by_inn(self, query: str, limit: int = 4) -> list[Drug]:
         """Exact case-insensitive match on inn_name."""
         async with self._pool.connection() as conn:
             cur = await conn.execute(
