@@ -12,23 +12,23 @@ class IssueSource:
     cite: str | None = None
 
     def pretty_format(self) -> str:
-        s = f"      source: {self.doc_title}"
+        s = f"      [ИСТОЧНИК]: {self.doc_title}"
         if self.section:
-            s += f" / {self.section}"
+            s += f" / [раздел]{self.section}"
         if self.cite:
-            s += f" — {self.cite}"
+            s += f" — [цитата] {self.cite}"
         return s
 
 
 @dataclass
-class DiagnisisIssue:
+class DiagnosisIssue:
     """One audit finding together with the guideline sources that support it."""
 
     issue: str
     sources: list[IssueSource] = field(default_factory=list)
 
     def pretty_format(self) -> str:
-        lines = [f"    • {self.issue}"]
+        lines = [f"    • [ЗАМЕЧАНИЕ] {self.issue}"]
         lines.extend(src.pretty_format() for src in self.sources)
         return "\n".join(lines)
 
@@ -72,7 +72,7 @@ class DiagnosisResult:
     """Audit result for a single diagnosis entry from the visit."""
 
     icd_code: str
-    issues: list[DiagnisisIssue] = field(default_factory=list)
+    issues: list[DiagnosisIssue] = field(default_factory=list)
 
     def pretty_format(self) -> str:
         if not self.issues:

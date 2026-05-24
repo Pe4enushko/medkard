@@ -33,7 +33,7 @@ from LLM.tools import (
 )
 from audit.diagnosis.clinic_recs import ClinicRecs
 from audit.models import DiagnosisAuditResult
-from storage.models.result import DiagnisisIssue, IssueSource
+from storage.models.result import DiagnosisIssue, IssueSource
 
 # ── Checker prompts ───────────────────────────────────────────────────────────
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "LLM" / "prompts"
@@ -51,7 +51,7 @@ _TREATMENT_PROMPT: str = _load_prompt("treatment_checker.txt")
 
 @dataclass
 class _CheckerRun:
-    issues: list[DiagnisisIssue]
+    issues: list[DiagnosisIssue]
 
 
 def _parse_inspection_data(raw_visit: dict[str, Any]) -> str:
@@ -79,7 +79,7 @@ def _format_diagnosis(diagnosis: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _parse_issues(output: str) -> list[DiagnisisIssue]:
+def _parse_issues(output: str) -> list[DiagnosisIssue]:
     """Parse a checker agent's JSON output into a list of Issue objects."""
     text = output.strip()
     if text.startswith("```"):
@@ -97,7 +97,7 @@ def _parse_issues(output: str) -> list[DiagnisisIssue]:
     if not isinstance(raw, list):
         return []
 
-    issues: list[DiagnisisIssue] = []
+    issues: list[DiagnosisIssue] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -113,7 +113,7 @@ def _parse_issues(output: str) -> list[DiagnisisIssue]:
             for s in item.get("sources", [])
             if isinstance(s, dict)
         ]
-        issues.append(DiagnisisIssue(issue=issue_text, sources=sources))
+        issues.append(DiagnosisIssue(issue=issue_text, sources=sources))
     return issues
 
 
@@ -175,9 +175,9 @@ class DiagnosisValidator:
         file_id, clinic_tokens = await self._clinic_recs.pick_recs(patient, diagnosis)
         logger.info("[diagnosis] guideline file_id picked: %s", file_id)
 
-        anamnesis_issues: list[DiagnisisIssue] = []
-        inspection_issues: list[DiagnisisIssue] = []
-        treatment_issues: list[DiagnisisIssue] = []
+        anamnesis_issues: list[DiagnosisIssue] = []
+        inspection_issues: list[DiagnosisIssue] = []
+        treatment_issues: list[DiagnosisIssue] = []
         checker_tokens = 0
 
         if file_id:

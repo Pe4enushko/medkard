@@ -90,24 +90,16 @@ def _format_drug(drug: Drug) -> str:
     if drug.dosage:
         parts.append(f"Дозировка: {drug.dosage}")
     if drug.patient_exclusions:
-        parts.append(f"Противопоказания: {drug.patient_exclusions}")
+        parts.append(f"Исключение отдельных групп пациентов: {drug.patient_exclusions}")
     return "\n".join(parts)
 
 
 def _format_supplement(s: DietarySupplement) -> str:
     parts = [f"Наименование: {s.product_name}"]
-    if s.registration_number:
-        parts.append(f"Рег. номер: {s.registration_number}")
     if s.status:
         parts.append(f"Статус: {s.status}")
-    if s.manufacturer_name:
-        parts.append(f"Производитель: {s.manufacturer_name}")
-    if s.country_of_manufacture:
-        parts.append(f"Страна: {s.country_of_manufacture}")
-    if s.scope_of_application:
-        parts.append(f"Область применения: {s.scope_of_application}")
-    if s.registered_at:
-        parts.append(f"Дата регистрации: {s.registered_at}")
+    if s.label_info:
+        parts.append(f"Информация на этикетке: {s.label_info}")
     return "\n".join(parts)
 
 
@@ -194,10 +186,10 @@ class SearchMedicineTool(BaseTool):
 
     name: str = "search_medicine"
     description: str = (
-        "Look up a drug or dietary supplement by trade name or INN. "
+        "Look up a drug or dietary supplement by trade name or INN. Just provide the name as the query without extra information. "
         "First searches the drugs registry (trigram, threshold 0.85); "
         "if nothing found, falls back to the dietary supplements registry (full-text). "
-        "Use when you need to verify whether a prescribed substance is a registered drug or supplement."
+        "Use when you need to verify whether a prescribed substance is a registered drug or supplement. And when you need to get its details (dosage, form, etc.) from the registry."
     )
     args_schema: Type[BaseModel] = _QueryInput
 
