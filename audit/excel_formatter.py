@@ -87,11 +87,16 @@ class _DoneCardsReader(BaseStorage):
     ) -> list[dict[str, Any]]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
+                "WITH cards AS ("
+                "  SELECT id, card_guid, card_data, formal_result, diag_result, "
+                "         to_date(card_data -> 'Прием' ->> 'DATE', 'DD.MM.YYYY') AS visit_date "
+                "  FROM done_cards "
+                "  WHERE ignored = FALSE"
+                ") "
                 "SELECT id, card_guid, card_data::text, formal_result, diag_result "
-                "FROM done_cards "
-                "WHERE ignored = FALSE "
-                "  AND finished_at >= %(from)s AND finished_at < %(to)s "
-                "ORDER BY finished_at",
+                "FROM cards "
+                "WHERE visit_date >= %(from)s::date AND visit_date < %(to)s::date "
+                "ORDER BY visit_date, id",
                 {"from": date_from, "to": date_to},
             )
             return self._decode_rows(await cur.fetchall())
@@ -160,7 +165,7 @@ class ExcelFormatter:
         return self._write_rows(rows)
 
     async def export_period(self, date_from: datetime, date_to: datetime) -> int:
-        """Write done_cards rows whose finished_at falls in [date_from, date_to)."""
+        """Write rows whose card_data appointment date falls in [date_from, date_to)."""
         rows = await self._reader.fetch_by_period(date_from, date_to)
         return self._write_rows(rows)
 
