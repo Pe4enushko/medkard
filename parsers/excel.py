@@ -160,6 +160,10 @@ class AuditExcelWriter:
             ]
             wb, ws = self._open_or_create()
             ws.append(row)
+            new_row = ws.max_row
+            for col_letter in _WRAPPED_COLUMNS:
+                col_idx = openpyxl.utils.column_index_from_string(col_letter)
+                ws.cell(row=new_row, column=col_idx).alignment = Alignment(wrap_text=True, vertical="top")
             wb.save(self._path)
             logger.info("📊 EXCEL APPEND OK path=%s", self._path)
         except Exception:
