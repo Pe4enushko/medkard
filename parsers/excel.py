@@ -34,9 +34,9 @@ from audit.models import FormalStructureResult
 
 _HEADERS = ["input", "formal_structure", "diagnosis"]
 _COLUMN_WIDTHS = {
-    "A": 100,
+    "A": 80,
     "B": 80,
-    "C": 120,
+    "C": 100,
 }
 _WRAPPED_COLUMNS = tuple(_COLUMN_WIDTHS)
 logger = logging.getLogger(__name__)
