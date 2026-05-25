@@ -203,7 +203,7 @@ class SearchMedicineTool(BaseTool):
                     query,
                     inn_name,
                 )
-                return f'В реестре наименование было определено как действующее вещество "{inn_name}"'
+                return f'В реестре ЕСКЛП наименование было определено как действующее вещество "{inn_name}"'
 
             drugs = await drugs_storage.search(query, threshold=_DRUG_SCORE_THRESHOLD)
 
@@ -221,7 +221,7 @@ class SearchMedicineTool(BaseTool):
                     drug.trade_name,
                     drug.inn_name,
                 )
-            lines = [f"Найдено в реестре лекарственных препаратов ({len(drugs)}):\n"]
+            lines = [f"Найдено как лекарственное средство в реестре ЕСКЛП ({len(drugs)}):\n"]
             lines += [f"--- {i} ---\n{_format_drug(d)}" for i, d in enumerate(drugs, 1)]
             return "\n\n".join(lines)
 
@@ -242,7 +242,7 @@ class SearchMedicineTool(BaseTool):
                     supplement.product_name,
                     supplement.registration_number,
                 )
-            lines = [f"Найдено в реестре БАД ({len(supplements)}):\n"]
+            lines = [f"Найдено как БАД в Едином реестре свидетельств о государственной регистрации ({len(supplements)}):\n"]
             lines += [f"--- {i} ---\n{_format_supplement(s)}" for i, s in enumerate(supplements, 1)]
             return "\n\n".join(lines)
 
