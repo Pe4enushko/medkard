@@ -4,13 +4,14 @@ Fetch appointments from 1C for a configured period, save the raw JSON
 snapshot, run the full audit pipeline, then export results to Excel.
 
 Run from project root:
-    python scripts/audit-one-c-period.py [--days N] [--ignore-icd CODE ...] [--excel PATH] [--num-batches N]
+    python scripts/audit-one-c-period.py [--days N] [--ignore-icd CODE ...] [--excel PATH] [--num-batches N] [--ftpcreds FILE]
 
 Options:
     --days         Shift datebegin N days back from today (default: 0)
     --ignore-icd   ICD codes to ignore, e.g. Z00.0 J06.9
     --excel        Output xlsx file (default: audit_results.xlsx)
     --num-batches  Max concurrent visits processed at a time (default: 5)
+    --ftpcreds     Credentials file for FTP upload (ip=, port=, username=, password=)
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 
 from audit.excel_formatter import ExcelFormatter
 from audit.pipeline import AuditPipeline
+from integrations.ftp import load_creds, upload
 from integrations.one_c import OneCClient
 from RAG.retrieval.vector_store import close_pool
 
@@ -37,8 +39,9 @@ _parser = argparse.ArgumentParser()
 _parser.add_argument("--days", type=int, default=0, help="Shift datebegin N days back from today")
 _parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
 _parser.add_argument("--ignore-icd", nargs="*", default=[], metavar="CODE", help="ICD codes to ignore (e.g. Z00.0 J06.9)")
-_parser.add_argument("--excel", default=str(ROOT / "audit_results.xlsx"), metavar="PATH", help="Output xlsx file (default: audit_results.xlsx)")
+_parser.add_argument("--excel", default=None, metavar="PATH", help="Output xlsx file (default: report_<datebegin>_to_<dateend>.xlsx)")
 _parser.add_argument("--num-batches", type=int, default=5, metavar="N", help="Max concurrent visits processed at a time (default: 5)")
+_parser.add_argument("--ftpcreds", default=None, metavar="FILE", help="Credentials file for FTP upload (ip=, port=, username=, password=)")
 _args = _parser.parse_args()
 
 IGNORE_ICD: list[str] = _args.ignore_icd
@@ -47,7 +50,8 @@ IGNORE_ICD: list[str] = _args.ignore_icd
 DATEBEGIN = (datetime.now() - timedelta(days=_args.days)).strftime("%d.%m.%Y")
 DATEEND   = datetime.now().strftime("%d.%m.%Y")
 
-EXCEL_PATH         = Path(_args.excel)
+_safe = lambda s: "".join(c if c.isalnum() else "-" for c in s)
+EXCEL_PATH = Path(_args.excel) if _args.excel else ROOT / f"report_{_safe(DATEBEGIN)}_to_{_safe(DATEEND)}.xlsx"
 DATA_SNAPSHOTS_DIR = ROOT / "data_snapshots"
 LOGS_DIR           = ROOT / "logs"
 
@@ -131,6 +135,12 @@ async def main() -> None:
             async with ExcelFormatter(EXCEL_PATH) as fmt:
                 written = await fmt.export_guids(new_guids)
             log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)
+            if _args.ftpcreds and written:
+                try:
+                    creds = load_creds(_args.ftpcreds)
+                    upload(EXCEL_PATH, EXCEL_PATH.name, creds)
+                except (FileNotFoundError, ValueError) as e:
+                    log.error("FTP upload failed: %s", e)
         else:
             log.info("📊 No guid-bearing cards to export; skipping Excel write")
 

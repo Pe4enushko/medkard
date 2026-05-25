@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import ftplib
 import logging
 import sys
 import tempfile
@@ -30,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from audit.excel_formatter import ExcelFormatter  # noqa: E402
+from integrations.ftp import load_creds, upload   # noqa: E402
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 _parser = argparse.ArgumentParser(description="Create Excel report and upload to FTP")
@@ -46,28 +46,13 @@ def _parse_date(value: str, label: str) -> datetime:
         _parser.error(f"--{label}: expected YYYY-MM-DD, got {value!r}")
 
 
-def _load_creds(path: str) -> dict[str, str]:
-    creds: dict[str, str] = {}
-    required = {"ip", "port", "username", "password"}
-    try:
-        for line in Path(path).read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            key, _, value = line.partition("=")
-            creds[key.strip()] = value.strip()
-    except FileNotFoundError:
-        _parser.error(f"--creds: file not found: {path!r}")
-    missing = required - creds.keys()
-    if missing:
-        _parser.error(f"--creds: missing keys: {', '.join(sorted(missing))}")
-    return creds
+try:
+    creds = load_creds(_args.creds)
+except (FileNotFoundError, ValueError) as e:
+    _parser.error(f"--creds: {e}")
 
-
-date_from = _parse_date(_args.date_from, "from")
-date_to   = _parse_date(_args.date_to,   "to") + timedelta(days=1)
-creds     = _load_creds(_args.creds)
-
+date_from  = _parse_date(_args.date_from, "from")
+date_to    = _parse_date(_args.date_to,   "to") + timedelta(days=1)
 _auto_name = f"report_{_args.date_from}_to_{_args.date_to}.xlsx"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -77,39 +62,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 log = logging.getLogger(__name__)
-
-
-def _ftp_makedirs(ftp: ftplib.FTP, path: str) -> None:
-    """Create remote directory tree, skipping parts that already exist."""
-    parts = [p for p in path.split("/") if p]
-    current = ""
-    for part in parts:
-        current += f"/{part}"
-        try:
-            ftp.mkd(current)
-        except ftplib.error_perm as e:
-            if "550" not in str(e):
-                raise
-
-
-def _upload(local_path: Path, remote_filename: str) -> None:
-    now = datetime.now()
-    remote_dir = f"/{now.year}/{now.month:02d}"
-    remote_path = f"{remote_dir}/{remote_filename}"
-
-    log.info("Connecting to FTP %s:%s", creds["ip"], creds["port"])
-    with ftplib.FTP() as ftp:
-        ftp.connect(host=creds["ip"], port=int(creds["port"]))
-        ftp.login(user=creds["username"], passwd=creds["password"])
-        ftp.set_pasv(True)
-
-        _ftp_makedirs(ftp, remote_dir)
-        ftp.cwd(remote_dir)
-
-        with local_path.open("rb") as f:
-            ftp.storbinary(f"STOR {remote_filename}", f)
-
-    log.info("Uploaded → ftp://%s%s", creds["ip"], remote_path)
 
 
 async def main() -> None:
@@ -124,7 +76,7 @@ async def main() -> None:
             return
 
         log.info("Wrote %d row(s), uploading to FTP…", written)
-        _upload(local_path, _auto_name)
+        upload(local_path, _auto_name, creds)
 
 
 if __name__ == "__main__":
