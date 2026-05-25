@@ -27,11 +27,18 @@ from typing import Any
 
 import openpyxl
 from openpyxl import Workbook
+from openpyxl.styles import Alignment
 from openpyxl.worksheet.worksheet import Worksheet
 
 from audit.models import FormalStructureResult
 
 _HEADERS = ["input", "formal_structure", "diagnosis"]
+_COLUMN_WIDTHS = {
+    "A": 70,
+    "B": 55,
+    "C": 85,
+}
+_WRAPPED_COLUMNS = tuple(_COLUMN_WIDTHS)
 logger = logging.getLogger(__name__)
 
 
@@ -125,6 +132,11 @@ class AuditExcelWriter:
             ws.delete_cols(4, 1)
         for idx, header in enumerate(_HEADERS, start=1):
             ws.cell(row=1, column=idx, value=header)
+        for column, width in _COLUMN_WIDTHS.items():
+            ws.column_dimensions[column].width = width
+        for column in _WRAPPED_COLUMNS:
+            for cell in ws[column]:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
         return wb, ws  # type: ignore[return-value]
 
     def append(
