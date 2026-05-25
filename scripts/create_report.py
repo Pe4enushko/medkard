@@ -4,7 +4,7 @@ Export done_cards rows for a date range to an Excel report.
 
 Run from project root:
     python scripts/create_report.py --from 2024-01-01 --to 2024-01-31
-    python scripts/create_report.py --from 2024-01-01 --to 2024-01-31 --excel my_report.xlsx
+    python scripts/create_report.py --from 2024-01-01 --to 2024-01-31 --output /some/dir
 
 Dates are inclusive on both ends (time range: 00:00:00 of date_from
 to 23:59:59.999… of date_to).
@@ -28,7 +28,7 @@ from audit.excel_formatter import ExcelFormatter  # noqa: E402
 _parser = argparse.ArgumentParser(description="Create Excel report from done_cards for a date range")
 _parser.add_argument("--from", dest="date_from", required=True, metavar="YYYY-MM-DD", help="Start date (inclusive)")
 _parser.add_argument("--to",   dest="date_to",   required=True, metavar="YYYY-MM-DD", help="End date (inclusive)")
-_parser.add_argument("--excel", default=None, metavar="PATH", help="Output xlsx file (default: report_<from>_<to>.xlsx)")
+_parser.add_argument("--output", default=None, metavar="DIR", help="Directory for the report file (default: project root)")
 _args = _parser.parse_args()
 
 
@@ -42,11 +42,8 @@ def _parse_date(value: str, label: str) -> datetime:
 date_from = _parse_date(_args.date_from, "from")
 date_to   = _parse_date(_args.date_to,   "to") + timedelta(days=1)  # make end-inclusive
 
-excel_path = Path(
-    _args.excel
-    if _args.excel
-    else ROOT / f"report_{_args.date_from}_to_{_args.date_to}.xlsx"
-)
+_auto_name = f"report_{_args.date_from}_to_{_args.date_to}.xlsx"
+excel_path = Path(_args.output) / _auto_name if _args.output else ROOT / _auto_name
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
