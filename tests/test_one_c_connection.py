@@ -1,7 +1,8 @@
 """
 Test 1C connection — fetches today's JSON payload and prints it.
 
-Requires ONE_C_APPOINTMENTS_URL, ONE_C_LOGIN, ONE_C_PASSWORD env vars to be set.
+Requires ALENKA_ONE_C_APPOINTMENTS_URL, ALENKA_ONE_C_LOGIN,
+ALENKA_ONE_C_PASSWORD env vars to be set.
 """
 
 import json

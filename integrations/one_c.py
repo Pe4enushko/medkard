@@ -13,6 +13,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class OneCClient:
+    appointments_url_env = "ALENKA_ONE_C_APPOINTMENTS_URL"
+    login_env = "ALENKA_ONE_C_LOGIN"
+    password_env = "ALENKA_ONE_C_PASSWORD"
+    timeout_seconds_env = "ALENKA_ONE_C_TIMEOUT_SECONDS"
+
     def __init__(
         self,
         url: str,
@@ -28,10 +33,10 @@ class OneCClient:
     @classmethod
     def from_env(cls) -> "OneCClient":
         return cls(
-            url=os.environ["ONE_C_APPOINTMENTS_URL"],
-            login=os.environ["ONE_C_LOGIN"],
-            password=os.environ["ONE_C_PASSWORD"],
-            timeout_seconds=float(os.environ.get("ONE_C_TIMEOUT_SECONDS", 15)),
+            url=os.environ[cls.appointments_url_env],
+            login=os.environ[cls.login_env],
+            password=os.environ[cls.password_env],
+            timeout_seconds=float(os.environ.get(cls.timeout_seconds_env, 15)),
         )
 
     def fetch_json_for_period(self, datebegin: str, dateend: str) -> Any:
@@ -42,9 +47,9 @@ class OneCClient:
             dateend: Period end date in format expected by 1C (e.g. DD.MM.YYYY).
         """
         if not self.url or self.url.startswith("<"):
-            raise ValueError("Set real ONE_C_APPOINTMENTS_URL in environment")
+            raise ValueError(f"Set real {self.appointments_url_env} in environment")
         if not self.login or not self.password:
-            raise ValueError("ONE_C_LOGIN and ONE_C_PASSWORD must be set")
+            raise ValueError(f"{self.login_env} and {self.password_env} must be set")
 
         token = base64.b64encode(f"{self.login}:{self.password}".encode("utf-8")).decode("ascii")
         query_params = urllib.parse.urlencode({"datebegin": datebegin, "dateend": dateend})
@@ -66,3 +71,14 @@ class OneCClient:
         """Fetch raw JSON from 1C for today's date and return it as-is."""
         current_day = datetime.now().strftime("%d.%m.%Y")
         return self.fetch_json_for_period(datebegin=current_day, dateend=current_day)
+
+
+class AlenkaOneCClient(OneCClient):
+    pass
+
+
+class MdsOneCClient(OneCClient):
+    appointments_url_env = "MDS_ONE_C_APPOINTMENTS_URL"
+    login_env = "MDS_ONE_C_LOGIN"
+    password_env = "MDS_ONE_C_PASSWORD"
+    timeout_seconds_env = "MDS_ONE_C_TIMEOUT_SECONDS"

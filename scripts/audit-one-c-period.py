@@ -4,9 +4,10 @@ Fetch appointments from 1C for a configured period, save the raw JSON
 snapshot, run the full audit pipeline, then export results to Excel.
 
 Run from project root:
-    python scripts/audit-one-c-period.py [--days N] [--ignore-icd CODE ...] [--excel PATH] [--num-batches N] [--ftpcreds FILE]
+    python scripts/audit-one-c-period.py ORG [--days N] [--ignore-icd CODE ...] [--excel PATH] [--num-batches N] [--ftpcreds FILE]
 
 Options:
+    ORG            1C organization: Alenka or MDS
     --days         Shift datebegin N days back from today (default: 0)
     --ignore-icd   ICD codes to ignore, e.g. Z00.0 J06.9
     --excel        Output xlsx file (default: audit_results.xlsx)
@@ -31,11 +32,13 @@ sys.path.insert(0, str(ROOT))
 from audit.excel_formatter import ExcelFormatter
 from audit.pipeline import AuditPipeline
 from integrations.ftp import load_creds, upload
-from integrations.one_c import OneCClient
+from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient
 from RAG.retrieval.vector_store import close_pool
+from storage.organizations_storage import OrganizationsStorage
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 _parser = argparse.ArgumentParser()
+_parser.add_argument("org", choices=("Alenka", "MDS"), help="1C organization")
 _parser.add_argument("--days", type=int, default=0, help="Shift datebegin N days back from today")
 _parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
 _parser.add_argument("--ignore-icd", nargs="*", default=[], metavar="CODE", help="ICD codes to ignore (e.g. Z00.0 J06.9)")
@@ -45,6 +48,10 @@ _parser.add_argument("--ftpcreds", default=None, metavar="FILE", help="Credentia
 _args = _parser.parse_args()
 
 IGNORE_ICD: list[str] = _args.ignore_icd
+ONE_C_CLIENTS: dict[str, type[OneCClient]] = {
+    "Alenka": AlenkaOneCClient,
+    "MDS": MdsOneCClient,
+}
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DATEBEGIN = (datetime.now() - timedelta(days=_args.days)).strftime("%d.%m.%Y")
@@ -77,20 +84,20 @@ def _safe_period_part(value: str) -> str:
     return "".join(char if char.isalnum() else "-" for char in value).strip("-")
 
 
-def _cache_path_for_period(datebegin: str, dateend: str) -> Path:
+def _cache_path_for_period(org: str, datebegin: str, dateend: str) -> Path:
     safe_datebegin = _safe_period_part(datebegin)
     safe_dateend = _safe_period_part(dateend)
-    return DATA_SNAPSHOTS_DIR / f"one_c_{safe_datebegin}_to_{safe_dateend}.json"
+    return DATA_SNAPSHOTS_DIR / f"one_c_{org}_{safe_datebegin}_to_{safe_dateend}.json"
 
 
-def _load_or_fetch_one_c_payload(datebegin: str, dateend: str) -> Any:
-    cache_path = _cache_path_for_period(datebegin, dateend)
+def _load_or_fetch_one_c_payload(org: str, datebegin: str, dateend: str) -> Any:
+    cache_path = _cache_path_for_period(org, datebegin, dateend)
     if cache_path.exists():
         log.info("Using cached 1C response: %s", cache_path)
         return json.loads(cache_path.read_text(encoding="utf-8"))
 
     log.info("No cached 1C response found for period; fetching from 1C")
-    client = OneCClient.from_env()
+    client = ONE_C_CLIENTS[org].from_env()
     payload = client.fetch_json_for_period(datebegin=datebegin, dateend=dateend)
     cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     log.info("Cached 1C response: %s", cache_path)
@@ -109,14 +116,17 @@ def _confirm_period(datebegin: str, dateend: str) -> None:
 
 async def main() -> None:
     _confirm_period(DATEBEGIN, DATEEND)
-    log.info("🩺 Starting period audit: datebegin=%s dateend=%s", DATEBEGIN, DATEEND)
+    log.info("🩺 Starting period audit: org=%s datebegin=%s dateend=%s", _args.org, DATEBEGIN, DATEEND)
 
     try:
+        async with OrganizationsStorage() as organizations:
+            org_id = await organizations.get_id_by_name(_args.org)
+
         # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────
-        payload = _load_or_fetch_one_c_payload(datebegin=DATEBEGIN, dateend=DATEEND)
+        payload = _load_or_fetch_one_c_payload(org=_args.org, datebegin=DATEBEGIN, dateend=DATEEND)
 
         # ── 2. Run pipeline — each card is persisted to DB on completion ──────
-        async with AuditPipeline() as pipeline:
+        async with AuditPipeline(org_id=org_id) as pipeline:
             pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches, ignore_icd=IGNORE_ICD or None)
         log.info("Pipeline done: %d result(s)", len(pairs))
 

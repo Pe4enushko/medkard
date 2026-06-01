@@ -14,9 +14,10 @@ Run migrations in `migrations/` against your Postgres DB.
 Fetches visits from 1C for a period and audits them.
 
 ```
-python scripts/audit-one-c-period.py [--days N] [--ignore-icd CODE ...] [--excel PATH]
+python scripts/audit-one-c-period.py {Alenka,MDS} [--days N] [--ignore-icd CODE ...] [--excel PATH]
 ```
 
+- `{Alenka,MDS}` — 1C organization to fetch visits from
 - `--days N` — start date is N days before today (default: today)
 - `--ignore-icd Z00.0 J06.9 ...` — skip visits where every diagnosis is in this list
 - `--excel PATH` — output xlsx file (default: `audit_results.xlsx`)
