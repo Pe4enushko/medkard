@@ -17,6 +17,7 @@ class OneCClient:
     login_env = "ALENKA_ONE_C_LOGIN"
     password_env = "ALENKA_ONE_C_PASSWORD"
     timeout_seconds_env = "ALENKA_ONE_C_TIMEOUT_SECONDS"
+    requires_password = True
 
     def __init__(
         self,
@@ -35,7 +36,7 @@ class OneCClient:
         return cls(
             url=os.environ[cls.appointments_url_env],
             login=os.environ[cls.login_env],
-            password=os.environ[cls.password_env],
+            password=os.environ[cls.password_env] if cls.requires_password else os.environ.get(cls.password_env, ""),
             timeout_seconds=float(os.environ.get(cls.timeout_seconds_env, 15)),
         )
 
@@ -48,8 +49,10 @@ class OneCClient:
         """
         if not self.url or self.url.startswith("<"):
             raise ValueError(f"Set real {self.appointments_url_env} in environment")
-        if not self.login or not self.password:
-            raise ValueError(f"{self.login_env} and {self.password_env} must be set")
+        if not self.login:
+            raise ValueError(f"{self.login_env} must be set")
+        if self.requires_password and not self.password:
+            raise ValueError(f"{self.password_env} must be set")
 
         token = base64.b64encode(f"{self.login}:{self.password}".encode("utf-8")).decode("ascii")
         query_params = urllib.parse.urlencode({"datebegin": datebegin, "dateend": dateend})
@@ -82,3 +85,4 @@ class MdsOneCClient(OneCClient):
     login_env = "MDS_ONE_C_LOGIN"
     password_env = "MDS_ONE_C_PASSWORD"
     timeout_seconds_env = "MDS_ONE_C_TIMEOUT_SECONDS"
+    requires_password = False

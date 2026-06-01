@@ -104,7 +104,8 @@ def _load_or_fetch_one_c_payload(org: str, datebegin: str, dateend: str) -> Any:
     return payload
 
 
-def _confirm_period(datebegin: str, dateend: str) -> None:
+def _confirm_period(org: str, datebegin: str, dateend: str) -> None:
+    print(f"Organization: {org}")
     print(f"Period: {datebegin} — {dateend}")
     if _args.y:
         return
@@ -115,7 +116,7 @@ def _confirm_period(datebegin: str, dateend: str) -> None:
 
 
 async def main() -> None:
-    _confirm_period(DATEBEGIN, DATEEND)
+    _confirm_period(_args.org, DATEBEGIN, DATEEND)
     log.info("🩺 Starting period audit: org=%s datebegin=%s dateend=%s", _args.org, DATEBEGIN, DATEEND)
 
     try:
