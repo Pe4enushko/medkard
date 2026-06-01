@@ -18,40 +18,20 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
-import instructor
-from dotenv import load_dotenv
-from openai import AsyncOpenAI
 from pydantic import BaseModel
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# ── Configurable ──────────────────────────────────────────────────────────────
-MODEL: str = os.environ.get("LLM_MODEL", "openai/gpt-oss-20b")
+from LLM.base import MODEL, get_instructor_client
+
 SCHEMAS_DIR: Path = Path(__file__).parent / "schemas"
-# ─────────────────────────────────────────────────────────────────────────────
 
 _JSON_SCHEMA: dict = json.loads(
     (SCHEMAS_DIR / "formal_structure_findings.json").read_text(encoding="utf-8")
 )
-
-_client: instructor.AsyncInstructor | None = None
-
-
-def _get_client() -> instructor.AsyncInstructor:
-    global _client
-    if _client is None:
-        base_url = os.environ.get("OPENAI_BASE_URL")
-        _client = instructor.from_openai(
-            AsyncOpenAI(base_url=base_url) if base_url else AsyncOpenAI(),
-            mode=instructor.Mode.JSON,
-        )
-    return _client
 
 
 class _Finding(BaseModel):
@@ -83,7 +63,7 @@ async def validate_visit(
     Returns:
         List of finding dicts: [{"flag": ..., "issue": ...}, ...]
     """
-    resolved_client = client or _get_client()
+    resolved_client = client or get_instructor_client()
     visit_text = json.dumps(visit, ensure_ascii=False, indent=2)
 
     result, completion = await resolved_client.chat.completions.create_with_completion(

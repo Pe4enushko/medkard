@@ -25,7 +25,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+from LLM.chinese_detector import ChineseDetector
 from LLM.rag_agent import _sum_agent_tokens, create_checker_agent
+
+_chinese_detector = ChineseDetector()
 from LLM.tools import (
     get_anamnesis_tools_for,
     get_inspection_tools_for,
@@ -140,6 +143,11 @@ async def _run_checker(
         )
     logger.info("🤖 [checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
+    for i, issue in enumerate(issues):
+        if _chinese_detector.check_str(issue.issue):
+            repaired, repair_tokens = await _chinese_detector.repair_issue(issue.issue)
+            issues[i] = DiagnosisIssue(issue=repaired, sources=issue.sources)
+            tokens += repair_tokens
     logger.debug("[checker:%s] parsed %d issue(s), tokens=%d", checker_label, len(issues), tokens)
     return _CheckerRun(issues=issues), tokens
 

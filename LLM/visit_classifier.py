@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
-from openai import AsyncOpenAI
-
 logger = logging.getLogger(__name__)
+
+from LLM.base import MODEL, get_openai_client
 
 _PROMPT: str = (Path(__file__).parent / "prompts" / "visit_type_classifier.txt").read_text(encoding="utf-8")
 _VALID_LABELS = {"primary", "repeat", "prophylactic"}
@@ -34,11 +33,8 @@ class VisitClassifier:
         Args:
             visit: Raw visit dict (as parsed from the source JSON).
         """
-        client = AsyncOpenAI(base_url=os.environ.get("OPENAI_BASE_URL") or None)
-        model = os.environ.get("LLM_MODEL", "openai/gpt-oss-20b")
-
-        resp = await client.chat.completions.create(
-            model=model,
+        resp = await get_openai_client().chat.completions.create(
+            model=MODEL,
             messages=[
                 {"role": "system", "content": _PROMPT},
                 {"role": "user", "content": json.dumps(visit, ensure_ascii=False, indent=2)},
