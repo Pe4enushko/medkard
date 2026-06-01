@@ -3,7 +3,9 @@
 -- Metrics are grouped by organization and visit date so callers can filter:
 --     SELECT * FROM done_cards_metrics WHERE organization_name = 'Alenka';
 
-CREATE OR REPLACE VIEW done_cards_metrics AS
+DROP VIEW IF EXISTS done_cards_metrics;
+
+CREATE VIEW done_cards_metrics AS
 WITH cards AS (
     SELECT
         organizations.name AS organization_name,

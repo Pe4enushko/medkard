@@ -13,7 +13,9 @@
 -- parallel cards would be double-counted. Instead, merge overlapping
 -- started_at/finished_at intervals and sum the merged intervals.
 
-CREATE OR REPLACE VIEW done_cards_metrics AS
+DROP VIEW IF EXISTS done_cards_metrics;
+
+CREATE VIEW done_cards_metrics AS
 WITH cards AS (
     SELECT
         to_date(card_data -> 'Прием' ->> 'DATE', 'DD.MM.YYYY') AS visit_date,
