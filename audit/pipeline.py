@@ -111,7 +111,7 @@ class AuditPipeline:
             where ``elapsed_ms`` is the wall-clock time for that card in milliseconds.
         """
         if done_guids is None:
-            done_guids = await self._done_cards.get_done_guids()
+            done_guids = await self._done_cards.get_done_guids(organization_id=self._org_id)
 
         appointments = _split_appointments(raw_input)
         pending, ignored_visits, skipped_done, skipped_icd = self._filter_pending_appointments(appointments, done_guids, ignore_icd)

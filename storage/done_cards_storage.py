@@ -179,13 +179,16 @@ class DoneCardsStorage(BaseStorage):
             logger.exception("💾 done_cards UPSERT_IGNORED FAILED guid=%s", card_guid)
             raise
 
-    async def get_done_guids(self) -> set[str]:
-        """Return the set of all non-null card_guid values in done_cards (including ignored)."""
+    async def get_done_guids(self, organization_id: str | None = None) -> set[str]:
+        """Return non-null card GUIDs for an organization, including ignored cards."""
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT card_guid FROM done_cards WHERE card_guid IS NOT NULL"
+                "SELECT card_guid FROM done_cards "
+                "WHERE card_guid IS NOT NULL "
+                "AND organization_id IS NOT DISTINCT FROM %(org_id)s",
+                {"org_id": organization_id},
             )
             rows = await cur.fetchall()
         guids = {row["card_guid"] for row in rows}
-        logger.info("💾 done_cards loaded %d done guid(s)", len(guids))
+        logger.info("💾 done_cards loaded %d done guid(s) for org_id=%s", len(guids), organization_id)
         return guids
