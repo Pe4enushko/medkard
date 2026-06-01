@@ -21,8 +21,11 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Any
 
+from LLM.chinese_detector import ChineseDetector
 from LLM.validations import validate_visit
 from LLM.visit_classifier import VisitClassifier
+
+_chinese_detector = ChineseDetector()
 
 NMU_RE = re.compile(r"^[ABАВ]\d{2}\.\d{3}\.\d{3}(?:\.\d{3})?$", re.I)
 
@@ -283,6 +286,12 @@ class FormalValidator:
 
         findings, tokens = await validate_visit(system_prompt, visit)
         logger.info("[formal] LLM returned %d finding(s), tokens=%d: %s", len(findings), tokens, findings)
+
+        for i, finding in enumerate(findings):
+            if _chinese_detector.check_str(finding["issue"]):
+                repaired, repair_tokens = await _chinese_detector.repair_issue(finding["issue"])
+                findings[i] = {**finding, "issue": repaired}
+                tokens += repair_tokens
 
         contradiction = self._check_nmu_keyword_contradiction(visit)
         if contradiction:

@@ -17,41 +17,20 @@ Usage::
 
 import json
 import logging
-import os
 from pathlib import Path
 
 import instructor
-from dotenv import load_dotenv
-from openai import AsyncOpenAI
 from pydantic import BaseModel
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# ── Configurable ──────────────────────────────────────────────────────────────
-MODEL: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+from LLM.base import MODEL, get_instructor_client
+
 PROMPTS_DIR: Path = Path(__file__).parent / "prompts"
 SCHEMAS_DIR: Path = Path(__file__).parent / "schemas"
-# ─────────────────────────────────────────────────────────────────────────────
 
 _PROMPT_TEMPLATE: str = (PROMPTS_DIR / "chunk_query_generator.txt").read_text(encoding="utf-8")
 _JSON_SCHEMA: dict = json.loads((SCHEMAS_DIR / "hypothetical_queries.json").read_text(encoding="utf-8"))
-
-# Lazily initialised module-level client; can be overridden in tests by passing
-# a client explicitly to generate_queries().
-_client: instructor.AsyncInstructor | None = None
-
-
-def _get_client() -> instructor.AsyncInstructor:
-    global _client
-    if _client is None:
-        base_url = os.environ.get("OPENAI_BASE_URL")
-        _client = instructor.from_openai(
-            AsyncOpenAI(base_url=base_url) if base_url else AsyncOpenAI(),
-            mode=instructor.Mode.JSON,
-        )
-    return _client
 
 
 class HypotheticalQueries(BaseModel):
@@ -93,7 +72,7 @@ async def generate_queries(
         (chunk, HypotheticalQueries) — the original chunk paired with the
         three generated queries.
     """
-    resolved_client = client or _get_client()
+    resolved_client = client or get_instructor_client()
     prompt = _PROMPT_TEMPLATE.replace("{chunk}", _render_content(chunk))
 
     queries, completion = await resolved_client.chat.completions.create_with_completion(

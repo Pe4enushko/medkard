@@ -13,30 +13,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-from openai import AsyncOpenAI
-
-load_dotenv()
-
 logger = logging.getLogger(__name__)
 
-MODEL: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+from LLM.base import MODEL, get_openai_client
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "icd_prefix_picker.txt"
-
-_client: AsyncOpenAI | None = None
-
-
-def _get_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        base_url = os.environ.get("OPENAI_BASE_URL") or None
-        _client = AsyncOpenAI(base_url=base_url) if base_url else AsyncOpenAI()
-    return _client
 
 
 class IcdPrefixPicker:
@@ -68,7 +52,7 @@ class IcdPrefixPicker:
             f"{json.dumps(candidates, ensure_ascii=False, indent=2)}"
         )
 
-        resp = await _get_client().chat.completions.create(
+        resp = await get_openai_client().chat.completions.create(
             model=MODEL,
             messages=[
                 {"role": "system", "content": self._system},
