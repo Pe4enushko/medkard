@@ -5,6 +5,7 @@ Export done_cards rows for a date range to an Excel report.
 Run from project root:
     python scripts/create_report.py --from 2024-01-01 --to 2024-01-31
     python scripts/create_report.py --from 2024-01-01 --to 2024-01-31 --output /some/dir
+    python scripts/create_report.py --from 2024-01-01 --to 2024-01-31 --org MDS
 
 Dates are inclusive on both ends (time range: 00:00:00 of date_from
 to 23:59:59.999… of date_to).
@@ -23,12 +24,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from audit.excel_formatter import ExcelFormatter  # noqa: E402
+from storage.organizations_storage import OrganizationsStorage  # noqa: E402
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 _parser = argparse.ArgumentParser(description="Create Excel report from done_cards for a date range")
 _parser.add_argument("--from", dest="date_from", required=True, metavar="YYYY-MM-DD", help="Start date (inclusive)")
 _parser.add_argument("--to",   dest="date_to",   required=True, metavar="YYYY-MM-DD", help="End date (inclusive)")
 _parser.add_argument("--output", default=None, metavar="DIR", help="Directory for the report file (default: project root)")
+_parser.add_argument("--org", required=True, choices=("Alenka", "MDS"), help="Organization to export (required: a report is always scoped to one org)")
 _args = _parser.parse_args()
 
 
@@ -42,7 +45,7 @@ def _parse_date(value: str, label: str) -> datetime:
 date_from = _parse_date(_args.date_from, "from")
 date_to   = _parse_date(_args.date_to,   "to") + timedelta(days=1)  # make end-inclusive
 
-_auto_name = f"report_{_args.date_from}_to_{_args.date_to}.xlsx"
+_auto_name = f"report_{_args.org}_{_args.date_from}_to_{_args.date_to}.xlsx"
 excel_path = Path(_args.output) / _auto_name if _args.output else ROOT / _auto_name
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -55,9 +58,15 @@ log = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    log.info("Creating report for %s — %s → %s", _args.date_from, _args.date_to, excel_path)
+    async with OrganizationsStorage() as organizations:
+        org_id = await organizations.get_id_by_name(_args.org)
+
+    log.info(
+        "Creating report for %s — %s (org=%s) → %s",
+        _args.date_from, _args.date_to, _args.org, excel_path,
+    )
     async with ExcelFormatter(excel_path) as fmt:
-        written = await fmt.export_period(date_from, date_to)
+        written = await fmt.export_period(date_from, date_to, org_id)
     if written:
         log.info("Done: wrote %d row(s) to %s", written, excel_path)
     else:

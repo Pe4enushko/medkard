@@ -83,21 +83,24 @@ class _DoneCardsReader(BaseStorage):
             return self._decode_rows(await cur.fetchall())
 
     async def fetch_by_period(
-        self, date_from: datetime, date_to: datetime
+        self, date_from: datetime, date_to: datetime, organization_id: str
     ) -> list[dict[str, Any]]:
+        if not organization_id:
+            raise ValueError("organization_id is required: a report must be scoped to one org")
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "WITH cards AS ("
                 "  SELECT id, card_guid, card_data, formal_result, diag_result, "
                 "         to_date(card_data -> 'Прием' ->> 'DATE', 'DD.MM.YYYY') AS visit_date "
                 "  FROM done_cards "
-                "  WHERE ignored = FALSE"
+                "  WHERE ignored = FALSE "
+                "    AND organization_id = %(org_id)s::uuid"
                 ") "
                 "SELECT id, card_guid, card_data::text, formal_result, diag_result "
                 "FROM cards "
                 "WHERE visit_date >= %(from)s::date AND visit_date < %(to)s::date "
                 "ORDER BY visit_date, id",
-                {"from": date_from, "to": date_to},
+                {"from": date_from, "to": date_to, "org_id": organization_id},
             )
             return self._decode_rows(await cur.fetchall())
 
@@ -164,9 +167,15 @@ class ExcelFormatter:
         rows = await self._reader.fetch_all()
         return self._write_rows(rows)
 
-    async def export_period(self, date_from: datetime, date_to: datetime) -> int:
-        """Write rows whose card_data appointment date falls in [date_from, date_to)."""
-        rows = await self._reader.fetch_by_period(date_from, date_to)
+    async def export_period(
+        self, date_from: datetime, date_to: datetime, organization_id: str
+    ) -> int:
+        """Write *organization_id*'s rows whose appointment date is in [date_from, date_to).
+
+        ``organization_id`` is mandatory: a report file is always scoped to a single
+        organization so cards from different orgs can never land in the same file.
+        """
+        rows = await self._reader.fetch_by_period(date_from, date_to, organization_id)
         return self._write_rows(rows)
 
     async def export_guids(self, guids: set[str]) -> int:
