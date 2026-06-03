@@ -4,11 +4,14 @@ Fetch appointments from 1C for a configured period, save the raw JSON
 snapshot, run the full audit pipeline, then export results to Excel.
 
 Run from project root:
-    python scripts/audit-one-c-period.py ORG [--days N] [--ignore-icd CODE ...] [--excel PATH] [--num-batches N] [--ftpcreds FILE]
+    python scripts/audit-one-c-period.py ORG [--days N | --date DD.MM.YYYY] [--ignore-icd CODE ...] [--excel PATH] [--num-batches N] [--ftpcreds FILE]
 
 Options:
     ORG            1C organization: Alenka or MDS
     --days         Shift datebegin N days back from today (default: 0)
+    --date         Process the cached single-day search for this exact date
+                   (DD.MM.YYYY); used as both datebegin and dateend, selecting
+                   the data_snapshots/one_c_<ORG>_<date>_to_<date>.json file
     --ignore-icd   ICD codes to ignore, e.g. Z00.0 J06.9
     --excel        Output xlsx file (default: audit_results.xlsx)
     --num-batches  Max concurrent visits processed at a time (default: 5)
@@ -40,6 +43,7 @@ from storage.organizations_storage import OrganizationsStorage
 _parser = argparse.ArgumentParser()
 _parser.add_argument("org", choices=("Alenka", "MDS"), help="1C organization")
 _parser.add_argument("--days", type=int, default=0, help="Shift datebegin N days back from today")
+_parser.add_argument("--date", default=None, metavar="DD.MM.YYYY", help="Process the cached single-day search for this exact date (used as both datebegin and dateend)")
 _parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
 _parser.add_argument("--ignore-icd", nargs="*", default=[], metavar="CODE", help="ICD codes to ignore (e.g. Z00.0 J06.9)")
 _parser.add_argument("--excel", default=None, metavar="PATH", help="Output xlsx file (default: report_<datebegin>_to_<dateend>.xlsx)")
@@ -54,8 +58,16 @@ ONE_C_CLIENTS: dict[str, type[OneCClient]] = {
 }
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DATEBEGIN = (datetime.now() - timedelta(days=_args.days)).strftime("%d.%m.%Y")
-DATEEND   = datetime.now().strftime("%d.%m.%Y")
+if _args.date:
+    # Process the cached single-day search for the given date.
+    try:
+        _date = datetime.strptime(_args.date, "%d.%m.%Y")
+    except ValueError:
+        _parser.error(f"--date must be DD.MM.YYYY, got {_args.date!r}")
+    DATEBEGIN = DATEEND = _date.strftime("%d.%m.%Y")
+else:
+    DATEBEGIN = (datetime.now() - timedelta(days=_args.days)).strftime("%d.%m.%Y")
+    DATEEND   = datetime.now().strftime("%d.%m.%Y")
 
 _safe = lambda s: "".join(c if c.isalnum() else "-" for c in s)
 EXCEL_PATH = Path(_args.excel) if _args.excel else ROOT / f"report_{_safe(DATEBEGIN)}_to_{_safe(DATEEND)}.xlsx"
