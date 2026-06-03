@@ -25,7 +25,7 @@ import asyncio
 import json
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -70,7 +70,11 @@ else:
     DATEEND   = datetime.now().strftime("%d.%m.%Y")
 
 _safe = lambda s: "".join(c if c.isalnum() else "-" for c in s)
-EXCEL_PATH = Path(_args.excel) if _args.excel else ROOT / f"report_{_safe(DATEBEGIN)}_to_{_safe(DATEEND)}.xlsx"
+EXCEL_PATH = Path(_args.excel) if _args.excel else ROOT / f"report_{_args.org}_{_safe(DATEBEGIN)}_to_{_safe(DATEEND)}.xlsx"
+
+# Period bounds for the DB-backed Excel export (end-inclusive).
+PERIOD_FROM = datetime.strptime(DATEBEGIN, "%d.%m.%Y").replace(tzinfo=timezone.utc)
+PERIOD_TO   = datetime.strptime(DATEEND,   "%d.%m.%Y").replace(tzinfo=timezone.utc) + timedelta(days=1)
 DATA_SNAPSHOTS_DIR = ROOT / "data_snapshots"
 LOGS_DIR           = ROOT / "logs"
 
@@ -142,30 +146,28 @@ async def main() -> None:
         async with AuditPipeline(org_id=org_id) as pipeline:
             pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches, ignore_icd=IGNORE_ICD or None)
         log.info("Pipeline done: %d result(s)", len(pairs))
-
         if not pairs:
-            log.info("Nothing new to export; all visits already in DB")
-            return
+            log.info("Nothing new processed this run; all visits already in DB")
 
-        # ── 3. Export new cards from DB to Excel ──────────────────────────────
-        new_guids = {
-            str((result.input.get("Прием") or {}).get("GUID") or "").lower()
-            for result, _ in pairs
-        }
-        new_guids.discard("")
+        # ── 3. Export the full period for this org from DB to Excel ───────────
+        #     Independent of stage 2: runs whether or not new cards were processed,
+        #     so the report always reflects every card in the period.
+        async with ExcelFormatter(EXCEL_PATH) as fmt:
+            written = await fmt.export_period(PERIOD_FROM, PERIOD_TO, org_id)
+        log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)
 
-        if new_guids:
-            async with ExcelFormatter(EXCEL_PATH) as fmt:
-                written = await fmt.export_guids(new_guids)
-            log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)
-            if _args.ftpcreds and written:
+        # ── 4. Upload the report to FTP ───────────────────────────────────────
+        #     Independent of stages 2 and 3: runs whenever the report file exists.
+        if _args.ftpcreds:
+            if EXCEL_PATH.exists():
                 try:
                     creds = load_creds(_args.ftpcreds)
                     upload(EXCEL_PATH, EXCEL_PATH.name, creds)
+                    log.info("📤 Uploaded %s to FTP", EXCEL_PATH.name)
                 except (FileNotFoundError, ValueError) as e:
                     log.error("FTP upload failed: %s", e)
-        else:
-            log.info("📊 No guid-bearing cards to export; skipping Excel write")
+            else:
+                log.warning("📤 No report file at %s; skipping FTP upload", EXCEL_PATH)
 
         log.info("Audit complete. Log: %s", LOG_FILE)
     finally:
