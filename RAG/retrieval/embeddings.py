@@ -61,7 +61,6 @@ class OpenAIEmbeddingAdapter(EmbeddingAdapter):
         response = await self._get_client().embeddings.create(
             model=EMBEDDING_MODEL,
             input=text,
-            dimensions=EMBEDDING_DIM,
         )
         return response.data[0].embedding
 
