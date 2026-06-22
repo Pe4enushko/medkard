@@ -12,6 +12,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
 from audit.pipeline import AuditPipeline
 from parsers.json_parser import AppointmentsParser
 

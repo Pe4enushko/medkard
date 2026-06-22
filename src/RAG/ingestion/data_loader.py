@@ -61,8 +61,9 @@ _SECTION_TITLE_PATTERN: re.Pattern = re.compile(
     r')',
     re.MULTILINE
 )
-PDFS_DIR: Path = Path("../pdfs")
-MANIFEST_PATH: Path = Path("manifest.csv")
+_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
+PDFS_DIR: Path = _PROJECT_ROOT / "pdfs"
+MANIFEST_PATH: Path = _PROJECT_ROOT / "resources" / "manifest.csv"
 PDF_EXTENSION: str = ".pdf"
 # ─────────────────────────────────────────────────────────────────────────────
 

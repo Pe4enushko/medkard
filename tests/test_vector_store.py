@@ -16,7 +16,7 @@ import pytest
 import pytest_asyncio
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 from RAG.retrieval.vector_store import (
     EMBEDDING_DIM,

@@ -18,7 +18,7 @@ from LLM.decider import decide_file_id
 from LLM.icd_prefix_picker import IcdPrefixPicker
 
 # Path to manifest — resolved relative to the project root.
-_MANIFEST_PATH: Path = Path(__file__).resolve().parent.parent.parent / "manifest.csv"
+_MANIFEST_PATH: Path = Path(__file__).resolve().parent.parent.parent.parent / "resources" / "manifest.csv"
 
 # МКБ codes for which no guideline lookup is needed (e.g. routine checkup codes).
 _SKIP_CODES: frozenset[str] = frozenset({"Z00.1"})

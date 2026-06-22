@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from integrations.one_c import OneCClient
 

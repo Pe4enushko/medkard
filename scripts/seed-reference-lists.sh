@@ -29,8 +29,8 @@ done < "$ENV_FILE"
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
-DRUGS_CSV="$ROOT_DIR/Drugs list.csv"
-SUPPLEMENTS_CSV="$ROOT_DIR/Dietary supplements.csv"
+DRUGS_CSV="$ROOT_DIR/resources/Drugs list.csv"
+SUPPLEMENTS_CSV="$ROOT_DIR/resources/Dietary supplements.csv"
 
 for f in "$DRUGS_CSV" "$SUPPLEMENTS_CSV"; do
     if [[ ! -f "$f" ]]; then

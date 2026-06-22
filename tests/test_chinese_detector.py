@@ -10,7 +10,7 @@ import pytest
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 load_dotenv(ROOT / ".env")
 
 from LLM.chinese_detector import ChineseDetector

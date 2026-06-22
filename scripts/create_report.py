@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 from audit.excel_formatter import ExcelFormatter  # noqa: E402
 from storage.organizations_storage import OrganizationsStorage  # noqa: E402
