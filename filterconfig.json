@@ -1,0 +1,18 @@
+[
+  {
+    "org": "Alenka",
+    "strategies": [
+      {"name": "IcdFilter", "is_active": true, "args": {"codes": ["Z11.1", "Z11.8"]}},
+      {"name": "KDLFilter", "is_active": false, "args": {}},
+      {"name": "AnalysisFilter", "is_active": false, "args": {}}
+    ]
+  },
+  {
+    "org": "MDS",
+    "strategies": [
+      {"name": "IcdFilter", "is_active": false, "args": {"codes": []}},
+      {"name": "KDLFilter", "is_active": true, "args": {}},
+      {"name": "AnalysisFilter", "is_active": true, "args": {}}
+    ]
+  }
+]
