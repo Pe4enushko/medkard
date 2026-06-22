@@ -108,8 +108,7 @@ class _DoneCardsReader(BaseStorage):
 def _existing_guids_in_excel(excel: AuditExcelWriter) -> set[str]:
     """Return the set of appointment GUIDs already present in the Excel sheet.
 
-    Each input cell contains the pretty-formatted visit dict; the GUID appears
-    as the value of the «GUID» key somewhere in that text.
+    The GUID appears as «GUID: <value>» inside the «Данные карты» column.
     """
     import openpyxl
 
@@ -121,15 +120,15 @@ def _existing_guids_in_excel(excel: AuditExcelWriter) -> set[str]:
     try:
         ws = wb.active
         existing: set[str] = set()
-        input_col = None
+        card_col = None
         for cell in ws[1]:
-            if cell.value == "input":
-                input_col = cell.column
+            if cell.value in ("Данные карты", "input"):
+                card_col = cell.column
                 break
-        if input_col is None:
+        if card_col is None:
             return set()
         for row in ws.iter_rows(min_row=2, values_only=True):
-            cell_value = row[input_col - 1]
+            cell_value = row[card_col - 1]
             if not cell_value:
                 continue
             for line in str(cell_value).splitlines():

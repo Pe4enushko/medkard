@@ -36,6 +36,7 @@ from audit.excel_formatter import ExcelFormatter
 from audit.pipeline import AuditPipeline
 from integrations.ftp import load_creds, upload
 from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient
+from parsers.filter_config import load_card_filter
 from RAG.retrieval.vector_store import close_pool
 from storage.organizations_storage import OrganizationsStorage
 
@@ -45,13 +46,11 @@ _parser.add_argument("org", choices=("Alenka", "MDS"), help="1C organization")
 _parser.add_argument("--days", type=int, default=0, help="Shift datebegin N days back from today")
 _parser.add_argument("--date", default=None, metavar="DD.MM.YYYY", help="Process the cached single-day search for this exact date (used as both datebegin and dateend)")
 _parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
-_parser.add_argument("--ignore-icd", nargs="*", default=[], metavar="CODE", help="ICD codes to ignore (e.g. Z00.0 J06.9)")
 _parser.add_argument("--excel", default=None, metavar="PATH", help="Output xlsx file (default: report_<datebegin>_to_<dateend>.xlsx)")
 _parser.add_argument("--num-batches", type=int, default=5, metavar="N", help="Max concurrent visits processed at a time (default: 5)")
 _parser.add_argument("--ftpcreds", default=None, metavar="FILE", help="Credentials file for FTP upload (ip=, port=, username=, password=)")
 _args = _parser.parse_args()
 
-IGNORE_ICD: list[str] = _args.ignore_icd
 ONE_C_CLIENTS: dict[str, type[OneCClient]] = {
     "Alenka": AlenkaOneCClient,
     "MDS": MdsOneCClient,
@@ -143,8 +142,9 @@ async def main() -> None:
         payload = _load_or_fetch_one_c_payload(org=_args.org, datebegin=DATEBEGIN, dateend=DATEEND)
 
         # ── 2. Run pipeline — each card is persisted to DB on completion ──────
-        async with AuditPipeline(org_id=org_id) as pipeline:
-            pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches, ignore_icd=IGNORE_ICD or None)
+        card_filter = load_card_filter(_args.org)
+        async with AuditPipeline(org_id=org_id, card_filter=card_filter) as pipeline:
+            pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches)
         log.info("Pipeline done: %d result(s)", len(pairs))
         if not pairs:
             log.info("Nothing new processed this run; all visits already in DB")

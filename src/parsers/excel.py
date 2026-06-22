@@ -1,10 +1,15 @@
 """
 excel.py — append audit results to an xlsx workbook.
 
-Each row contains three columns with human-readable text:
-  - ``input``            — raw visit payload (source JSON from 1C)
-  - ``formal_structure`` — FormalStructureResult
-  - ``diagnosis``        — DiagnosisAuditResult or a list of them
+Column layout (left to right):
+  A  Специализация   — Врач.SPECIALIZATION
+  B  Дата приема     — Прием.DATE
+  C  Данные карты    — Пациент + Врач + Прием dicts
+  D  Данные осмотра  — ДанныеОсмотра list
+  E  Услуги          — Услуги list
+  F  Диагнозы        — Диагнозы list
+  G  formal_structure
+  H  diagnosis
 
 Usage::
     from parsers.excel import AuditExcelWriter
@@ -32,13 +37,29 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from audit.models import FormalStructureResult
 
-_HEADERS = ["input", "formal_structure", "diagnosis"]
+_HEADERS = [
+    "Специализация",
+    "Дата приема",
+    "Данные карты",
+    "Данные осмотра",
+    "Услуги",
+    "Диагнозы",
+    "formal_structure",
+    "diagnosis",
+]
 _COLUMN_WIDTHS = {
-    "A": 80,
-    "B": 80,
-    "C": 100,
+    "A": 25,
+    "B": 15,
+    "C": 60,
+    "D": 80,
+    "E": 60,
+    "F": 60,
+    "G": 80,
+    "H": 100,
 }
-_WRAPPED_COLUMNS = tuple(_COLUMN_WIDTHS)
+_WRAPPED_COLUMNS = ("C", "D", "E", "F", "G", "H")
+_AUTOFILTER_RANGE = "A1:B1"
+
 logger = logging.getLogger(__name__)
 
 
@@ -111,6 +132,16 @@ def _format_scalar(value: Any) -> str:
     return str(value)
 
 
+def _card_data_text(visit: dict[str, Any]) -> str:
+    """Render Пациент + Врач + Прием as a single text block."""
+    parts: list[str] = []
+    for key in ("Пациент", "Врач", "Прием"):
+        val = visit.get(key)
+        if val is not None:
+            parts.append(f"{key}:\n{_format_value(val, indent=2)}")
+    return "\n\n".join(parts) if parts else "—"
+
+
 class AuditExcelWriter:
     """Append audit results to an xlsx file, creating it with a header row if absent.
 
@@ -128,8 +159,6 @@ class AuditExcelWriter:
         else:
             wb = Workbook()
             ws = wb.active
-        if ws.cell(row=1, column=4).value == "sources":
-            ws.delete_cols(4, 1)
         for idx, header in enumerate(_HEADERS, start=1):
             ws.cell(row=1, column=idx, value=header)
         for column, width in _COLUMN_WIDTHS.items():
@@ -137,6 +166,7 @@ class AuditExcelWriter:
         for column in _WRAPPED_COLUMNS:
             for cell in ws[column]:
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.auto_filter.ref = _AUTOFILTER_RANGE
         return wb, ws  # type: ignore[return-value]
 
     def append(
@@ -153,8 +183,15 @@ class AuditExcelWriter:
             diagnosis: Diagnosis audit result(s) for this visit.
         """
         try:
+            specialization = (visit.get("Врач") or {}).get("SPECIALIZATION") or "—"
+            visit_date = (visit.get("Прием") or {}).get("DATE") or "—"
             row = [
-                _pretty(visit),
+                specialization,
+                visit_date,
+                _card_data_text(visit),
+                _pretty(visit.get("ДанныеОсмотра") or []),
+                _pretty(visit.get("Услуги") or []),
+                _pretty(visit.get("Диагнозы") or []),
                 _pretty(formal),
                 _pretty(diagnosis),
             ]

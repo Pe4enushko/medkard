@@ -23,10 +23,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from audit.diagnosis.validator import DiagnosisValidator
+from audit.filters import CardFilter
 from audit.formal_structure.validator import FormalValidator
 from audit.models import FormalFinding, FormalStructureResult
 from storage.done_cards_storage import DoneCardsStorage
-from storage.models.result import DiagnosisResult, Result
+from storage.models.result import DiagnosisIssue, DiagnosisResult, Result
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +66,9 @@ class AuditPipeline:
     separately by audit.excel_formatter.
     """
 
-    def __init__(self, org_id: str | None = None) -> None:
+    def __init__(self, org_id: str | None = None, card_filter: CardFilter | None = None) -> None:
         self._org_id = org_id
+        self._card_filter = card_filter or CardFilter([])
         self._done_cards: DoneCardsStorage | None = None
 
     async def __aenter__(self) -> "AuditPipeline":
@@ -83,17 +85,15 @@ class AuditPipeline:
         self,
         raw_input: dict | list | str,
         done_guids: set[str] | None = None,
-        ignore_icd: list[str] | None = None,
     ) -> list[tuple[Result, int]]:
         """Deprecated sequential wrapper — delegates to :meth:`run_batched` with num_batches=1."""
-        return await self.run_batched(raw_input, num_batches=1, done_guids=done_guids, ignore_icd=ignore_icd)
+        return await self.run_batched(raw_input, num_batches=1, done_guids=done_guids)
 
     async def run_batched(
         self,
         raw_input: dict | list | str,
         num_batches: int = 5,
         done_guids: set[str] | None = None,
-        ignore_icd: list[str] | None = None,
     ) -> list[tuple[Result, int]]:
         """Audit all appointments concurrently, up to *num_batches* at a time.
 
@@ -103,8 +103,6 @@ class AuditPipeline:
             num_batches: Maximum number of visits processed concurrently (default 5).
             done_guids:  Set of visit GUIDs already audited. If omitted, loaded
                          from the DB automatically.
-            ignore_icd:  Optional list of ICD codes. A visit is skipped only if
-                         every one of its diagnoses is in this list.
 
         Returns:
             List of ``(Result, elapsed_ms)`` pairs — one per audited visit,
@@ -114,7 +112,7 @@ class AuditPipeline:
             done_guids = await self._done_cards.get_done_guids(organization_id=self._org_id)
 
         appointments = _split_appointments(raw_input)
-        pending, ignored_visits, skipped_done, skipped_icd = self._filter_pending_appointments(appointments, done_guids, ignore_icd)
+        pending, ignored_visits, skipped_done, skipped_strategy = self._card_filter.filter(appointments, done_guids)
 
         if ignored_visits and self._done_cards is not None:
             await asyncio.gather(*[
@@ -144,74 +142,25 @@ class AuditPipeline:
             await asyncio.gather(*[_audit_with_sem(idx, visit) for idx, visit in pending])
         )
 
-        self._log_queue_summary(appointments, done_guids, skipped_done, skipped_icd, len(pairs))
+        self._log_queue_summary(appointments, done_guids, skipped_done, skipped_strategy, len(pairs))
         return pairs
 
     # ── Internal ──────────────────────────────────────────────────────────────
-
-    def _filter_pending_appointments(
-        self,
-        appointments: list[dict[str, Any]],
-        done_guids: set[str] | None,
-        ignore_icd: list[str] | None = None,
-    ) -> tuple[list[tuple[int, dict[str, Any]]], list[dict[str, Any]], int, int]:
-        """Return (pending, ignored_visits, skipped_done, skipped_icd)."""
-        normalized_done_guids = {str(guid).lower() for guid in (done_guids or set())}
-        normalized_ignore_icd = {code.upper() for code in (ignore_icd or [])}
-        pending: list[tuple[int, dict[str, Any]]] = []
-        ignored_visits: list[dict[str, Any]] = []
-        skipped_done = 0
-        skipped_icd = 0
-
-        for idx, visit in enumerate(appointments):
-            priem: dict = visit.get("Прием") or {}
-            visit_id = priem.get("GUID") or priem.get("DATE") or f"#{idx + 1}"
-            visit_guid = _visit_guid(visit)
-
-            if visit_guid and visit_guid in normalized_done_guids:
-                skipped_done += 1
-                logger.info(
-                    "🩺 Skipping already audited visit %s (%d/%d)",
-                    visit_guid, idx + 1, len(appointments),
-                )
-                continue
-
-            if normalized_done_guids and not visit_guid:
-                logger.warning(
-                    "🩺 Visit %s has no Прием.GUID; auditing it because it cannot be matched to done_guids",
-                    visit_id,
-                )
-
-            if normalized_ignore_icd:
-                diagnoses: list[dict] = visit.get("Диагнозы") or []
-                dx_codes = {(d.get("КодМКБ") or "").upper() for d in diagnoses}
-                if dx_codes and dx_codes.issubset(normalized_ignore_icd):
-                    skipped_icd += 1
-                    logger.info(
-                        "🩺 Skipping visit %s — all diagnoses %s are in ignore_icd list",
-                        visit_id, dx_codes,
-                    )
-                    ignored_visits.append(visit)
-                    continue
-
-            pending.append((idx, visit))
-
-        return pending, ignored_visits, skipped_done, skipped_icd
 
     def _log_queue_summary(
         self,
         appointments: list[dict[str, Any]],
         done_guids: set[str] | None,
         skipped_done: int,
-        skipped_icd: int,
+        skipped_strategy: int,
         audited: int,
     ) -> None:
-        if done_guids or skipped_icd:
+        if done_guids or skipped_strategy:
             logger.info(
-                "🩺 Pipeline audit queue complete: total=%d skipped_done=%d skipped_icd=%d audited=%d",
+                "🩺 Pipeline audit queue complete: total=%d skipped_done=%d skipped_strategy=%d audited=%d",
                 len(appointments),
                 skipped_done,
-                skipped_icd,
+                skipped_strategy,
                 audited,
             )
 
@@ -270,6 +219,20 @@ class AuditPipeline:
                 dx_code,
                 diagnosis.get("НаименованиеМКБ"),
             )
+
+            if self._card_filter.should_skip_diagnosis(diagnosis):
+                logger.info(
+                    "🧬 [pipeline] Skipping diagnosis %s for visit %s — filtered by ICD filter",
+                    dx_code, visit_id,
+                )
+                diagnosis_results.append(
+                    DiagnosisResult(
+                        icd_code=dx_code,
+                        issues=[DiagnosisIssue(issue="Диагноз пропущен фильтром МКБ", sources=[])],
+                    )
+                )
+                continue
+
             diag_result, diag_tokens = await diag_validator.validate_diagnosis(diagnosis)
             total_tokens += diag_tokens
             logger.info(
