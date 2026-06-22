@@ -21,11 +21,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from LLM.base import MODEL, get_instructor_client
+from LLM.base import MODEL, get_openai_client
 
 SCHEMAS_DIR: Path = Path(__file__).parent / "schemas"
 
@@ -39,42 +40,38 @@ class _Finding(BaseModel):
     issue: str
 
 
-class _Findings(BaseModel):
-    findings: list[_Finding]
-
-
 async def validate_visit(
     system_prompt: str,
     visit: dict[str, Any],
     *,
-    client: instructor.AsyncInstructor | None = None,
+    client: AsyncOpenAI | None = None,
     model: str = MODEL,
-) -> list[dict[str, str]]:
+) -> tuple[list[dict[str, str]], int]:
     """Call the LLM to validate a visit against a pre-rendered system prompt.
 
     Args:
         system_prompt: Fully rendered system prompt containing the applicable
                        rules (produced by FormalValidator).
         visit:         Raw visit dict (as parsed from the source JSON).
-        client:        Optional pre-built instructor client (for testing /
-                       client reuse). Falls back to the module-level singleton.
+        client:        Optional AsyncOpenAI client (for testing / client reuse).
+                       Falls back to the module-level singleton.
         model:         LLM model identifier.
 
     Returns:
-        List of finding dicts: [{"flag": ..., "issue": ...}, ...]
+        (findings, tokens) — findings is a list of ``{"flag": ..., "issue": ...}``
+        dicts; tokens is the total LLM token count for this call.
     """
-    resolved_client = client or get_instructor_client()
+    resolved_client = client or get_openai_client()
     visit_text = json.dumps(visit, ensure_ascii=False, indent=2)
 
-    result, completion = await resolved_client.chat.completions.create_with_completion(
+    completion = await resolved_client.chat.completions.create(
         model=model,
-        response_model=_Findings,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": visit_text},
         ],
-        temperature=0.7,
-        #extra_body={"guided_json": _JSON_SCHEMA},
+        temperature=0.1,
+        extra_body={"guided_json": _JSON_SCHEMA},
     )
 
     finish_reason = completion.choices[0].finish_reason
@@ -84,6 +81,29 @@ async def validate_visit(
             finish_reason,
             completion.model_dump_json(indent=2),
         )
-    logger.debug("[validations] raw LLM answer: %s", result.model_dump_json(indent=2))
+
+    raw_content = completion.choices[0].message.content or "[]"
+    logger.debug("[validations] raw LLM answer: %s", raw_content)
     tokens = completion.usage.total_tokens if completion.usage else 0
-    return [{"flag": f.flag, "issue": f.issue} for f in result.findings], tokens
+
+    try:
+        raw: list = json.loads(raw_content)
+    except json.JSONDecodeError:
+        logger.error("[validations] failed to parse JSON response: %r", raw_content)
+        return [], tokens
+
+    if not isinstance(raw, list):
+        logger.error("[validations] expected list, got %s: %r", type(raw).__name__, raw_content)
+        return [], tokens
+
+    findings: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            f = _Finding.model_validate(item)
+            findings.append({"flag": f.flag, "issue": f.issue})
+        except Exception:
+            logger.warning("[validations] skipping malformed finding: %r", item)
+
+    return findings, tokens

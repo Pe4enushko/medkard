@@ -19,12 +19,12 @@ import json
 import logging
 from pathlib import Path
 
-import instructor
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from LLM.base import MODEL, get_instructor_client
+from LLM.base import MODEL, get_openai_client
 
 PROMPTS_DIR: Path = Path(__file__).parent / "prompts"
 SCHEMAS_DIR: Path = Path(__file__).parent / "schemas"
@@ -56,31 +56,28 @@ def _render_content(chunk: dict) -> str:
 async def generate_queries(
     chunk: dict,
     *,
-    client: instructor.AsyncInstructor | None = None,
+    client: AsyncOpenAI | None = None,
     model: str = MODEL,
 ) -> tuple[dict, HypotheticalQueries]:
     """Generate 3 hypothetical queries for a single content chunk.
 
     Args:
         chunk:  A chunk dict from PDFContentReader.iter_chunks().
-        client: Optional pre-built instructor client (useful for testing or
+        client: Optional AsyncOpenAI client (useful for testing or
                 when reusing a client across many calls). Falls back to the
-                module-level singleton backed by AsyncOpenAI().
+                module-level singleton.
         model:  LLM model identifier. Defaults to MODULE-level MODEL constant.
 
     Returns:
         (chunk, HypotheticalQueries) — the original chunk paired with the
         three generated queries.
     """
-    resolved_client = client or get_instructor_client()
+    resolved_client = client or get_openai_client()
     prompt = _PROMPT_TEMPLATE.replace("{chunk}", _render_content(chunk))
 
-    queries, completion = await resolved_client.chat.completions.create_with_completion(
+    completion = await resolved_client.chat.completions.create(
         model=model,
-        response_model=HypotheticalQueries,
         messages=[{"role": "user", "content": prompt}],
-        # extra_body activates guided JSON decoding on vLLM-compatible endpoints;
-        # silently ignored by the standard OpenAI API.
         extra_body={"guided_json": _JSON_SCHEMA},
     )
 
@@ -92,4 +89,6 @@ async def generate_queries(
             completion.model_dump_json(indent=2),
         )
 
+    raw_content = completion.choices[0].message.content or "{}"
+    queries = HypotheticalQueries.model_validate_json(raw_content)
     return chunk, queries
