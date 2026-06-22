@@ -19,7 +19,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from LLM.base import MODEL, get_openai_client
+from LLM.client import LLMClient
+
+_client = LLMClient()
 
 
 async def decide_file_id(
@@ -54,8 +56,7 @@ async def decide_file_id(
         f"## Кандидаты (клинические рекомендации)\n{candidate_json}"
     )
 
-    resp = await get_openai_client().chat.completions.create(
-        model=MODEL,
+    raw_content, tokens = await _client.call(
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -63,17 +64,7 @@ async def decide_file_id(
         temperature=0.4,
     )
 
-    logger.debug("[decider] LLM response:\n%s", resp.model_dump_json(indent=2))
-    raw_content = resp.choices[0].message.content
-    finish_reason = resp.choices[0].finish_reason
-    if finish_reason != "stop":
-        logger.error(
-            "[decider] unexpected finish_reason=%r; full response: %s",
-            finish_reason,
-            resp.model_dump_json(indent=2),
-        )
     logger.debug("[decider] raw LLM answer: %s", raw_content)
-    tokens = resp.usage.total_tokens if resp.usage else 0
     chosen = raw_content.strip().strip('"').strip("'")
     valid_ids = {row.get("ID", "") for row in candidates}
     return (chosen if chosen in valid_ids else None), tokens

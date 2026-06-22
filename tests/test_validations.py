@@ -21,17 +21,16 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 load_dotenv(ROOT / ".env")
 
-from openai import AsyncOpenAI
+from LLM.client import LLMClient
 from LLM.validations import validate_visit
 
 
 # ── Shared client fixture ─────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module")
-def api_client() -> AsyncOpenAI:
-    """Build an AsyncOpenAI client from the loaded env — avoids singleton ordering issues."""
-    base_url = os.environ.get("OPENAI_BASE_URL") or None
-    return AsyncOpenAI(base_url=base_url) if base_url else AsyncOpenAI()
+def api_client() -> LLMClient:
+    """Build an LLMClient from the loaded env — avoids singleton ordering issues."""
+    return LLMClient()
 
 
 # ── Prompts ───────────────────────────────────────────────────────────────────

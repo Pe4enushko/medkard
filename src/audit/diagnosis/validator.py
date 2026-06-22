@@ -26,14 +26,15 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 from LLM.chinese_detector import ChineseDetector
-from LLM.rag_agent import _sum_agent_tokens, create_checker_agent
-
-_chinese_detector = ChineseDetector()
+from LLM.client import LLMClient
 from LLM.tools import (
     get_anamnesis_tools_for,
     get_inspection_tools_for,
     get_treatment_tools_for,
 )
+
+_chinese_detector = ChineseDetector()
+_client = LLMClient()
 from audit.diagnosis.clinic_recs import ClinicRecs
 from audit.models import DiagnosisAuditResult
 from storage.models.result import DiagnosisIssue, IssueSource
@@ -128,19 +129,7 @@ async def _run_checker(
 ) -> tuple[_CheckerRun, int]:
     tool_names = [t.name for t in tools]
     logger.debug("[checker:%s] START — tools=%s", checker_label, tool_names)
-    agent = create_checker_agent(system_prompt, tools)
-    result = await agent.ainvoke({"messages": [("user", human_message)]})
-    tokens = _sum_agent_tokens(result)
-    last_msg = result["messages"][-1]
-    raw_answer = last_msg.content
-    finish_reason = (getattr(last_msg, "response_metadata", {}) or {}).get("finish_reason")
-    if finish_reason and finish_reason != "stop":
-        logger.error(
-            "[checker:%s] unexpected finish_reason=%r; response_metadata: %s",
-            checker_label,
-            finish_reason,
-            getattr(last_msg, "response_metadata", {}),
-        )
+    raw_answer, tokens = await _client.call_agent(system_prompt, tools, human_message)
     logger.info("🤖 [checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
     for i, issue in enumerate(issues):

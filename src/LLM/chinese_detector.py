@@ -22,7 +22,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from LLM.base import MODEL, get_openai_client
+from LLM.client import LLMClient
 
 # CJK Unified Ideographs and common extensions — never valid in Russian medical text.
 _CJK_RE = re.compile(
@@ -35,6 +35,9 @@ _CJK_RE = re.compile(
     r"\U00020000-\U0002A6DF"  # CJK Unified Ideographs Extension B
     r"]"
 )
+
+
+_client = LLMClient()
 
 
 class ChineseDetector:
@@ -103,8 +106,7 @@ class ChineseDetector:
         Returns:
             (repaired_text, tokens_used)
         """
-        resp = await get_openai_client().chat.completions.create(
-            model=MODEL,
+        repaired, tokens = await _client.call(
             messages=[
                 {
                     "role": "system",
@@ -119,7 +121,6 @@ class ChineseDetector:
             ],
             temperature=0.3,
         )
-        tokens = resp.usage.total_tokens if resp.usage else 0
-        repaired = resp.choices[0].message.content.strip()
+        repaired = repaired.strip()
         logger.warning("[chinese_detector] repaired CJK in issue. original=%r repaired=%r", issue, repaired)
         return repaired, tokens

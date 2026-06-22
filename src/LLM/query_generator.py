@@ -15,22 +15,19 @@ Usage::
     # queries.fact_query, queries.procedural_query, queries.constraint_query
 """
 
-import json
 import logging
 from pathlib import Path
 
-from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from LLM.base import MODEL, get_openai_client
+from LLM.client import LLMClient
 
 PROMPTS_DIR: Path = Path(__file__).parent / "prompts"
-SCHEMAS_DIR: Path = Path(__file__).parent / "schemas"
 
 _PROMPT_TEMPLATE: str = (PROMPTS_DIR / "chunk_query_generator.txt").read_text(encoding="utf-8")
-_JSON_SCHEMA: dict = json.loads((SCHEMAS_DIR / "hypothetical_queries.json").read_text(encoding="utf-8"))
+_client = LLMClient()
 
 
 class HypotheticalQueries(BaseModel):
@@ -53,42 +50,23 @@ def _render_content(chunk: dict) -> str:
     return chunk["content"]  # already a str for text chunks
 
 
-async def generate_queries(
-    chunk: dict,
-    *,
-    client: AsyncOpenAI | None = None,
-    model: str = MODEL,
-) -> tuple[dict, HypotheticalQueries]:
+async def generate_queries(chunk: dict) -> tuple[dict, HypotheticalQueries]:
     """Generate 3 hypothetical queries for a single content chunk.
 
     Args:
-        chunk:  A chunk dict from PDFContentReader.iter_chunks().
-        client: Optional AsyncOpenAI client (useful for testing or
-                when reusing a client across many calls). Falls back to the
-                module-level singleton.
-        model:  LLM model identifier. Defaults to MODULE-level MODEL constant.
+        chunk: A chunk dict from PDFContentReader.iter_chunks().
 
     Returns:
         (chunk, HypotheticalQueries) — the original chunk paired with the
         three generated queries.
     """
-    resolved_client = client or get_openai_client()
     prompt = _PROMPT_TEMPLATE.replace("{chunk}", _render_content(chunk))
 
-    completion = await resolved_client.chat.completions.create(
-        model=model,
+    raw_content, _ = await _client.call(
         messages=[{"role": "user", "content": prompt}],
-        extra_body={"guided_json": _JSON_SCHEMA},
+        temperature=0.7,
+        response_model=HypotheticalQueries,
     )
 
-    finish_reason = completion.choices[0].finish_reason
-    if finish_reason != "stop":
-        logger.error(
-            "[query_generator] unexpected finish_reason=%r; full response: %s",
-            finish_reason,
-            completion.model_dump_json(indent=2),
-        )
-
-    raw_content = completion.choices[0].message.content or "{}"
     queries = HypotheticalQueries.model_validate_json(raw_content)
     return chunk, queries

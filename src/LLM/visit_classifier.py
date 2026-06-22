@@ -17,7 +17,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from LLM.base import MODEL, get_openai_client
+from LLM.client import LLMClient
 
 _PROMPT: str = (Path(__file__).parent / "prompts" / "visit_type_classifier.txt").read_text(encoding="utf-8")
 _VALID_LABELS = {"primary", "repeat", "prophylactic"}
@@ -26,6 +26,9 @@ _VALID_LABELS = {"primary", "repeat", "prophylactic"}
 class VisitClassifier:
     """Ask the LLM to classify a visit as primary / repeat / prophylactic."""
 
+    def __init__(self) -> None:
+        self._client = LLMClient()
+
     async def classify(self, visit: dict[str, Any]) -> str | None:
         """Return one of ``"primary"``, ``"repeat"``, ``"prophylactic"``, or
         ``None`` if the model response is not a recognised label.
@@ -33,17 +36,15 @@ class VisitClassifier:
         Args:
             visit: Raw visit dict (as parsed from the source JSON).
         """
-        resp = await get_openai_client().chat.completions.create(
-            model=MODEL,
+        answer, tokens = await self._client.call(
             messages=[
                 {"role": "system", "content": _PROMPT},
                 {"role": "user", "content": json.dumps(visit, ensure_ascii=False, indent=2)},
             ],
-            temperature=0.7
+            temperature=0.7,
         )
 
-        tokens = resp.usage.total_tokens if resp.usage else 0
-        answer = resp.choices[0].message.content.strip().lower()
+        answer = answer.strip().lower()
         if answer not in _VALID_LABELS:
             logger.warning("[visit_classifier] unrecognised label %r", answer)
             return None, tokens

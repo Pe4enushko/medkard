@@ -18,7 +18,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from LLM.base import MODEL, get_openai_client
+from LLM.client import LLMClient
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "icd_prefix_picker.txt"
 
@@ -28,6 +28,7 @@ class IcdPrefixPicker:
 
     def __init__(self) -> None:
         self._system = _PROMPT_PATH.read_text(encoding="utf-8").strip()
+        self._client = LLMClient()
 
     async def pick(
         self,
@@ -52,8 +53,7 @@ class IcdPrefixPicker:
             f"{json.dumps(candidates, ensure_ascii=False, indent=2)}"
         )
 
-        resp = await get_openai_client().chat.completions.create(
-            model=MODEL,
+        raw, tokens = await self._client.call(
             messages=[
                 {"role": "system", "content": self._system},
                 {"role": "user", "content": user},
@@ -61,16 +61,6 @@ class IcdPrefixPicker:
             temperature=0.4,
         )
 
-        finish_reason = resp.choices[0].finish_reason
-        if finish_reason != "stop":
-            logger.error(
-                "[icd_prefix_picker] unexpected finish_reason=%r; response: %s",
-                finish_reason,
-                resp.model_dump_json(indent=2),
-            )
-
-        tokens = resp.usage.total_tokens if resp.usage else 0
-        raw = resp.choices[0].message.content
         logger.debug("[icd_prefix_picker] raw answer: %s", raw)
         chosen = raw.strip().strip('"').strip("'")
         if chosen.lower() == "none":
