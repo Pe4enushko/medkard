@@ -40,6 +40,39 @@ _PROMPT_PATH = Path(__file__).parent.parent.parent / "LLM" / "prompts" / "formal
 _RULES: list[dict] = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
 _PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
 
+# ── Flag → regulatory source lookup ───────────────────────────────────────────
+_FLAG_SOURCE: dict[str, str] = {r["flag_code"]: r.get("source", "") for r in _RULES}
+_ALL_FLAGS: list[str] = list(_FLAG_SOURCE)
+
+
+def _levenshtein(a: str, b: str) -> int:
+    if len(a) < len(b):
+        a, b = b, a
+    prev = list(range(len(b) + 1))
+    for ch_a in a:
+        curr = [prev[0] + 1]
+        for j, ch_b in enumerate(b):
+            curr.append(min(prev[j + 1] + 1, curr[j] + 1, prev[j] + (ch_a != ch_b)))
+        prev = curr
+    return prev[-1]
+
+
+def _enrich_flags(findings: list[dict]) -> list[dict]:
+    """Attach 'source' to each finding and drop any flag not in rules.json (Levenshtein > 3)."""
+    result: list[dict] = []
+    for f in findings:
+        flag = f["flag"]
+        if flag in _FLAG_SOURCE:
+            result.append({**f, "source": _FLAG_SOURCE[flag]})
+            continue
+        best: str | None = min(_ALL_FLAGS, key=lambda k: _levenshtein(flag, k), default=None)
+        if best is not None and _levenshtein(flag, best) <= 3:
+            logger.warning("[formal] flag %r fuzzy-matched to %r", flag, best)
+            result.append({**f, "flag": best, "source": _FLAG_SOURCE[best]})
+        else:
+            logger.warning("[formal] dropping unrecognised flag %r (no match within edit distance 3)", flag)
+    return result
+
 
 class VisitType(Enum):
     """Type of ambulatory visit derived from the service name."""
@@ -293,9 +326,12 @@ class FormalValidator:
                 findings[i] = {**finding, "issue": repaired}
                 tokens += repair_tokens
 
+        findings = _enrich_flags(findings)
+
         contradiction = self._check_nmu_keyword_contradiction(visit)
         if contradiction:
             logger.warning("[formal] NMU/keyword contradiction: %s", contradiction["issue"])
-            findings.append(contradiction)
+            # NMU contradictions are always kept; source is not from rules.json
+            findings.append({**contradiction, "source": ""})
 
         return findings, tokens

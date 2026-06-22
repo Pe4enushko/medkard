@@ -179,7 +179,7 @@ class AuditPipeline:
         formal_raw, formal_tokens = await FormalValidator().validate(visit)
         formal_result = FormalStructureResult(
             findings=[
-                FormalFinding(flag=f["flag"], issue=f["issue"]) for f in formal_raw
+                FormalFinding(flag=f["flag"], issue=f["issue"], source=f.get("source", ""), comment=f.get("comment", "")) for f in formal_raw
             ]
         )
         logger.info(
@@ -248,6 +248,7 @@ class AuditPipeline:
                 DiagnosisResult(
                     icd_code=dx_code,
                     issues=diag_result.all_issues,
+                    guideline_file_id=diag_result.guideline_file_id,
                 )
             )
 

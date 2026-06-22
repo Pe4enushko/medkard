@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+_DELIM = "─" * 10
+
 
 @dataclass
 class IssueSource:
@@ -39,9 +41,19 @@ class FormalFinding:
 
     flag: str
     issue: str
+    source: str = ""
+    comment: str = ""
 
     def pretty_format(self) -> str:
-        return f"    [{self.flag}] {self.issue}"
+        s = f"    [{self.flag}] {self.issue}"
+        if self.comment:
+            s += f"\n    [Наблюдения]: {self.comment}"
+        if self.source:
+            s += f"\n    [Источник: {self.source}]"
+        return s
+
+    def to_dict(self) -> dict:
+        return {"flag": self.flag, "issue": self.issue, "source": self.source, "comment": self.comment}
 
 
 @dataclass
@@ -55,16 +67,13 @@ class FormalStructureResult:
         return [f.flag for f in self.findings]
 
     def to_dict(self) -> dict:
-        return {
-            "findings": [{"flag": f.flag, "issue": f.issue} for f in self.findings]
-        }
+        return {"findings": [f.to_dict() for f in self.findings]}
 
     def pretty_format(self) -> str:
         if not self.findings:
-            return "  Formal structure: OK"
-        lines = ["  Formal structure:"]
-        lines.extend(f.pretty_format() for f in self.findings)
-        return "\n".join(lines)
+            return "Замечаний по формальной структуре нет"
+        parts = [f.pretty_format() for f in self.findings]
+        return f"\n{_DELIM}\n".join(parts)
 
 
 @dataclass
@@ -73,13 +82,31 @@ class DiagnosisResult:
 
     icd_code: str
     issues: list[DiagnosisIssue] = field(default_factory=list)
+    guideline_file_id: str | None = None
+    guideline_meta: dict | None = None  # {name, date, age_group} — populated at export time, not stored in DB
 
     def pretty_format(self) -> str:
+        if self.guideline_file_id is None:
+            return f"[{self.icd_code}] Клинические рекоммендации для данного кода не найдены"
+
+        header_parts = [f"[{self.icd_code}]"]
+        if self.guideline_meta:
+            m = self.guideline_meta
+            header_parts.append(
+                f"Клинические рекомендации: {m.get('name', '—')} "
+                f"(ID: {self.guideline_file_id}, дата: {m.get('date', '—')}, "
+                f"категория: {m.get('age_group', '—')})"
+            )
+        else:
+            header_parts.append(f"Клинические рекомендации ID: {self.guideline_file_id}")
+
         if not self.issues:
-            return f"  [{self.icd_code}] OK"
-        lines = [f"  [{self.icd_code}]"]
-        lines.extend(iss.pretty_format() for iss in self.issues)
-        return "\n".join(lines)
+            header_parts.append("Замечаний по клин. рекоммендациям нет")
+            return "\n".join(header_parts)
+
+        issue_blocks = [iss.pretty_format() for iss in self.issues]
+        body = f"\n{_DELIM}\n".join(issue_blocks)
+        return "\n".join(header_parts) + "\n" + body
 
 
 @dataclass

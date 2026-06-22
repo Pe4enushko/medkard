@@ -16,6 +16,7 @@ Usage::
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from datetime import datetime
@@ -28,14 +29,35 @@ from storage.models.result import DiagnosisResult, FormalFinding, FormalStructur
 
 logger = logging.getLogger(__name__)
 
+_MANIFEST_PATH = Path(__file__).resolve().parent.parent.parent / "resources" / "manifest.csv"
+
+
+def _load_manifest_meta() -> dict[str, dict]:
+    """Return {ID: {name, date, age_group}} from manifest.csv."""
+    if not _MANIFEST_PATH.exists():
+        return {}
+    with open(_MANIFEST_PATH, newline="", encoding="utf-8") as fh:
+        return {
+            row["ID"]: {
+                "name": row.get("Наименование", ""),
+                "date": row.get("Дата размещения", ""),
+                "age_group": row.get("Возрастная категория", ""),
+            }
+            for row in csv.DictReader(fh)
+            if row.get("ID")
+        }
+
 
 def _parse_formal(data: list[dict]) -> FormalStructureResult:
     return FormalStructureResult(
-        findings=[FormalFinding(flag=f["flag"], issue=f.get("issue", "")) for f in (data or [])]
+        findings=[
+            FormalFinding(flag=f["flag"], issue=f.get("issue", ""), source=f.get("source", ""), comment=f.get("comment", ""))
+            for f in (data or [])
+        ]
     )
 
 
-def _parse_diagnosis(data: list[dict]) -> list[DiagnosisResult]:
+def _parse_diagnosis(data: list[dict], manifest_meta: dict[str, dict] | None = None) -> list[DiagnosisResult]:
     from storage.models.result import DiagnosisIssue, IssueSource
     results = []
     for entry in (data or []):
@@ -53,7 +75,14 @@ def _parse_diagnosis(data: list[dict]) -> list[DiagnosisResult]:
             )
             for iss in entry.get("issues", [])
         ]
-        results.append(DiagnosisResult(icd_code=entry["icd_code"], issues=issues))
+        file_id = entry.get("guideline_file_id")
+        meta = manifest_meta.get(file_id) if (manifest_meta and file_id) else None
+        results.append(DiagnosisResult(
+            icd_code=entry["icd_code"],
+            issues=issues,
+            guideline_file_id=file_id,
+            guideline_meta=meta,
+        ))
     return results
 
 
@@ -184,6 +213,7 @@ class ExcelFormatter:
 
     def _write_rows(self, rows: list[dict[str, Any]]) -> int:
         existing = _existing_guids_in_excel(self._excel)
+        manifest_meta = _load_manifest_meta()
         written = 0
         for row in rows:
             guid = (row["card_guid"] or "").lower()
@@ -192,7 +222,7 @@ class ExcelFormatter:
                 continue
             visit = row["card_data"]
             formal = _parse_formal(row["formal_result"])
-            diagnosis = _parse_diagnosis(row["diag_result"])
+            diagnosis = _parse_diagnosis(row["diag_result"], manifest_meta)
             self._excel.append(visit=visit, formal=formal, diagnosis=diagnosis)
             logger.debug("📊 exported card id=%s guid=%s", row["id"], guid)
             written += 1

@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def _formal_json(formal: FormalStructureResult) -> str:
     return json.dumps(
-        [{"flag": f.flag, "issue": f.issue} for f in formal.findings],
+        [{"flag": f.flag, "issue": f.issue, "source": f.source, "comment": f.comment} for f in formal.findings],
         ensure_ascii=False,
     )
 
@@ -30,6 +30,7 @@ def _diag_json(diagnosis: list[DiagnosisResult]) -> str:
         [
             {
                 "icd_code": dr.icd_code,
+                "guideline_file_id": dr.guideline_file_id,
                 "issues": [
                     {
                         "issue": iss.issue,

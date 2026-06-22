@@ -32,6 +32,7 @@ _client = LLMClient()
 class _Finding(BaseModel):
     flag: str
     issue: str
+    comment: str = ""
 
 
 class _Findings(BaseModel):
@@ -71,7 +72,7 @@ async def validate_visit(
 
     try:
         findings_obj = _Findings.model_validate_json(raw_content)
-        return [{"flag": f.flag, "issue": f.issue} for f in findings_obj.root], tokens
+        return [{"flag": f.flag, "issue": f.issue, "comment": f.comment} for f in findings_obj.root], tokens
     except Exception:
         logger.warning("[validations] failed to parse as _Findings, trying fallback: %r", raw_content)
         pass
@@ -86,7 +87,7 @@ async def validate_visit(
                     continue
                 try:
                     f = _Finding.model_validate(item)
-                    findings.append({"flag": f.flag, "issue": f.issue})
+                    findings.append({"flag": f.flag, "issue": f.issue, "comment": f.comment})
                 except Exception:
                     logger.warning("[validations] skipping malformed finding: %r", item)
             return findings, tokens
