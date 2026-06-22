@@ -18,7 +18,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from src.LLM.base import MODEL, get_openai_client
+from LLM.base import MODEL, get_openai_client
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "icd_prefix_picker.txt"
 

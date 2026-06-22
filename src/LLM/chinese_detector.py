@@ -22,7 +22,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from src.LLM.base import MODEL, get_openai_client
+from LLM.base import MODEL, get_openai_client
 
 # CJK Unified Ideographs and common extensions — never valid in Russian medical text.
 _CJK_RE = re.compile(

@@ -17,7 +17,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from src.LLM.base import MODEL, get_openai_client
+from LLM.base import MODEL, get_openai_client
 
 _PROMPT: str = (Path(__file__).parent / "prompts" / "visit_type_classifier.txt").read_text(encoding="utf-8")
 _VALID_LABELS = {"primary", "repeat", "prophylactic"}

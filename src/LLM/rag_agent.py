@@ -26,8 +26,8 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 
-from src.RAG.retrieval.embeddings import embed
-from src.RAG.retrieval.vector_store import hybrid_search
+from RAG.retrieval.embeddings import embed
+from RAG.retrieval.vector_store import hybrid_search
 from langchain_core.tools import tool
 
 load_dotenv()

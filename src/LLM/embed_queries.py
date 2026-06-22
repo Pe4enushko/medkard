@@ -15,8 +15,8 @@ Usage::
 import asyncio
 from dataclasses import dataclass
 
-from src.RAG.retrieval.vector_store import embed
-from src.LLM.query_generator import HypotheticalQueries
+from RAG.retrieval.vector_store import embed
+from LLM.query_generator import HypotheticalQueries
 
 
 @dataclass

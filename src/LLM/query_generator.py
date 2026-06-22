@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from src.LLM.base import MODEL, get_openai_client
+from LLM.base import MODEL, get_openai_client
 
 PROMPTS_DIR: Path = Path(__file__).parent / "prompts"
 SCHEMAS_DIR: Path = Path(__file__).parent / "schemas"

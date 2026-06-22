@@ -26,17 +26,17 @@ from typing import Type
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from src.RAG.retrieval.searches import (
+from RAG.retrieval.searches import (
     search_anamnesis,
     search_by_file_id,
     search_inspection,
     search_treatment,
 )
-from src.storage.dietary_supplements_storage import DietarySupplementsStorage
-from src.storage.drugs_storage import DrugsStorage
-from src.storage.models.dietary_supplement import DietarySupplement
-from src.storage.models.doc import Doc
-from src.storage.models.drug import Drug
+from storage.dietary_supplements_storage import DietarySupplementsStorage
+from storage.drugs_storage import DrugsStorage
+from storage.models.dietary_supplement import DietarySupplement
+from storage.models.doc import Doc
+from storage.models.drug import Drug
 
 logger = logging.getLogger(__name__)
 
