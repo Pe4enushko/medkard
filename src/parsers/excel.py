@@ -49,25 +49,23 @@ _HEADERS = [
     "Данные осмотра",
     "Услуги",
     "Диагнозы",
-    "formal_structure",
-    "diagnosis",
+    "Проверка по приказам МЗ",
+    "Проверка по клин.рекоммендациям",
 ]
 _COLUMN_WIDTHS = {
     "A": 25,
     "B": 15,
     "C": 60,
-    "D": 80,
+    "D": 178,
     "E": 60,
     "F": 60,
     "G": 80,
     "H": 100,
 }
-_WRAPPED_COLUMNS = ("C", "D", "E", "F", "G", "H")
 _AUTOFILTER_RANGE = "A1:B1"
 
 _LEGACY_HEADERS = ["visits", "formal", "diagnosis"]
 _LEGACY_COLUMN_WIDTHS = {"A": 100, "B": 80, "C": 100}
-_LEGACY_WRAPPED_COLUMNS = ("A", "B", "C")
 _LEGACY_AUTOFILTER_RANGE = "A1:A1"
 
 logger = logging.getLogger(__name__)
@@ -174,20 +172,15 @@ class AuditExcelWriter:
         if self._legacy:
             headers = _LEGACY_HEADERS
             widths = _LEGACY_COLUMN_WIDTHS
-            wrapped = _LEGACY_WRAPPED_COLUMNS
             autofilter = _LEGACY_AUTOFILTER_RANGE
         else:
             headers = _HEADERS
             widths = _COLUMN_WIDTHS
-            wrapped = _WRAPPED_COLUMNS
             autofilter = _AUTOFILTER_RANGE
         for idx, header in enumerate(headers, start=1):
             ws.cell(row=1, column=idx, value=header)
         for column, width in widths.items():
             ws.column_dimensions[column].width = width
-        for column in wrapped:
-            for cell in ws[column]:
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
         ws.auto_filter.ref = autofilter
         return wb, ws  # type: ignore[return-value]
 
@@ -211,7 +204,6 @@ class AuditExcelWriter:
                     _pretty(formal),
                     _pretty(diagnosis),
                 ]
-                wrapped = _LEGACY_WRAPPED_COLUMNS
             else:
                 specialization = (visit.get("Врач") or {}).get("SPECIALIZATION") or "—"
                 visit_date = (visit.get("Прием") or {}).get("DATE") or "—"
@@ -225,12 +217,10 @@ class AuditExcelWriter:
                     _pretty(formal),
                     _pretty(diagnosis),
                 ]
-                wrapped = _WRAPPED_COLUMNS
             wb, ws = self._open_or_create()
             ws.append(row)
             new_row = ws.max_row
-            for col_letter in wrapped:
-                col_idx = openpyxl.utils.column_index_from_string(col_letter)
+            for col_idx in range(1, len(row) + 1):
                 ws.cell(row=new_row, column=col_idx).alignment = Alignment(wrap_text=True, vertical="top")
             ws.row_dimensions[new_row].height = None
             wb.save(self._path)
