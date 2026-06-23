@@ -3,14 +3,15 @@ BaseStorage — shared async connection pool lifecycle for all storage classes.
 """
 
 import os
-from typing import Any, Callable, Coroutine
+from typing import Any
 
-import psycopg
 import psycopg.rows
 from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 
 load_dotenv()
+
+_shared_pool: AsyncConnectionPool | None = None
 
 
 def _conninfo() -> str:
@@ -23,27 +24,32 @@ def _conninfo() -> str:
     )
 
 
-class BaseStorage:
-    """Async context-manager that owns an AsyncConnectionPool.
-
-    Subclasses may override _configure() to run per-connection setup
-    (e.g. registering pgvector codecs).
-    """
-
-    async def _configure(self, conn: psycopg.AsyncConnection) -> None:
-        """Called once per new connection. Override to add codec registrations."""
-
-    async def __aenter__(self) -> "BaseStorage":
-        self._pool: AsyncConnectionPool = AsyncConnectionPool(
+async def _get_shared_pool() -> AsyncConnectionPool:
+    global _shared_pool
+    if _shared_pool is None or _shared_pool.closed:
+        _shared_pool = AsyncConnectionPool(
             conninfo=_conninfo(),
             min_size=1,
-            max_size=3,
+            max_size=5,
             open=False,
-            configure=self._configure,
             kwargs={"row_factory": psycopg.rows.dict_row},
         )
-        await self._pool.open()
+        await _shared_pool.open()
+    return _shared_pool
+
+
+class BaseStorage:
+    """Async context-manager backed by a shared module-level connection pool.
+
+    All subclasses share one pool so concurrent instantiations don't multiply
+    open connections. Subclasses that need per-connection setup (codec
+    registration etc.) should override _configure() — called once on __aenter__
+    rather than per connection, since the pool is shared.
+    """
+
+    async def __aenter__(self) -> "BaseStorage":
+        self._pool = await _get_shared_pool()
         return self
 
     async def __aexit__(self, *_: Any) -> None:
-        await self._pool.close()
+        pass  # pool is shared; do not close it here

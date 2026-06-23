@@ -5,7 +5,9 @@ DocsStorage — async psycopg3 interface for the *docs* table.
 import json
 
 import psycopg
+import psycopg.rows
 from pgvector.psycopg import register_vector_async
+from psycopg_pool import AsyncConnectionPool
 
 from .base import BaseStorage
 from .models import Doc
@@ -34,7 +36,23 @@ class DocsStorage(BaseStorage):
             doc    = await storage.get(doc_id)
     """
 
-    async def _configure(self, conn: psycopg.AsyncConnection) -> None:
+    async def __aenter__(self) -> "DocsStorage":
+        from .base import _conninfo
+        self._pool = AsyncConnectionPool(
+            conninfo=_conninfo(),
+            min_size=1,
+            max_size=3,
+            open=False,
+            configure=self._configure_conn,
+            kwargs={"row_factory": psycopg.rows.dict_row},
+        )
+        await self._pool.open()
+        return self  # type: ignore[return-value]
+
+    async def __aexit__(self, *args: object) -> None:
+        await self._pool.close()
+
+    async def _configure_conn(self, conn: psycopg.AsyncConnection) -> None:
         await register_vector_async(conn)
 
     # ── Writes ────────────────────────────────────────────────────────────────
