@@ -177,10 +177,11 @@ class ExcelFormatter:
 
     Args:
         excel_path: Path to the output xlsx file (created if absent).
+        legacy:     Use the legacy 3-column layout (visits / formal / diagnosis).
     """
 
-    def __init__(self, excel_path: str | Path) -> None:
-        self._excel = AuditExcelWriter(excel_path)
+    def __init__(self, excel_path: str | Path, *, legacy: bool = False) -> None:
+        self._excel = AuditExcelWriter(excel_path, legacy=legacy)
         self._reader = _DoneCardsReader()
 
     async def __aenter__(self) -> "ExcelFormatter":

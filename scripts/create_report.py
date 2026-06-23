@@ -32,6 +32,7 @@ _parser.add_argument("--from", dest="date_from", required=True, metavar="YYYY-MM
 _parser.add_argument("--to",   dest="date_to",   required=True, metavar="YYYY-MM-DD", help="End date (inclusive)")
 _parser.add_argument("--output", default=None, metavar="DIR", help="Directory for the report file (default: project root)")
 _parser.add_argument("--org", required=True, choices=("Alenka", "MDS"), help="Organization to export (required: a report is always scoped to one org)")
+_parser.add_argument("--legacy-report", action="store_true", help="Use legacy 3-column Excel layout (visits, formal, diagnosis)")
 _args = _parser.parse_args()
 
 
@@ -65,7 +66,7 @@ async def main() -> None:
         "Creating report for %s — %s (org=%s) → %s",
         _args.date_from, _args.date_to, _args.org, excel_path,
     )
-    async with ExcelFormatter(excel_path) as fmt:
+    async with ExcelFormatter(excel_path, legacy=_args.legacy_report) as fmt:
         written = await fmt.export_period(date_from, date_to, org_id)
     if written:
         log.info("Done: wrote %d row(s) to %s", written, excel_path)

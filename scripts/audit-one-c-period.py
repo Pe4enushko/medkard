@@ -36,6 +36,7 @@ from audit.excel_formatter import ExcelFormatter
 from audit.pipeline import AuditPipeline
 from integrations.ftp import load_creds, upload
 from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient
+from audit.filters import CardFilter
 from parsers.filter_config import load_card_filter
 from RAG.retrieval.vector_store import close_pool
 from storage.organizations_storage import OrganizationsStorage
@@ -49,6 +50,7 @@ _parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
 _parser.add_argument("--excel", default=None, metavar="PATH", help="Output xlsx file (default: report_<datebegin>_to_<dateend>.xlsx)")
 _parser.add_argument("--num-batches", type=int, default=5, metavar="N", help="Max concurrent visits processed at a time (default: 5)")
 _parser.add_argument("--ftpcreds", default=None, metavar="FILE", help="Credentials file for FTP upload (ip=, port=, username=, password=)")
+_parser.add_argument("--legacy-report", action="store_true", help="Use legacy 3-column Excel layout (visits, formal, diagnosis)")
 _args = _parser.parse_args()
 
 ONE_C_CLIENTS: dict[str, type[OneCClient]] = {
@@ -119,9 +121,10 @@ def _load_or_fetch_one_c_payload(org: str, datebegin: str, dateend: str) -> Any:
     return payload
 
 
-def _confirm_period(org: str, datebegin: str, dateend: str) -> None:
+def _confirm_period(org: str, datebegin: str, dateend: str, card_filter: CardFilter) -> None:
     print(f"Organization: {org}")
     print(f"Period: {datebegin} — {dateend}")
+    print(f"Filters:\n{card_filter}")
     if _args.y:
         return
     answer = input("Proceed? [y/N] ").strip().lower()
@@ -131,7 +134,8 @@ def _confirm_period(org: str, datebegin: str, dateend: str) -> None:
 
 
 async def main() -> None:
-    _confirm_period(_args.org, DATEBEGIN, DATEEND)
+    card_filter = load_card_filter(_args.org)
+    _confirm_period(_args.org, DATEBEGIN, DATEEND, card_filter)
     log.info("🩺 Starting period audit: org=%s datebegin=%s dateend=%s", _args.org, DATEBEGIN, DATEEND)
 
     try:
@@ -142,7 +146,6 @@ async def main() -> None:
         payload = _load_or_fetch_one_c_payload(org=_args.org, datebegin=DATEBEGIN, dateend=DATEEND)
 
         # ── 2. Run pipeline — each card is persisted to DB on completion ──────
-        card_filter = load_card_filter(_args.org)
         async with AuditPipeline(org_id=org_id, card_filter=card_filter) as pipeline:
             pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches)
         log.info("Pipeline done: %d result(s)", len(pairs))
@@ -152,7 +155,7 @@ async def main() -> None:
         # ── 3. Export the full period for this org from DB to Excel ───────────
         #     Independent of stage 2: runs whether or not new cards were processed,
         #     so the report always reflects every card in the period.
-        async with ExcelFormatter(EXCEL_PATH) as fmt:
+        async with ExcelFormatter(EXCEL_PATH, legacy=_args.legacy_report) as fmt:
             written = await fmt.export_period(PERIOD_FROM, PERIOD_TO, org_id)
         log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)
 
