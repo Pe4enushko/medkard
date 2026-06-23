@@ -52,7 +52,7 @@ class _QueryInput(BaseModel):
 def _format_results(results: list[dict]) -> str:
     """Render a list of raw search result dicts as readable text for the LLM."""
     if not results:
-        return "Ничего не найдено."
+        return "Ничего не найдено. Не повторяй этот запрос — попробуй другой или переходи к выводу."
 
     parts: list[str] = []
     for i, raw in enumerate(results, start=1):

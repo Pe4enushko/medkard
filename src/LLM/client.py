@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import os
+
 from openai import APIError
 from pydantic import BaseModel
 
@@ -130,7 +132,11 @@ class LLMClient:
         for attempt in range(self._max_retries + 1):
             try:
                 agent = create_checker_agent(system_prompt, tools)
-                result = await agent.ainvoke({"messages": [("user", current_human)]})
+                max_steps = int(os.environ.get("AGENT_MAX_STEPS", "20"))
+                result = await agent.ainvoke(
+                    {"messages": [("user", current_human)]},
+                    config={"recursion_limit": max_steps},
+                )
                 total_tokens += _sum_agent_tokens(result)
 
                 last_msg = result["messages"][-1]

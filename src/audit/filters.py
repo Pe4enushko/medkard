@@ -40,6 +40,10 @@ class IcdFilter(_BaseFilter):
     def __init__(self, codes: list[str]) -> None:
         self._codes = {c.upper() for c in codes}
 
+    def __str__(self) -> str:
+        codes = ", ".join(sorted(self._codes)) if self._codes else "(none)"
+        return f"IcdFilter: skip visits/diagnoses with ICD codes [{codes}]"
+
     def should_skip(self, visit: dict[str, Any]) -> bool:
         if not self._codes:
             return False
@@ -62,6 +66,9 @@ class KDLFilter(_BaseFilter):
 
     _KDL_SUFFIX = "(КДЛ)"
     _CODE_RE = re.compile(r"\d+\.\d+\.[A-Za-zА-Яа-яЁё]\d+\.\d+")
+
+    def __str__(self) -> str:
+        return "KDLFilter: skip KDL-only visits"
 
     def _service_matches(self, service: dict[str, Any]) -> bool:
         name: str = service.get(_НАИМЕНОВАНИЕ) or ""
@@ -87,6 +94,9 @@ class AnalysisFilter(_BaseFilter):
 
     _CODE_RE = re.compile(r"[AА]\d{2,}\.\d{2,}\.\d{3,}")
 
+    def __str__(self) -> str:
+        return "AnalysisFilter: skip analysis-only visits"
+
     def _service_matches(self, service: dict[str, Any]) -> bool:
         for field in _SERVICE_CODE_FIELDS:
             value: str = service.get(field) or ""
@@ -110,6 +120,11 @@ class CardFilter:
 
     def __init__(self, strategies: list[_BaseFilter]) -> None:
         self.strategies = strategies
+
+    def __str__(self) -> str:
+        if not self.strategies:
+            return "(none)"
+        return "\n".join(f"  {s}" for s in self.strategies)
 
     def filter(
         self,
