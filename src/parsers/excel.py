@@ -11,6 +11,11 @@ Column layout (left to right):
   G  formal_structure
   H  diagnosis
 
+Legacy column layout (left to right):
+  A  Данные карты    — full visit dump
+  B  formal_structure
+  C  diagnosis
+
 Usage::
     from parsers.excel import AuditExcelWriter
     from audit.models import DiagnosisAuditResult, FormalStructureResult
@@ -59,6 +64,11 @@ _COLUMN_WIDTHS = {
 }
 _WRAPPED_COLUMNS = ("C", "D", "E", "F", "G", "H")
 _AUTOFILTER_RANGE = "A1:B1"
+
+_LEGACY_HEADERS = ["visits", "formal", "diagnosis"]
+_LEGACY_COLUMN_WIDTHS = {"A": 100, "B": 80, "C": 100}
+_LEGACY_WRAPPED_COLUMNS = ("A", "B", "C")
+_LEGACY_AUTOFILTER_RANGE = "A1:A1"
 
 logger = logging.getLogger(__name__)
 
@@ -146,11 +156,13 @@ class AuditExcelWriter:
     """Append audit results to an xlsx file, creating it with a header row if absent.
 
     Args:
-        path: Path to the xlsx output file (created automatically if missing).
+        path:   Path to the xlsx output file (created automatically if missing).
+        legacy: Use the legacy 3-column layout (visits / formal / diagnosis).
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, legacy: bool = False) -> None:
         self._path = Path(path)
+        self._legacy = legacy
 
     def _open_or_create(self) -> tuple[Workbook, Worksheet]:
         if self._path.exists():
@@ -159,14 +171,24 @@ class AuditExcelWriter:
         else:
             wb = Workbook()
             ws = wb.active
-        for idx, header in enumerate(_HEADERS, start=1):
+        if self._legacy:
+            headers = _LEGACY_HEADERS
+            widths = _LEGACY_COLUMN_WIDTHS
+            wrapped = _LEGACY_WRAPPED_COLUMNS
+            autofilter = _LEGACY_AUTOFILTER_RANGE
+        else:
+            headers = _HEADERS
+            widths = _COLUMN_WIDTHS
+            wrapped = _WRAPPED_COLUMNS
+            autofilter = _AUTOFILTER_RANGE
+        for idx, header in enumerate(headers, start=1):
             ws.cell(row=1, column=idx, value=header)
-        for column, width in _COLUMN_WIDTHS.items():
+        for column, width in widths.items():
             ws.column_dimensions[column].width = width
-        for column in _WRAPPED_COLUMNS:
+        for column in wrapped:
             for cell in ws[column]:
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
-        ws.auto_filter.ref = _AUTOFILTER_RANGE
+        ws.auto_filter.ref = autofilter
         return wb, ws  # type: ignore[return-value]
 
     def append(
@@ -183,22 +205,31 @@ class AuditExcelWriter:
             diagnosis: Diagnosis audit result(s) for this visit.
         """
         try:
-            specialization = (visit.get("Врач") or {}).get("SPECIALIZATION") or "—"
-            visit_date = (visit.get("Прием") or {}).get("DATE") or "—"
-            row = [
-                specialization,
-                visit_date,
-                _card_data_text(visit),
-                _pretty(visit.get("ДанныеОсмотра") or []),
-                _pretty(visit.get("Услуги") or []),
-                _pretty(visit.get("Диагнозы") or []),
-                _pretty(formal),
-                _pretty(diagnosis),
-            ]
+            if self._legacy:
+                row = [
+                    _pretty(visit),
+                    _pretty(formal),
+                    _pretty(diagnosis),
+                ]
+                wrapped = _LEGACY_WRAPPED_COLUMNS
+            else:
+                specialization = (visit.get("Врач") or {}).get("SPECIALIZATION") or "—"
+                visit_date = (visit.get("Прием") or {}).get("DATE") or "—"
+                row = [
+                    specialization,
+                    visit_date,
+                    _card_data_text(visit),
+                    _pretty(visit.get("ДанныеОсмотра") or []),
+                    _pretty(visit.get("Услуги") or []),
+                    _pretty(visit.get("Диагнозы") or []),
+                    _pretty(formal),
+                    _pretty(diagnosis),
+                ]
+                wrapped = _WRAPPED_COLUMNS
             wb, ws = self._open_or_create()
             ws.append(row)
             new_row = ws.max_row
-            for col_letter in _WRAPPED_COLUMNS:
+            for col_letter in wrapped:
                 col_idx = openpyxl.utils.column_index_from_string(col_letter)
                 ws.cell(row=new_row, column=col_idx).alignment = Alignment(wrap_text=True, vertical="top")
             ws.row_dimensions[new_row].height = None
