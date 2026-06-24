@@ -2,7 +2,7 @@ ALTER TABLE done_cards
     ADD COLUMN IF NOT EXISTS broken    BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS stacktrace TEXT;
 
-CREATE VIEW broken_cards AS
+CREATE OR REPLACE VIEW broken_cards AS
 SELECT
     done_cards.id,
     done_cards.card_guid,
