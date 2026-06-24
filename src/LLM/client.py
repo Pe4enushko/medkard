@@ -132,7 +132,7 @@ class LLMClient:
         for attempt in range(self._max_retries + 1):
             try:
                 agent = create_checker_agent(system_prompt, tools)
-                max_steps = int(os.environ.get("AGENT_MAX_STEPS", "20"))
+                max_steps = int(os.environ.get("AGENT_MAX_STEPS", "25"))
                 result = await agent.ainvoke(
                     {"messages": [("user", current_human)]},
                     config={"recursion_limit": max_steps},

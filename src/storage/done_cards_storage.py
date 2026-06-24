@@ -103,6 +103,7 @@ class DoneCardsStorage(BaseStorage):
                             started_at      = EXCLUDED.started_at,
                             finished_at     = EXCLUDED.finished_at,
                             ignored         = FALSE,
+                            broken          = FALSE,
                             organization_id = EXCLUDED.organization_id
                         RETURNING id::text
                         """,
@@ -167,6 +168,7 @@ class DoneCardsStorage(BaseStorage):
                     ON CONFLICT (card_guid) DO UPDATE SET
                         card_data       = EXCLUDED.card_data,
                         ignored         = TRUE,
+                        broken          = FALSE,
                         organization_id = EXCLUDED.organization_id
                     RETURNING id::text
                     """,
@@ -178,6 +180,70 @@ class DoneCardsStorage(BaseStorage):
             return row_id
         except Exception:
             logger.exception("💾 done_cards UPSERT_IGNORED FAILED guid=%s", card_guid)
+            raise
+
+    async def upsert_broken(
+        self,
+        *,
+        card_data: str,
+        stacktrace: str,
+        started_at: datetime,
+        card_guid: str | None = None,
+        organization_id: str | None = None,
+    ) -> str:
+        """Insert or update a done_cards row for a card that failed with an exception.
+
+        Sets broken=TRUE and stores the stacktrace; all audit columns are left NULL.
+        """
+        try:
+            async with self._pool.connection() as conn:
+                if card_guid:
+                    cur = await conn.execute(
+                        """
+                        INSERT INTO done_cards
+                            (card_guid, card_data, ignored, broken, stacktrace, started_at, organization_id)
+                        VALUES
+                            (%(guid)s, %(data)s::jsonb, FALSE, TRUE, %(stacktrace)s, %(started_at)s, %(org_id)s)
+                        ON CONFLICT (card_guid) DO UPDATE SET
+                            card_data       = EXCLUDED.card_data,
+                            ignored         = FALSE,
+                            broken          = TRUE,
+                            stacktrace      = EXCLUDED.stacktrace,
+                            started_at      = EXCLUDED.started_at,
+                            organization_id = EXCLUDED.organization_id
+                        RETURNING id::text
+                        """,
+                        {
+                            "guid":       card_guid,
+                            "data":       card_data,
+                            "stacktrace": stacktrace,
+                            "started_at": started_at,
+                            "org_id":     organization_id,
+                        },
+                    )
+                else:
+                    cur = await conn.execute(
+                        """
+                        INSERT INTO done_cards
+                            (card_guid, card_data, ignored, broken, stacktrace, started_at, organization_id)
+                        VALUES
+                            (NULL, %(data)s::jsonb, FALSE, TRUE, %(stacktrace)s, %(started_at)s, %(org_id)s)
+                        RETURNING id::text
+                        """,
+                        {
+                            "data":       card_data,
+                            "stacktrace": stacktrace,
+                            "started_at": started_at,
+                            "org_id":     organization_id,
+                        },
+                    )
+
+                row = await cur.fetchone()
+            row_id: str = row["id"]
+            logger.info("💾 done_cards UPSERT_BROKEN OK id=%s guid=%s", row_id, card_guid)
+            return row_id
+        except Exception:
+            logger.exception("💾 done_cards UPSERT_BROKEN FAILED guid=%s", card_guid)
             raise
 
     async def get_done_guids(self, organization_id: str | None = None) -> set[str]:

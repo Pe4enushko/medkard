@@ -30,7 +30,7 @@ _parser.add_argument("--csv", dest="csv_path", default=None, metavar="PATH")
 _args = _parser.parse_args()
 
 _COLUMNS = [
-    "visit_date", "total_cards", "ignored_cards",
+    "visit_date", "total_cards", "audited_cards", "ignored_cards", "broken_cards",
     "total_tokens", "avg_tokens", "wall_clock_sec", "avg_time_sec",
     "organization_name",
 ]
@@ -38,7 +38,9 @@ _COLUMNS = [
 _COL_WIDTHS = {
     "visit_date":        12,
     "total_cards":        6,
+    "audited_cards":      7,
     "ignored_cards":      7,
+    "broken_cards":       7,
     "total_tokens":      12,
     "avg_tokens":        10,
     "wall_clock_sec":    14,
@@ -48,8 +50,10 @@ _COL_WIDTHS = {
 
 _COL_LABELS = {
     "visit_date":        "Date",
-    "total_cards":       "Cards",
+    "total_cards":       "Total",
+    "audited_cards":     "Audited",
     "ignored_cards":     "Ignored",
+    "broken_cards":      "Broken",
     "total_tokens":      "Total tokens",
     "avg_tokens":        "Avg tokens",
     "wall_clock_sec":    "Wall clock (s)",

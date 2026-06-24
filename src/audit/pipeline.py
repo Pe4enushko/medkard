@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import time
+import traceback
 from datetime import datetime, timezone
 from typing import Any
 
@@ -127,20 +128,38 @@ class AuditPipeline:
 
         sem = asyncio.Semaphore(num_batches)
 
-        async def _audit_with_sem(idx: int, visit: dict[str, Any]) -> tuple[Result, int]:
+        async def _audit_with_sem(idx: int, visit: dict[str, Any]) -> tuple[Result, int] | None:
             priem: dict = visit.get("Прием") or {}
             visit_id = priem.get("GUID") or priem.get("DATE") or f"#{idx + 1}"
+            card_guid = priem.get("GUID") or None
             async with sem:
                 logger.info("🩺 Auditing visit %s (%d/%d)", visit_id, idx + 1, len(appointments))
                 t_start = time.monotonic()
-                result = await self._audit_visit(visit)
-                elapsed_ms = int((time.monotonic() - t_start) * 1000)
-                logger.info("🩺 Visit %s done in %d ms", visit_id, elapsed_ms)
-                return result, elapsed_ms
+                dt_start = datetime.now(timezone.utc)
+                try:
+                    result = await self._audit_visit(visit)
+                    elapsed_ms = int((time.monotonic() - t_start) * 1000)
+                    logger.info("🩺 Visit %s done in %d ms", visit_id, elapsed_ms)
+                    return result, elapsed_ms
+                except Exception:
+                    elapsed_ms = int((time.monotonic() - t_start) * 1000)
+                    tb = traceback.format_exc()
+                    logger.exception("🩺 Visit %s FAILED after %d ms", visit_id, elapsed_ms)
+                    if self._done_cards is not None:
+                        try:
+                            await self._done_cards.upsert_broken(
+                                card_guid=card_guid,
+                                card_data=json.dumps(visit, ensure_ascii=False),
+                                stacktrace=tb,
+                                started_at=dt_start,
+                                organization_id=self._org_id,
+                            )
+                        except Exception:
+                            logger.exception("💾 Failed to persist broken card guid=%s", card_guid)
+                    return None
 
-        pairs: list[tuple[Result, int]] = list(
-            await asyncio.gather(*[_audit_with_sem(idx, visit) for idx, visit in pending])
-        )
+        raw_pairs = await asyncio.gather(*[_audit_with_sem(idx, visit) for idx, visit in pending])
+        pairs: list[tuple[Result, int]] = [p for p in raw_pairs if p is not None]
 
         self._log_queue_summary(appointments, done_guids, skipped_done, skipped_strategy, len(pairs))
         return pairs
