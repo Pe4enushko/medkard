@@ -80,7 +80,7 @@ def _pretty(obj: Any) -> str:
         for item in obj
     ):
         if not obj:
-            return "—"
+            return "Нет"
         return "\n\n".join(
             f"{idx}.\n{item.pretty_format()}"
             for idx, item in enumerate(obj, start=1)
