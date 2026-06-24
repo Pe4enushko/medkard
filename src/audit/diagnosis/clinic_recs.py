@@ -26,6 +26,29 @@ _SKIP_CODES: frozenset[str] = frozenset({"Z00.1"})
 _ICD_COLUMN = "МКБ-10"
 _ID_COLUMN = "ID"
 _NAME_COLUMN = "Наименование"
+_AGE_COLUMN = "Возрастная категория"
+_ADULT_THRESHOLD = 15  # age > this → adult
+
+
+def _is_age_eligible(row: dict[str, str], age: int | None) -> bool:
+    """Return False if the row's age category contradicts the patient's age."""
+    if age is None:
+        return True
+    cat = row.get(_AGE_COLUMN, "").strip().lower()
+    is_child = age <= _ADULT_THRESHOLD
+    if "дети" in cat and "взрослые" not in cat:
+        return is_child
+    if "взрослые" in cat and "дети" not in cat:
+        return not is_child
+    return True  # "Взрослые, дети" or unknown — keep
+
+
+def _patient_age(patient: dict[str, Any]) -> int | None:
+    raw = patient.get("AGE") or patient.get("Возраст")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 class ClinicRecs:
@@ -90,15 +113,16 @@ class ClinicRecs:
         if not normalised or normalised in _SKIP_CODES:
             return None, 0
 
-        matched = self._find_matching_rows(normalised)
+        age = _patient_age(patient)
+        matched = [r for r in self._find_matching_rows(normalised) if _is_age_eligible(r, age)]
 
         if not matched:
             # ── Prefix fallback: strip .(\d+) subcategory (J20.9 → J20) ─────
             prefix = normalised.split(".")[0]
             if prefix != normalised:
-                matched = self._find_matching_rows_by_prefix(prefix)
-                if matched:
-                    return await self._prefix_picker.pick(patient, diagnosis, matched)
+                candidates = [r for r in self._find_matching_rows_by_prefix(prefix) if _is_age_eligible(r, age)]
+                if candidates:
+                    return await self._prefix_picker.pick(patient, diagnosis, candidates)
             return None, 0
 
         if len(matched) == 1:
