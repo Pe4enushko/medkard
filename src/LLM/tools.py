@@ -27,6 +27,8 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from RAG.retrieval.searches import (
+    get_section_chunks,
+    get_sections_for_file,
     search_anamnesis,
     search_by_file_id,
     search_inspection,
@@ -253,6 +255,79 @@ class SearchMedicineTool(BaseTool):
         raise NotImplementedError("Use async invocation (_arun).")
 
 
+# ── ICD checker tools (file_id supplied as agent input, not bound at construction) ──
+
+class _GuidelineStructureInput(BaseModel):
+    file_id: str = Field(description="Guideline file ID from the manifest (e.g. '581_2').")
+
+
+class _SectionReadInput(BaseModel):
+    file_id: str = Field(description="Guideline file ID from the manifest.")
+    section: str = Field(description="Exact section name as returned by get_guideline_structure.")
+
+
+class GetGuidelineStructureTool(BaseTool):
+    """Return the ordered list of section names (TOC) for a guideline document."""
+
+    name: str = "get_guideline_structure"
+    description: str = (
+        "Get the table of contents (ordered section names) for a clinical guideline. "
+        "Use this first to see which sections exist before deciding what to read."
+    )
+    args_schema: Type[BaseModel] = _GuidelineStructureInput
+
+    async def _arun(self, file_id: str) -> str:  # type: ignore[override]
+        sections = await get_sections_for_file(file_id)
+        if not sections:
+            return f"Документ '{file_id}' не найден или не содержит разделов."
+        numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(sections, 1))
+        return f"Разделы документа {file_id}:\n{numbered}"
+
+    def _run(self, file_id: str) -> str:  # type: ignore[override]
+        raise NotImplementedError("Use async invocation (_arun).")
+
+
+class ReadGuidelineSectionTool(BaseTool):
+    """Read all chunks of a specific section from a guideline document in order."""
+
+    name: str = "read_guideline_section"
+    description: str = (
+        "Read the full text of a specific section from a clinical guideline, "
+        "chunk by chunk in document order. Use after get_guideline_structure to "
+        "read sections 1.x (definition, classification, diagnostic criteria)."
+    )
+    args_schema: Type[BaseModel] = _SectionReadInput
+
+    async def _arun(self, file_id: str, section: str) -> str:  # type: ignore[override]
+        chunks = await get_section_chunks(file_id, section)
+        if not chunks:
+            return f"Раздел '{section}' в документе '{file_id}' не найден."
+        import json as _json
+        parts: list[str] = []
+        for raw in chunks:
+            meta = raw.get("metadata") or {}
+            if isinstance(meta, str):
+                try:
+                    meta = _json.loads(meta)
+                except _json.JSONDecodeError:
+                    meta = {}
+            from storage.models.doc import Doc
+            doc = Doc(
+                chunk=raw.get("chunk", ""),
+                file_id=raw.get("file_id", file_id),
+                metadata=meta,
+                id=raw.get("id"),
+                fact_q=raw.get("fact_q"),
+                procedure_q=raw.get("procedure_q"),
+                constraint_q=raw.get("constraint_q"),
+            )
+            parts.append(doc._format_chunk())
+        return "\n\n".join(parts)
+
+    def _run(self, file_id: str, section: str) -> str:  # type: ignore[override]
+        raise NotImplementedError("Use async invocation (_arun).")
+
+
 # ── Public factories ──────────────────────────────────────────────────────────
 
 def get_tools_for(file_id: str) -> list[BaseTool]:
@@ -288,4 +363,16 @@ def get_treatment_tools_for(file_id: str) -> list[BaseTool]:
         SearchTreatmentTool(file_id=file_id),
         SearchGuidelineTool(file_id=file_id),
         SearchMedicineTool(),
+    ]
+
+
+def get_icd_checker_tools() -> list[BaseTool]:
+    """Return tools for the ICD checker agent.
+
+    Unlike the clinical checker tools, these are not bound to a specific file_id —
+    the agent supplies file_id as a tool argument based on the manifest table in context.
+    """
+    return [
+        GetGuidelineStructureTool(),
+        ReadGuidelineSectionTool(),
     ]

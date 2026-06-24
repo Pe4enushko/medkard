@@ -109,6 +109,8 @@ class FormalValidator:
 
     All rule data is loaded once at class instantiation from ``rules.json``
     and the system prompt template is loaded from ``LLM/prompts/``.
+
+    # TODO: refactor to use parsers.json_parser.AppointmentParser.parse() instead of direct key access
     """
 
     async def get_visit_types(self, visit: dict[str, Any]) -> set[VisitType]:

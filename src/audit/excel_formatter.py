@@ -25,7 +25,7 @@ from typing import Any
 
 from parsers.excel import AuditExcelWriter
 from storage.base import BaseStorage
-from storage.models.result import DiagnosisResult, FormalFinding, FormalStructureResult
+from storage.models.result import DiagnosisResult, FormalFinding, FormalStructureResult, IcdCodingIssue, IssueSource
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,29 @@ def _parse_formal(data: list[dict]) -> FormalStructureResult:
             for f in (data or [])
         ]
     )
+
+
+def _parse_icd_check(data: list[dict] | None) -> list[IcdCodingIssue]:
+    issues = []
+    for entry in (data or []):
+        sources = [
+            IssueSource(
+                doc_title=s.get("doc_title", ""),
+                section=s.get("section"),
+                cite=s.get("cite"),
+            )
+            for s in entry.get("sources", [])
+            if isinstance(s, dict)
+        ]
+        issues.append(IcdCodingIssue(
+            dx_index=entry.get("dx_index", 0),
+            initial_code=entry.get("initial_code", ""),
+            suggested_code=entry.get("suggested_code", ""),
+            confidence=entry.get("confidence", 0),
+            comment=entry.get("comment", ""),
+            sources=sources,
+        ))
+    return issues
 
 
 def _parse_diagnosis(data: list[dict], manifest_meta: dict[str, dict] | None = None) -> list[DiagnosisResult]:
@@ -97,7 +120,7 @@ class _DoneCardsReader(BaseStorage):
     async def fetch_all(self) -> list[dict[str, Any]]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, card_guid, card_data::text, formal_result, diag_result "
+                "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result"
                 "FROM done_cards ORDER BY id"
             )
             return self._decode_rows(await cur.fetchall())
@@ -105,7 +128,7 @@ class _DoneCardsReader(BaseStorage):
     async def fetch_by_guids(self, guids: set[str]) -> list[dict[str, Any]]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, card_guid, card_data::text, formal_result, diag_result "
+                "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result"
                 "FROM done_cards WHERE card_guid = ANY(%(guids)s) ORDER BY id",
                 {"guids": list(guids)},
             )
@@ -125,7 +148,7 @@ class _DoneCardsReader(BaseStorage):
                 "  WHERE ignored = FALSE "
                 "    AND organization_id = %(org_id)s::uuid"
                 ") "
-                "SELECT id, card_guid, card_data::text, formal_result, diag_result "
+                "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result"
                 "FROM cards "
                 "WHERE visit_date >= %(from)s::date AND visit_date < %(to)s::date "
                 "ORDER BY visit_date, id",
@@ -224,7 +247,8 @@ class ExcelFormatter:
             visit = row["card_data"]
             formal = _parse_formal(row["formal_result"])
             diagnosis = _parse_diagnosis(row["diag_result"], manifest_meta)
-            self._excel.append(visit=visit, formal=formal, diagnosis=diagnosis)
+            icd_check = _parse_icd_check(row.get("icd_check_result") or [])
+            self._excel.append(visit=visit, formal=formal, diagnosis=diagnosis, icd_check=icd_check)
             logger.debug("📊 exported card id=%s guid=%s", row["id"], guid)
             written += 1
         logger.info("📊 ExcelFormatter exported %d row(s)", written)

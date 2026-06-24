@@ -6,6 +6,43 @@ _DELIM = "─" * 10
 
 
 @dataclass
+class IcdCodingIssue:
+    """ICD-10 coding error found by the ICD checker for a single diagnosis."""
+
+    dx_index: int               # position in visit["Диагнозы"] — safe key for duplicate codes
+    initial_code: str           # doctor's original code, e.g. "J20.0"
+    suggested_code: str         # LLM-suggested correct code, e.g. "J18.9"
+    confidence: int             # 8–10
+    comment: str                # reasoning in Russian
+    sources: list[IssueSource] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "dx_index": self.dx_index,
+            "initial_code": self.initial_code,
+            "suggested_code": self.suggested_code,
+            "confidence": self.confidence,
+            "comment": self.comment,
+            "sources": [
+                {"doc_title": s.doc_title, "section": s.section, "cite": s.cite}
+                for s in self.sources
+            ],
+        }
+
+    def pretty_format(self) -> str:
+        lines = [
+            f"    [ОШИБКА КОДИРОВАНИЯ МКБ]",
+            f"    Код врача:       {self.initial_code}",
+            f"    Предложен код:   {self.suggested_code}",
+            f"    Уверенность:     {self.confidence}/10",
+            f"    Обоснование:     {self.comment}",
+        ]
+        for src in self.sources:
+            lines.append(src.pretty_format())
+        return "\n".join(lines)
+
+
+@dataclass
 class IssueSource:
     """A single document source reference that supports an audit issue."""
 

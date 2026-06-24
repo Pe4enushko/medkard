@@ -51,6 +51,7 @@ _HEADERS = [
     "Диагнозы",
     "Проверка по приказам МЗ",
     "Проверка по клин.рекоммендациям",
+    "Проверка кодирования МКБ",
 ]
 _COLUMN_WIDTHS = {
     "A": 25,
@@ -61,6 +62,7 @@ _COLUMN_WIDTHS = {
     "F": 60,
     "G": 80,
     "H": 100,
+    "I": 100,
 }
 _AUTOFILTER_RANGE = "A1:B1"
 
@@ -189,6 +191,7 @@ class AuditExcelWriter:
         visit: dict[str, Any],
         formal: FormalStructureResult,
         diagnosis: Any,
+        icd_check: Any = None,
     ) -> None:
         """Append one result row and save the workbook.
 
@@ -216,6 +219,7 @@ class AuditExcelWriter:
                     _pretty(visit.get("Диагнозы") or []),
                     _pretty(formal),
                     _pretty(diagnosis),
+                    _pretty(icd_check or []),
                 ]
             wb, ws = self._open_or_create()
             ws.append(row)

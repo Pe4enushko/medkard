@@ -109,19 +109,23 @@ class LLMClient:
         system_prompt: str,
         tools: list,
         human_message: str,
-    ) -> tuple[str, int]:
+        response_format: type[BaseModel] | None = None,
+    ) -> tuple[str | BaseModel, int]:
         """Invoke a LangChain ReAct agent with retry.
 
         Creates a fresh agent on each attempt and injects a failure notice as
         an extra user message when retrying.
 
         Args:
-            system_prompt:  Fully rendered system prompt for the agent.
-            tools:          File-id-bound tool instances.
-            human_message:  The user-facing clinical input.
+            system_prompt:   Fully rendered system prompt for the agent.
+            tools:           File-id-bound tool instances.
+            human_message:   The user-facing clinical input.
+            response_format: Optional Pydantic model — passed to create_react_agent
+                             so the final answer is structured via with_structured_output.
+                             When provided the return value is a Pydantic instance, not str.
 
         Returns:
-            (last_message_content, total_tokens)
+            (last_message_content_or_pydantic_instance, total_tokens)
         """
         total_tokens = 0
         last_exc: Exception | None = None
@@ -131,7 +135,7 @@ class LLMClient:
 
         for attempt in range(self._max_retries + 1):
             try:
-                agent = create_checker_agent(system_prompt, tools)
+                agent = create_checker_agent(system_prompt, tools, response_format=response_format)
                 max_steps = int(os.environ.get("AGENT_MAX_STEPS", "25"))
                 result = await agent.ainvoke(
                     {"messages": [("user", current_human)]},
@@ -140,6 +144,10 @@ class LLMClient:
                 total_tokens += _sum_agent_tokens(result)
 
                 last_msg = result["messages"][-1]
+                if response_format is not None:
+                    parsed = getattr(last_msg, "parsed", None) or getattr(last_msg, "content", "")
+                    return parsed, total_tokens
+
                 content: str = last_msg.content or ""
                 finish_reason = (getattr(last_msg, "response_metadata", {}) or {}).get("finish_reason")
 

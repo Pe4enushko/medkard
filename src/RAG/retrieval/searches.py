@@ -194,3 +194,48 @@ async def search_treatment(
     Returns raw result dicts (no formatting).
     """
     return await _hybrid_filtered(query, file_id, section_filter="лечен")
+
+
+async def get_sections_for_file(file_id: str) -> list[str]:
+    """Return distinct section names for *file_id* ordered by first chunk_index.
+
+    Used by the ICD checker agent to get the TOC of a guideline before
+    deciding which sections to read.
+    """
+    from RAG.retrieval.vector_store import _get_pool
+    pool = await _get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT metadata->>'section' AS section,
+               MIN((metadata->>'chunk_index')::INT) AS min_idx
+        FROM docs
+        WHERE file_id = $1
+          AND metadata->>'section' IS NOT NULL
+        GROUP BY metadata->>'section'
+        ORDER BY min_idx ASC
+        """,
+        file_id,
+    )
+    return [r["section"] for r in rows if r["section"]]
+
+
+async def get_section_chunks(file_id: str, section: str) -> list[dict]:
+    """Return all chunks for *file_id* in *section*, ordered by chunk_index.
+
+    Used by the ICD checker agent to read a guideline section sequentially
+    (e.g. sections 1.1, 1.2 — definition and classification).
+    """
+    from RAG.retrieval.vector_store import _get_pool
+    pool = await _get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id::text, chunk, metadata, fact_q, procedure_q, constraint_q
+        FROM docs
+        WHERE file_id = $1
+          AND metadata->>'section' = $2
+        ORDER BY (metadata->>'chunk_index')::INT ASC
+        """,
+        file_id,
+        section,
+    )
+    return [dict(r) for r in rows]

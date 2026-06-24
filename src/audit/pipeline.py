@@ -26,31 +26,14 @@ from typing import Any
 from audit.diagnosis.validator import DiagnosisValidator
 from audit.filters import CardFilter
 from audit.formal_structure.validator import FormalValidator
+from audit.icd_check.validator import check_icd_codes
 from audit.models import FormalFinding, FormalStructureResult
+from audit.diagnosis.clinic_recs import ClinicRecs, _is_age_eligible, _patient_age
+from parsers.json_parser import AppointmentParser
 from storage.done_cards_storage import DoneCardsStorage
-from storage.models.result import DiagnosisIssue, DiagnosisResult, Result
+from storage.models.result import DiagnosisIssue, DiagnosisResult, IcdCodingIssue, Result
 
 logger = logging.getLogger(__name__)
-
-_APPOINTMENTS_KEY = "appointments"
-
-
-def _split_appointments(raw: Any) -> list[dict[str, Any]]:
-    """Extract the appointments list from *raw*.
-
-    Accepts a wrapper dict with the ``"appointments"`` key, a bare list,
-    or a raw JSON string of either shape.
-    """
-    if isinstance(raw, str):
-        raw = json.loads(raw)
-
-    if isinstance(raw, list):
-        return raw
-
-    if isinstance(raw, dict):
-        return raw[_APPOINTMENTS_KEY]
-
-    raise ValueError(f"Cannot extract appointments from input of type {type(raw).__name__!r}")
 
 
 def _visit_guid(visit: dict[str, Any]) -> str | None:
@@ -112,7 +95,7 @@ class AuditPipeline:
         if done_guids is None:
             done_guids = await self._done_cards.get_done_guids(organization_id=self._org_id)
 
-        appointments = _split_appointments(raw_input)
+        appointments = AppointmentParser.split(raw_input)
         pending, ignored_visits, skipped_done, skipped_strategy = self._card_filter.filter(appointments, done_guids)
 
         if ignored_visits and self._done_cards is not None:
@@ -207,14 +190,16 @@ class AuditPipeline:
             formal_result.pretty_format(),
         )
 
-        diagnoses: list[dict] = visit.get("Диагнозы", [])
+        patient: dict = visit.get("Пациент") or {}
+        diagnoses: list[dict] = visit.get("Диагнозы") or []
+        inspection_data: list[dict] = visit.get("ДанныеОсмотра") or []
         logger.debug("[pipeline] diagnoses found: %d", len(diagnoses))
 
         if not diagnoses:
-            logger.info("🧬 [pipeline] visit %s has no diagnoses — skipping DiagnosisValidator", visit_id)
+            logger.info("🧬 [pipeline] visit %s has no diagnoses — skipping ICD check and DiagnosisValidator", visit_id)
             await self._upsert_done_card(
                 visit=visit, card_guid=card_guid,
-                formal=formal_result, diagnosis=[],
+                formal=formal_result, diagnosis=[], icd_check=[],
                 time_ms=int((time.monotonic() - t_start) * 1000),
                 token_count=formal_tokens,
                 started_at=dt_start,
@@ -222,21 +207,32 @@ class AuditPipeline:
             )
             return Result(input=visit, formal=formal_result, diagnosis=[], token_count=formal_tokens)
 
-        # ── Diagnosis check (once per diagnosis) ──────────────────────────────
+        # ── ICD coding check (once per visit, all diagnoses together) ─────────
+        clinic_recs = ClinicRecs()
+        age = _patient_age(patient)
+        all_manifest_rows = clinic_recs._load_manifest()
+        manifest_rows = [r for r in all_manifest_rows if _is_age_eligible(r, age)]
+
+        logger.info("🔎 [pipeline] running ICD checker for visit %s (%d diagnoses)", visit_id, len(diagnoses))
+        icd_issues, icd_tokens = await check_icd_codes(
+            patient=patient,
+            diagnoses=diagnoses,
+            manifest_rows=manifest_rows,
+            inspection_data=inspection_data,
+        )
+        icd_lookup: dict[int, IcdCodingIssue] = {issue.dx_index: issue for issue in icd_issues}
+        logger.info("[pipeline] ICD checker done — %d issue(s), tokens=%d", len(icd_issues), icd_tokens)
+
+        # ── Diagnosis check (once per code, original + suggested if flagged) ──
         diag_validator = DiagnosisValidator(visit)
         diagnosis_results: list[DiagnosisResult] = []
-        total_tokens = formal_tokens
+        total_tokens = formal_tokens + icd_tokens
 
         for dx_idx, diagnosis in enumerate(diagnoses):
             dx_code = diagnosis.get("КодМКБ", f"#{dx_idx + 1}")
             logger.info(
                 "🧬 [pipeline] DiagnosisValidator — visit %s, diagnosis %d/%d (%s)",
                 visit_id, dx_idx + 1, len(diagnoses), dx_code,
-            )
-            logger.debug(
-                "[pipeline] diagnosis input code=%s name=%s",
-                dx_code,
-                diagnosis.get("НаименованиеМКБ"),
             )
 
             if self._card_filter.should_skip_diagnosis(diagnosis):
@@ -252,6 +248,7 @@ class AuditPipeline:
                 )
                 continue
 
+            # Audit original code
             diag_result, diag_tokens = await diag_validator.validate_diagnosis(diagnosis)
             total_tokens += diag_tokens
             logger.info(
@@ -271,12 +268,41 @@ class AuditPipeline:
                 )
             )
 
+            # If ICD checker flagged this diagnosis, also audit the suggested code
+            coding_issue = icd_lookup.get(dx_idx)
+            if coding_issue:
+                suggested_code = coding_issue.suggested_code
+                logger.info(
+                    "🔎 [pipeline] auditing suggested ICD code %s for visit %s dx %s",
+                    suggested_code, visit_id, dx_code,
+                )
+                suggested_diagnosis = dict(diagnosis)
+                suggested_diagnosis["КодМКБ"] = suggested_code
+                suggested_diagnosis["НаименованиеМКБ"] = suggested_code
+                sugg_result, sugg_tokens = await diag_validator.validate_diagnosis(suggested_diagnosis)
+                total_tokens += sugg_tokens
+                logger.info(
+                    "[pipeline] suggested code audit done — %s: anamnesis=%d inspection=%d treatment=%d tokens=%d",
+                    suggested_code,
+                    len(sugg_result.anamnesis_issues),
+                    len(sugg_result.inspection_issues),
+                    len(sugg_result.treatment_issues),
+                    sugg_tokens,
+                )
+                diagnosis_results.append(
+                    DiagnosisResult(
+                        icd_code=suggested_code,
+                        issues=sugg_result.all_issues,
+                        guideline_file_id=sugg_result.guideline_file_id,
+                    )
+                )
+
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
         dt_finish = datetime.now(timezone.utc)
 
         await self._upsert_done_card(
             visit=visit, card_guid=card_guid,
-            formal=formal_result, diagnosis=diagnosis_results,
+            formal=formal_result, diagnosis=diagnosis_results, icd_check=icd_issues,
             time_ms=elapsed_ms,
             token_count=total_tokens,
             started_at=dt_start,
@@ -299,6 +325,7 @@ class AuditPipeline:
         card_guid: str | None,
         formal: FormalStructureResult,
         diagnosis: list[DiagnosisResult],
+        icd_check: list[IcdCodingIssue],
         time_ms: int,
         started_at: datetime,
         finished_at: datetime,
@@ -312,6 +339,7 @@ class AuditPipeline:
             card_data=card_data,
             formal=formal,
             diagnosis=diagnosis,
+            icd_check=icd_check,
             token_count=token_count,
             time_ms=time_ms,
             started_at=started_at,

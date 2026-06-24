@@ -13,7 +13,7 @@ import logging
 from datetime import datetime
 
 from .base import BaseStorage
-from .models.result import DiagnosisResult, FormalStructureResult
+from .models.result import DiagnosisResult, FormalStructureResult, IcdCodingIssue
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,13 @@ logger = logging.getLogger(__name__)
 def _formal_json(formal: FormalStructureResult) -> str:
     return json.dumps(
         [{"flag": f.flag, "issue": f.issue, "source": f.source, "comment": f.comment} for f in formal.findings],
+        ensure_ascii=False,
+    )
+
+
+def _icd_check_json(issues: list[IcdCodingIssue]) -> str:
+    return json.dumps(
+        [issue.to_dict() for issue in issues],
         ensure_ascii=False,
     )
 
@@ -69,6 +76,7 @@ class DoneCardsStorage(BaseStorage):
         card_data: str,
         formal: FormalStructureResult,
         diagnosis: list[DiagnosisResult],
+        icd_check: list[IcdCodingIssue],
         token_count: int,
         time_ms: int,
         started_at: datetime,
@@ -84,6 +92,7 @@ class DoneCardsStorage(BaseStorage):
         """
         formal_json = _formal_json(formal)
         diag_json = _diag_json(diagnosis)
+        icd_check_json = _icd_check_json(icd_check)
 
         try:
             async with self._pool.connection() as conn:
@@ -91,20 +100,21 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, started_at, finished_at, ignored, organization_id)
+                            (card_guid, card_data, formal_result, diag_result, icd_check_result, token_count, time_ms, started_at, finished_at, ignored, organization_id)
                         VALUES
-                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s)
+                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s)
                         ON CONFLICT (card_guid) DO UPDATE SET
-                            card_data       = EXCLUDED.card_data,
-                            formal_result   = EXCLUDED.formal_result,
-                            diag_result     = EXCLUDED.diag_result,
-                            token_count     = EXCLUDED.token_count,
-                            time_ms         = EXCLUDED.time_ms,
-                            started_at      = EXCLUDED.started_at,
-                            finished_at     = EXCLUDED.finished_at,
-                            ignored         = FALSE,
-                            broken          = FALSE,
-                            organization_id = EXCLUDED.organization_id
+                            card_data         = EXCLUDED.card_data,
+                            formal_result     = EXCLUDED.formal_result,
+                            diag_result       = EXCLUDED.diag_result,
+                            icd_check_result  = EXCLUDED.icd_check_result,
+                            token_count       = EXCLUDED.token_count,
+                            time_ms           = EXCLUDED.time_ms,
+                            started_at        = EXCLUDED.started_at,
+                            finished_at       = EXCLUDED.finished_at,
+                            ignored           = FALSE,
+                            broken            = FALSE,
+                            organization_id   = EXCLUDED.organization_id
                         RETURNING id::text
                         """,
                         {
@@ -112,6 +122,7 @@ class DoneCardsStorage(BaseStorage):
                             "data":        card_data,
                             "formal":      formal_json,
                             "diag":        diag_json,
+                            "icd_check":   icd_check_json,
                             "tokens":      token_count,
                             "ms":          time_ms,
                             "started_at":  started_at,
@@ -123,15 +134,16 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, token_count, time_ms, started_at, finished_at, ignored, organization_id)
+                            (card_guid, card_data, formal_result, diag_result, icd_check_result, token_count, time_ms, started_at, finished_at, ignored, organization_id)
                         VALUES
-                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s)
+                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s)
                         RETURNING id::text
                         """,
                         {
                             "data":        card_data,
                             "formal":      formal_json,
                             "diag":        diag_json,
+                            "icd_check":   icd_check_json,
                             "tokens":      token_count,
                             "ms":          time_ms,
                             "started_at":  started_at,

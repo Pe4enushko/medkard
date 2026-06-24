@@ -82,12 +82,16 @@ def _sum_agent_tokens(result: dict) -> int:
 def create_checker_agent(
     system_prompt: str,
     tools: list,
+    response_format: type | None = None,
 ) -> Any:
     """Create a checker agent with custom file-id-bound tools.
 
     Args:
-        system_prompt: Fully rendered system prompt for the checker.
-        tools:         List of tool instances (already file-id bound).
+        system_prompt:   Fully rendered system prompt for the checker.
+        tools:           List of tool instances (already file-id bound).
+        response_format: Optional Pydantic model passed to create_react_agent
+                         as response_format — enforces structured output on the
+                         agent's final answer via with_structured_output.
 
     Returns:
         A compiled agent graph (``CompiledStateGraph``) ready to invoke via
@@ -99,9 +103,13 @@ def create_checker_agent(
         temperature=0.7,
     )
 
-    return create_agent(
+    kwargs: dict[str, Any] = dict(
         model=llm,
         tools=tools,
         system_prompt=system_prompt,
     )
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+
+    return create_agent(**kwargs)
 

@@ -149,6 +149,7 @@ class DiagnosisValidator:
     """
 
     def __init__(self, visit: dict[str, Any]) -> None:
+        # TODO: refactor to use parsers.json_parser.AppointmentParser.parse() instead of direct key access
         self._visit = visit
         self._clinic_recs = ClinicRecs()
 
