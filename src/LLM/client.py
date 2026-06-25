@@ -145,8 +145,18 @@ class LLMClient:
 
                 last_msg = result["messages"][-1]
                 if response_format is not None:
-                    parsed = getattr(last_msg, "parsed", None) or getattr(last_msg, "content", "")
-                    return parsed, total_tokens
+                    structured = result.get("structured_response")
+                    if structured is not None:
+                        return structured, total_tokens
+
+                    parsed = getattr(last_msg, "parsed", None)
+                    if parsed is not None:
+                        return parsed, total_tokens
+
+                    content = getattr(last_msg, "content", "")
+                    if isinstance(content, response_format):
+                        return content, total_tokens
+                    return content, total_tokens
 
                 content: str = last_msg.content or ""
                 finish_reason = (getattr(last_msg, "response_metadata", {}) or {}).get("finish_reason")

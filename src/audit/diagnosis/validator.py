@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 logger = logging.getLogger(__name__)
 
 from LLM.chinese_detector import ChineseDetector
@@ -58,6 +60,32 @@ class _CheckerRun:
     issues: list[DiagnosisIssue]
 
 
+class _CheckerSource(BaseModel):
+    doc_title: str = Field(default="")
+    section: str | None = Field(default=None)
+    cite: str | None = Field(default=None)
+
+
+class _CheckerIssue(BaseModel):
+    issue: str = Field(default="")
+    sources: list[_CheckerSource] = Field(default_factory=list)
+
+
+class _CheckerOutput(BaseModel):
+    issues: list[_CheckerIssue] = Field(default_factory=list)
+
+
+def _issue_from_schema(item: _CheckerIssue) -> DiagnosisIssue | None:
+    if not item.issue:
+        return None
+
+    sources = [
+        IssueSource(doc_title=s.doc_title, section=s.section, cite=s.cite)
+        for s in item.sources
+    ]
+    return DiagnosisIssue(issue=item.issue, sources=sources)
+
+
 def _parse_inspection_data(raw_visit: dict[str, Any]) -> str:
     items: list[dict] = raw_visit.get("ДанныеОсмотра", [])
     lines: list[str] = []
@@ -83,8 +111,15 @@ def _format_diagnosis(diagnosis: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _parse_issues(output: str) -> list[DiagnosisIssue]:
+def _parse_issues(output: str | _CheckerOutput) -> list[DiagnosisIssue]:
     """Parse a checker agent's JSON output into a list of Issue objects."""
+    if isinstance(output, _CheckerOutput):
+        return [
+            issue
+            for item in output.issues
+            if (issue := _issue_from_schema(item)) is not None
+        ]
+
     text = output.strip()
     if text.startswith("```"):
         parts = text.split("```")
@@ -129,7 +164,12 @@ async def _run_checker(
 ) -> tuple[_CheckerRun, int]:
     tool_names = [t.name for t in tools]
     logger.debug("[checker:%s] START — tools=%s", checker_label, tool_names)
-    raw_answer, tokens = await _client.call_agent(system_prompt, tools, human_message)
+    raw_answer, tokens = await _client.call_agent(
+        system_prompt,
+        tools,
+        human_message,
+        response_format=_CheckerOutput,
+    )
     logger.info("🤖 [checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
     for i, issue in enumerate(issues):
