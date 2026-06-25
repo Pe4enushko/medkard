@@ -81,3 +81,40 @@ def test_validate_visit_keeps_legacy_root_wrapper_fallback() -> None:
             "comment": "",
         }
     ]
+
+
+def test_validate_visit_parses_fenced_json_array_without_dropping_findings(caplog) -> None:
+    client = _FakeClient(
+        """```json
+[
+  {
+    "flag": "НЕСООТВЕТСТВИЕ_МКБ_И_ТЕКСТА_ДИАГНОЗА",
+    "issue": "Код МКБ не соответствует клинической картине.",
+    "comment": "В записи описана острая инфекция, но указан I10."
+  },
+  {
+    "flag": "НЕПОЛНОЕ_НАЗНАЧЕНИЕ_ПРЕПАРАТА",
+    "issue": "Назначение препарата не содержит кратности приема.",
+    "comment": "Парацетамол указан без интервала и длительности."
+  }
+]
+```"""
+    )
+
+    findings, _ = asyncio.run(
+        validate_visit("prompt", {"visit": "data"}, client=client)  # type: ignore[arg-type]
+    )
+
+    assert findings == [
+        {
+            "flag": "НЕСООТВЕТСТВИЕ_МКБ_И_ТЕКСТА_ДИАГНОЗА",
+            "issue": "Код МКБ не соответствует клинической картине.",
+            "comment": "В записи описана острая инфекция, но указан I10.",
+        },
+        {
+            "flag": "НЕПОЛНОЕ_НАЗНАЧЕНИЕ_ПРЕПАРАТА",
+            "issue": "Назначение препарата не содержит кратности приема.",
+            "comment": "Парацетамол указан без интервала и длительности.",
+        },
+    ]
+    assert "failed to parse JSON response" not in caplog.text

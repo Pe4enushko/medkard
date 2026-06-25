@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel, RootModel
@@ -43,33 +44,50 @@ def _finding_to_dict(finding: _Finding) -> dict[str, str]:
     return {"flag": finding.flag, "issue": finding.issue, "comment": finding.comment}
 
 
+def _json_candidates(raw_content: str) -> list[str]:
+    text = raw_content.strip()
+    candidates = [text]
+
+    for match in re.finditer(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL):
+        candidates.insert(0, match.group(1).strip())
+
+    for marker in ("[", "{"):
+        idx = text.find(marker)
+        if idx >= 0:
+            candidates.append(text[idx:].strip())
+
+    return [candidate for candidate in candidates if candidate]
+
+
 def _parse_findings(raw_content: str) -> list[dict[str, str]]:
-    """Parse LLM findings from the canonical bare array or legacy root wrapper."""
-    try:
-        findings_obj = _Findings.model_validate_json(raw_content)
-        return [_finding_to_dict(f) for f in findings_obj.root]
-    except Exception:
-        logger.warning("[validations] failed to parse as _Findings, trying fallback: %r", raw_content)
+    """Parse LLM findings from a bare array, fenced JSON, or legacy root wrapper."""
+    decoder = json.JSONDecoder()
 
-    try:
-        raw = json.loads(raw_content)
-    except json.JSONDecodeError:
-        logger.error("[validations] failed to parse JSON response: %r", raw_content)
-        return []
+    for candidate in _json_candidates(raw_content):
+        try:
+            findings_obj = _Findings.model_validate_json(candidate)
+            return [_finding_to_dict(f) for f in findings_obj.root]
+        except Exception:
+            pass
 
-    if isinstance(raw, dict) and isinstance(raw.get("root"), list):
-        raw = raw["root"]
+        try:
+            raw, _ = decoder.raw_decode(candidate)
+        except json.JSONDecodeError:
+            continue
 
-    if isinstance(raw, list):
-        findings: list[dict[str, str]] = []
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            try:
-                findings.append(_finding_to_dict(_Finding.model_validate(item)))
-            except Exception:
-                logger.warning("[validations] skipping malformed finding: %r", item)
-        return findings
+        if isinstance(raw, dict) and isinstance(raw.get("root"), list):
+            raw = raw["root"]
+
+        if isinstance(raw, list):
+            findings: list[dict[str, str]] = []
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    findings.append(_finding_to_dict(_Finding.model_validate(item)))
+                except Exception:
+                    logger.warning("[validations] skipping malformed finding: %r", item)
+            return findings
 
     logger.error("[validations] failed to parse JSON response: %r", raw_content)
     return []
