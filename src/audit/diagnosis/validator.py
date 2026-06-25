@@ -19,11 +19,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +33,7 @@ from LLM.tools import (
     get_inspection_tools_for,
     get_treatment_tools_for,
 )
+from audit.diagnosis.schemas import CheckerIssue, CheckerOutput
 
 _chinese_detector = ChineseDetector()
 _client = LLMClient()
@@ -60,22 +60,7 @@ class _CheckerRun:
     issues: list[DiagnosisIssue]
 
 
-class _CheckerSource(BaseModel):
-    doc_title: str = Field(default="")
-    section: str | None = Field(default=None)
-    cite: str | None = Field(default=None)
-
-
-class _CheckerIssue(BaseModel):
-    issue: str = Field(default="")
-    sources: list[_CheckerSource] = Field(default_factory=list)
-
-
-class _CheckerOutput(BaseModel):
-    issues: list[_CheckerIssue] = Field(default_factory=list)
-
-
-def _issue_from_schema(item: _CheckerIssue) -> DiagnosisIssue | None:
+def _issue_from_schema(item: CheckerIssue) -> DiagnosisIssue | None:
     if not item.issue:
         return None
 
@@ -84,6 +69,30 @@ def _issue_from_schema(item: _CheckerIssue) -> DiagnosisIssue | None:
         for s in item.sources
     ]
     return DiagnosisIssue(issue=item.issue, sources=sources)
+
+
+def _load_checker_json(output: str) -> Any | None:
+    text = output.strip()
+    candidates = [text]
+
+    for match in re.finditer(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL):
+        candidates.insert(0, match.group(1).strip())
+
+    for marker in ("{", "["):
+        idx = text.find(marker)
+        if idx >= 0:
+            candidates.append(text[idx:].strip())
+
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(candidate)
+            return parsed
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def _parse_inspection_data(raw_visit: dict[str, Any]) -> str:
@@ -95,6 +104,83 @@ def _parse_inspection_data(raw_visit: dict[str, Any]) -> str:
         if key and value:
             lines.append(f"{key}: {value}")
     return "\n".join(lines)
+
+
+def _has_content(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True
+
+
+def _format_visit_value(value: Any, indent: int = 0) -> str:
+    prefix = " " * indent
+
+    if isinstance(value, dict):
+        if not value:
+            return f"{prefix}—"
+
+        lines: list[str] = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                lines.append(f"{prefix}{key}:")
+                lines.append(_format_visit_value(item, indent + 2))
+            else:
+                lines.append(f"{prefix}{key}: {item if item is not None else '—'}")
+        return "\n".join(lines)
+
+    if isinstance(value, list):
+        if not value:
+            return f"{prefix}—"
+
+        lines: list[str] = []
+        for idx, item in enumerate(value, start=1):
+            if isinstance(item, (dict, list)):
+                lines.append(f"{prefix}{idx}.")
+                lines.append(_format_visit_value(item, indent + 2))
+            else:
+                lines.append(f"{prefix}{idx}. {item if item is not None else '—'}")
+        return "\n".join(lines)
+
+    return f"{prefix}{value if value is not None else '—'}"
+
+
+def _format_visit_context(raw_visit: dict[str, Any]) -> str:
+    """Render all clinically relevant visit fields for guideline checkers."""
+    excluded = {"Пациент", "Диагнозы", "Прием", "Врач"}
+    preferred = [
+        "Жалобы",
+        "Анамнез",
+        "ОбъективныйОсмотр",
+        "Рекомендации",
+        "Назначения",
+        "Секции",
+        "ДанныеОсмотра",
+        "Услуги",
+    ]
+
+    keys: list[str] = []
+    for key in preferred:
+        if key in raw_visit:
+            keys.append(key)
+    keys.extend(key for key in raw_visit if key not in excluded and key not in keys)
+
+    parts: list[str] = []
+    for key in keys:
+        value = raw_visit.get(key)
+        if not _has_content(value):
+            continue
+
+        if key == "ДанныеОсмотра" and isinstance(value, list):
+            rendered = _parse_inspection_data(raw_visit) or _format_visit_value(value)
+        else:
+            rendered = _format_visit_value(value)
+        parts.append(f"## {key}\n{rendered}")
+
+    return "\n\n".join(parts) if parts else "—"
 
 
 def _format_diagnosis(diagnosis: dict[str, Any]) -> str:
@@ -111,27 +197,29 @@ def _format_diagnosis(diagnosis: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _parse_issues(output: str | _CheckerOutput) -> list[DiagnosisIssue]:
+def _parse_issues(output: str | CheckerOutput) -> list[DiagnosisIssue]:
     """Parse a checker agent's JSON output into a list of Issue objects."""
-    if isinstance(output, _CheckerOutput):
+    if isinstance(output, CheckerOutput):
         return [
             issue
             for item in output.issues
             if (issue := _issue_from_schema(item)) is not None
         ]
 
-    text = output.strip()
-    if text.startswith("```"):
-        parts = text.split("```")
-        text = parts[1] if len(parts) > 1 else text
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-
-    try:
-        raw: list[dict] = json.loads(text)
-    except json.JSONDecodeError:
+    raw = _load_checker_json(output)
+    if raw is None:
         return []
+
+    if isinstance(raw, dict):
+        try:
+            parsed = CheckerOutput.model_validate(raw)
+        except Exception:
+            return []
+        return [
+            issue
+            for item in parsed.issues
+            if (issue := _issue_from_schema(item)) is not None
+        ]
 
     if not isinstance(raw, list):
         return []
@@ -168,7 +256,7 @@ async def _run_checker(
         system_prompt,
         tools,
         human_message,
-        response_format=_CheckerOutput,
+        response_format=CheckerOutput,
     )
     logger.info("🤖 [checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
@@ -225,8 +313,8 @@ class DiagnosisValidator:
                 f"{patient_info}\n\n"
                 "## Диагноз\n"
                 f"{_format_diagnosis(diagnosis)}\n\n"
-                "## Клинический контекст (данные осмотра)\n"
-                f"{_parse_inspection_data(self._visit)}"
+                "## Клинический контекст записи\n"
+                f"{_format_visit_context(self._visit)}"
             )
             logger.info("📨 [diagnosis] checker user prompt for dx=%s:\n%s", dx_code, human_message)
             logger.info("[diagnosis] launching anamnesis / inspection / treatment checkers in parallel")

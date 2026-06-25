@@ -136,8 +136,12 @@ async def check_icd_codes(
         f"{manifest_table}"
     )
 
-    logger.info("[icd_check] launching ICD checker agent for %d diagnosis(es)", len(diagnoses))
-    logger.debug("[icd_check] human message:\n%s", human_message)
+    logger.info(
+        "[icd_check] launching ICD checker agent for %d diagnosis(es), age-filtered manifest rows=%d",
+        len(diagnoses),
+        len(manifest_rows),
+    )
+    logger.debug("[icd_check] diagnosis codes: %s", [dx.get("КодМКБ", "?") for dx in diagnoses])
 
     tools = get_icd_checker_tools()
     output, tokens = await _client.call_agent(
@@ -175,8 +179,13 @@ async def check_icd_codes(
             sources=sources,
         ))
         logger.info(
-            "[icd_check] coding issue dx_index=%d: %s → %s (confidence=%d)",
-            entry.dx_index, initial_code, entry.suggested_code, entry.confidence,
+            "[icd_check] selected ICD correction dx_index=%d: %s → %s "
+            "(confidence=%d, comment=%s)",
+            entry.dx_index,
+            initial_code,
+            entry.suggested_code,
+            entry.confidence,
+            entry.comment,
         )
 
     logger.info("[icd_check] done — %d issue(s), tokens=%d", len(issues), tokens)

@@ -8,6 +8,7 @@ Configuration is read once from the environment.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -18,6 +19,9 @@ load_dotenv()
 MODEL: str = os.environ.get("LLM_MODEL", "openai/gpt-oss-20b")
 
 _openai_client: AsyncOpenAI | None = None
+
+for _logger_name in ("openai", "httpx", "httpcore"):
+    logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
 
 def get_openai_client() -> AsyncOpenAI:

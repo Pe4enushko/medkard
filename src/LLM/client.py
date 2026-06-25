@@ -111,7 +111,7 @@ class LLMClient:
         human_message: str,
         response_format: type[BaseModel] | None = None,
     ) -> tuple[str | BaseModel, int]:
-        """Invoke a LangChain ReAct agent with retry.
+        """Invoke a LangGraph ReAct agent with retry.
 
         Creates a fresh agent on each attempt and injects a failure notice as
         an extra user message when retrying.

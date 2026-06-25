@@ -5,6 +5,7 @@ pydantic
 
 # LangChain (RAG agent)
 langchain
+langgraph
 langchain-openai
 langchain-core
 

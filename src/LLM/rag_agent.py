@@ -1,5 +1,5 @@
 """
-rag_agent.py — LangChain ReAct agent with a RAG retrieval tool.
+rag_agent.py — LangGraph ReAct agent with a RAG retrieval tool.
 
 The agent is equipped with a single tool — ``retrieve`` — that performs
 hybrid search (HNSW vector + BM25 via RRF) against the docs table and
@@ -22,9 +22,9 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain.agents import create_agent
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import create_react_agent
 
 from RAG.retrieval.embeddings import embed
 from RAG.retrieval.vector_store import hybrid_search
@@ -89,9 +89,8 @@ def create_checker_agent(
     Args:
         system_prompt:   Fully rendered system prompt for the checker.
         tools:           List of tool instances (already file-id bound).
-        response_format: Optional Pydantic model passed to create_react_agent
-                         as response_format — enforces structured output on the
-                         agent's final answer via with_structured_output.
+        response_format: Optional Pydantic model passed to LangGraph
+                         create_react_agent as response_format.
 
     Returns:
         A compiled agent graph (``CompiledStateGraph``) ready to invoke via
@@ -106,10 +105,9 @@ def create_checker_agent(
     kwargs: dict[str, Any] = dict(
         model=llm,
         tools=tools,
-        system_prompt=system_prompt,
+        prompt=system_prompt,
     )
     if response_format is not None:
         kwargs["response_format"] = response_format
 
-    return create_agent(**kwargs)
-
+    return create_react_agent(**kwargs)

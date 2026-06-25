@@ -26,13 +26,17 @@ class _FakeAgent:
         }
 
 
-def test_call_agent_returns_langchain_structured_response(monkeypatch) -> None:
+def _install_fake_rag_agent(monkeypatch, agent: Any) -> None:
     fake_rag_agent = types.ModuleType("LLM.rag_agent")
     fake_rag_agent._sum_agent_tokens = lambda result: 17
     fake_rag_agent.create_checker_agent = (
-        lambda system_prompt, tools, response_format=None: _FakeAgent()
+        lambda system_prompt, tools, response_format=None: agent
     )
     monkeypatch.setitem(sys.modules, "LLM.rag_agent", fake_rag_agent)
+
+
+def test_call_agent_returns_langchain_structured_response(monkeypatch) -> None:
+    _install_fake_rag_agent(monkeypatch, _FakeAgent())
 
     client = LLMClient(max_retries=0)
 
