@@ -120,7 +120,7 @@ class _DoneCardsReader(BaseStorage):
     async def fetch_all(self) -> list[dict[str, Any]]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result"
+                "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result "
                 "FROM done_cards ORDER BY id"
             )
             return self._decode_rows(await cur.fetchall())
@@ -128,7 +128,7 @@ class _DoneCardsReader(BaseStorage):
     async def fetch_by_guids(self, guids: set[str]) -> list[dict[str, Any]]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result"
+                "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result "
                 "FROM done_cards WHERE card_guid = ANY(%(guids)s) ORDER BY id",
                 {"guids": list(guids)},
             )
@@ -142,13 +142,13 @@ class _DoneCardsReader(BaseStorage):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "WITH cards AS ("
-                "  SELECT id, card_guid, card_data, formal_result, diag_result, "
+                "  SELECT id, card_guid, card_data, formal_result, diag_result, icd_check_result, "
                 "         to_date(card_data -> 'Прием' ->> 'DATE', 'DD.MM.YYYY') AS visit_date "
                 "  FROM done_cards "
                 "  WHERE ignored = FALSE "
                 "    AND organization_id = %(org_id)s::uuid"
                 ") "
-                "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result"
+                "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result "
                 "FROM cards "
                 "WHERE visit_date >= %(from)s::date AND visit_date < %(to)s::date "
                 "ORDER BY visit_date, id",
