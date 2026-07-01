@@ -46,3 +46,6 @@ htmlcov/
 Thumbs.db
 
 raw_data_example.json
+report_*
+MDSdata.json
+data_snapshots/
