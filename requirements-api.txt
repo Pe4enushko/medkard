@@ -1,0 +1,21 @@
+# Minimal dependency set for the pull API container (src/api, src/reporting,
+# src/storage) — excludes LangChain/RAG/embeddings/PDF-ingestion/NLP deps
+# that the audit pipeline needs but the pull API never imports.
+
+pydantic
+fastapi
+uvicorn
+
+# Storage (psycopg3 path) — used by storage/*_storage.py
+psycopg[binary]
+psycopg-pool
+
+# storage/__init__.py eagerly imports DocsStorage, which needs these even
+# though the pull API itself never touches the docs/vector-search tables.
+asyncpg
+pgvector
+
+# pull's xlsx response — parsers/excel.py
+openpyxl
+
+python-dotenv

@@ -31,6 +31,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+import io
 import logging
 from pathlib import Path
 from typing import Any
@@ -152,6 +153,64 @@ def _card_data_text(visit: dict[str, Any]) -> str:
     return "\n\n".join(parts) if parts else "—"
 
 
+def _build_row(
+    visit: dict[str, Any],
+    formal: FormalStructureResult,
+    diagnosis: Any,
+    icd_check: Any = None,
+    *,
+    legacy: bool = False,
+) -> list[str]:
+    if legacy:
+        return [_pretty(visit), _pretty(formal), _pretty(diagnosis)]
+
+    specialization = (visit.get("Врач") or {}).get("SPECIALIZATION") or "—"
+    visit_date = (visit.get("Прием") or {}).get("DATE") or "—"
+    return [
+        specialization,
+        visit_date,
+        _card_data_text(visit),
+        _pretty(visit.get("ДанныеОсмотра") or []),
+        _pretty(visit.get("Услуги") or []),
+        _pretty(visit.get("Диагнозы") or []),
+        _pretty(formal),
+        _pretty(diagnosis),
+        _pretty(icd_check or []),
+    ]
+
+
+def build_workbook_bytes(
+    rows: list[tuple[dict[str, Any], FormalStructureResult, Any, Any]],
+    *,
+    legacy: bool = False,
+) -> bytes:
+    """Build an xlsx workbook in memory from (visit, formal, diagnosis, icd_check)
+    tuples and return its bytes — no disk I/O, for use in per-request API responses.
+    """
+    wb = Workbook()
+    ws = wb.active
+    headers = _LEGACY_HEADERS if legacy else _HEADERS
+    widths = _LEGACY_COLUMN_WIDTHS if legacy else _COLUMN_WIDTHS
+    autofilter = _LEGACY_AUTOFILTER_RANGE if legacy else _AUTOFILTER_RANGE
+
+    for idx, header in enumerate(headers, start=1):
+        ws.cell(row=1, column=idx, value=header)
+    for column, width in widths.items():
+        ws.column_dimensions[column].width = width
+    ws.auto_filter.ref = autofilter
+
+    for visit, formal, diagnosis, icd_check in rows:
+        row = _build_row(visit, formal, diagnosis, icd_check, legacy=legacy)
+        ws.append(row)
+        new_row = ws.max_row
+        for col_idx in range(1, len(row) + 1):
+            ws.cell(row=new_row, column=col_idx).alignment = Alignment(wrap_text=True, vertical="top")
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
 class AuditExcelWriter:
     """Append audit results to an xlsx file, creating it with a header row if absent.
 
@@ -201,26 +260,7 @@ class AuditExcelWriter:
             diagnosis: Diagnosis audit result(s) for this visit.
         """
         try:
-            if self._legacy:
-                row = [
-                    _pretty(visit),
-                    _pretty(formal),
-                    _pretty(diagnosis),
-                ]
-            else:
-                specialization = (visit.get("Врач") or {}).get("SPECIALIZATION") or "—"
-                visit_date = (visit.get("Прием") or {}).get("DATE") or "—"
-                row = [
-                    specialization,
-                    visit_date,
-                    _card_data_text(visit),
-                    _pretty(visit.get("ДанныеОсмотра") or []),
-                    _pretty(visit.get("Услуги") or []),
-                    _pretty(visit.get("Диагнозы") or []),
-                    _pretty(formal),
-                    _pretty(diagnosis),
-                    _pretty(icd_check or []),
-                ]
+            row = _build_row(visit, formal, diagnosis, icd_check, legacy=self._legacy)
             wb, ws = self._open_or_create()
             ws.append(row)
             new_row = ws.max_row

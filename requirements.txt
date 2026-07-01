@@ -39,7 +39,12 @@ numpy
 python-dotenv
 openpyxl
 
+# Pull API
+fastapi
+uvicorn
+
 # Tests
 pytest
 pytest-asyncio
 pytest_asyncio
+httpx

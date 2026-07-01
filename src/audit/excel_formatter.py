@@ -16,7 +16,6 @@ Usage::
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
 from datetime import datetime
@@ -24,89 +23,13 @@ from pathlib import Path
 from typing import Any
 
 from parsers.excel import AuditExcelWriter
+from reporting.result_parser import load_manifest_meta as _load_manifest_meta
+from reporting.result_parser import parse_diagnosis as _parse_diagnosis
+from reporting.result_parser import parse_formal as _parse_formal
+from reporting.result_parser import parse_icd_check as _parse_icd_check
 from storage.base import BaseStorage
-from storage.models.result import DiagnosisResult, FormalFinding, FormalStructureResult, IcdCodingIssue, IssueSource
 
 logger = logging.getLogger(__name__)
-
-_MANIFEST_PATH = Path(__file__).resolve().parent.parent.parent / "resources" / "manifest.csv"
-
-
-def _load_manifest_meta() -> dict[str, dict]:
-    """Return {ID: {name, date, age_group}} from manifest.csv."""
-    if not _MANIFEST_PATH.exists():
-        return {}
-    with open(_MANIFEST_PATH, newline="", encoding="utf-8") as fh:
-        return {
-            row["ID"]: {
-                "name": row.get("Наименование", ""),
-                "date": row.get("Дата размещения", ""),
-                "age_group": row.get("Возрастная категория", ""),
-            }
-            for row in csv.DictReader(fh)
-            if row.get("ID")
-        }
-
-
-def _parse_formal(data: list[dict]) -> FormalStructureResult:
-    return FormalStructureResult(
-        findings=[
-            FormalFinding(flag=f["flag"], issue=f.get("issue", ""), source=f.get("source", ""), comment=f.get("comment", ""))
-            for f in (data or [])
-        ]
-    )
-
-
-def _parse_icd_check(data: list[dict] | None) -> list[IcdCodingIssue]:
-    issues = []
-    for entry in (data or []):
-        sources = [
-            IssueSource(
-                doc_title=s.get("doc_title", ""),
-                section=s.get("section"),
-                cite=s.get("cite"),
-            )
-            for s in entry.get("sources", [])
-            if isinstance(s, dict)
-        ]
-        issues.append(IcdCodingIssue(
-            dx_index=entry.get("dx_index", 0),
-            initial_code=entry.get("initial_code", ""),
-            suggested_code=entry.get("suggested_code", ""),
-            confidence=entry.get("confidence", 0),
-            comment=entry.get("comment", ""),
-            sources=sources,
-        ))
-    return issues
-
-
-def _parse_diagnosis(data: list[dict], manifest_meta: dict[str, dict] | None = None) -> list[DiagnosisResult]:
-    from storage.models.result import DiagnosisIssue, IssueSource
-    results = []
-    for entry in (data or []):
-        issues = [
-            DiagnosisIssue(
-                issue=iss["issue"],
-                sources=[
-                    IssueSource(
-                        doc_title=s["doc_title"],
-                        section=s.get("section"),
-                        cite=s.get("cite"),
-                    )
-                    for s in iss.get("sources", [])
-                ],
-            )
-            for iss in entry.get("issues", [])
-        ]
-        file_id = entry.get("guideline_file_id")
-        meta = manifest_meta.get(file_id) if (manifest_meta and file_id) else None
-        results.append(DiagnosisResult(
-            icd_code=entry["icd_code"],
-            issues=issues,
-            guideline_file_id=file_id,
-            guideline_meta=meta,
-        ))
-    return results
 
 
 class _DoneCardsReader(BaseStorage):
@@ -146,6 +69,7 @@ class _DoneCardsReader(BaseStorage):
                 "         to_date(card_data -> 'Прием' ->> 'DATE', 'DD.MM.YYYY') AS visit_date "
                 "  FROM done_cards "
                 "  WHERE ignored = FALSE "
+                "    AND broken = FALSE "
                 "    AND organization_id = %(org_id)s::uuid"
                 ") "
                 "SELECT id, card_guid, card_data::text, formal_result, diag_result, icd_check_result "
