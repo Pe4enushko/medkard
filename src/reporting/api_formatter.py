@@ -62,6 +62,28 @@ class _ApiCardsReader(BaseStorage):
             cur = await conn.execute(query, params)
             return self._decode_rows(await cur.fetchall())
 
+    async def fetch_export(
+        self, organization_id: str, since: str | None, limit: int, cursor: int
+    ) -> list[dict[str, Any]]:
+        query = (
+            "SELECT card_guid, card_data, formal_result, diag_result, "
+            "       icd_check_result, updated_at "
+            "FROM done_cards "
+            "WHERE organization_id = %(org_id)s::uuid "
+            "  AND ignored = FALSE AND broken = FALSE "        # audited cards only
+            "  AND (%(since)s::timestamptz IS NULL OR updated_at > %(since)s::timestamptz) "
+            "ORDER BY updated_at, card_guid "
+        )
+        params: dict[str, Any] = {"org_id": organization_id, "since": since}
+        if limit and limit > 0:
+            query += "LIMIT %(limit)s OFFSET %(cursor)s"
+            params["limit"] = limit
+            params["cursor"] = cursor
+
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(query, params)
+            return await cur.fetchall()
+
 
 class ApiFormatter:
     """Async context-manager producing pull-API responses for one organization."""
@@ -97,3 +119,13 @@ class ApiFormatter:
             workbook_rows.append((row["card_data"], formal, diagnosis, icd_check))
 
         return build_workbook_bytes(workbook_rows)
+
+    async def export(
+        self, organization_id: str, since: str | None, limit: int, cursor: int
+    ) -> list[dict[str, Any]]:
+        """Return done_cards rows for one org as native dicts.
+
+        since=None → all history; limit=0 → no LIMIT/OFFSET (one-shot daily).
+        limit>0 uses cursor as an OFFSET for the backfill loop.
+        """
+        return await self._reader.fetch_export(organization_id, since, limit, cursor)
