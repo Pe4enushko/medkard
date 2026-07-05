@@ -62,41 +62,62 @@ call-site changes required.
 (guids come from 1C, stable). The re-insert bumps `updated_at`, so the engine's
 next incremental pull picks it up and overwrites its replica row by `card_guid`.
 
-## 4. Incremental export endpoint
+## 4. Export endpoint
 
 Add to `src/api/routes/cards.py`, same auth and org-scoping as `pull`
 (`Depends(require_org_access)` → `(org_id, org_name)`), delegating to a new
 formatter method (routes stay DB-free, per the module contract).
 
 ```
-GET /cards/export?org=<name>&since=<iso8601>&limit=<n>&after=<cursor>
+GET /cards/export?org=<name>&since=<iso8601>&limit=<n=0>&cursor=<offset=0>
 ```
-- **Auth/scope:** api-key resolves `?org=` to `organization_id`; only that org's
+
+**Params:**
+- `org` — **required**. Api-key resolves it to `organization_id`; only that org's
   rows are returned. Identical trust boundary to the existing `pull`.
-- **Selection:** rows where `updated_at > :since AND organization_id = :org_id`,
-  ordered by `(updated_at, card_guid)` for a stable cursor.
-- **Response:** NDJSON (one JSON object per line) so large deltas stream without
-  buffering a giant array. Each line is one `done_cards` row:
-  ```
-  card_guid, card_data, formal_result, diag_result, icd_check_result,
-  token_count, time_ms, started_at, finished_at, ignored, broken,
-  stacktrace, updated_at, organization_name
-  ```
-  JSONB columns are emitted as native JSON (not stringified), so the engine
-  keeps nested structure. `organization_name` is included so the engine can
-  route the row to the `medkard_<slug>` database without a second lookup.
-- **Pagination:** `limit` (default e.g. 5000) + `after=<last card_guid at last
-  updated_at>` cursor. The engine loops until a short page. Response carries the
-  max `updated_at` seen (header or final summary line) → the engine's next
-  watermark.
-- **Empty delta:** returns zero lines (normal on days with no changes for a
-  clinic).
+- `since` — **optional** ISO8601 watermark. When set, returns rows where
+  `updated_at > :since`. Omitted → all history (used by full export).
+- `limit` — **optional, default `0` = no limit** (return everything matching in
+  one response). Used by the daily pull.
+- `cursor` — **optional, default `0`**, treated as an **OFFSET**. Only meaningful
+  together with `limit > 0`; the full-export script increments it by `limit` each
+  loop.
+
+**Selection:**
+```sql
+SELECT ... FROM done_cards
+WHERE organization_id = :org_id
+  AND (:since IS NULL OR updated_at > :since)
+ORDER BY updated_at, card_guid          -- stable order → correct OFFSET paging
+[ LIMIT :limit OFFSET :cursor ]         -- only when limit > 0
+```
+The stable `ORDER BY` is required so `LIMIT/OFFSET` paging can't skip or duplicate
+rows across pages.
+
+**Response:** a plain JSON array of `done_cards` rows (pages are bounded, so no
+streaming/NDJSON needed). Each object:
+```
+card_guid, card_data, formal_result, diag_result, icd_check_result,
+token_count, time_ms, started_at, finished_at, ignored, broken,
+stacktrace, updated_at, organization_name
+```
+JSONB columns are emitted as **native JSON** (not stringified) so the engine keeps
+nested structure. `organization_name` is included so the engine routes each row to
+the `medkard_<slug>` database without a second lookup.
+
+**Two usage modes (engine side):**
+- **Daily pull:** `?org=<slug>&since=<watermark>` with `limit=0` → one request
+  returns the whole day's delta (~150 rows max). Engine's next watermark =
+  `max(updated_at)` over the returned rows. Empty delta → `[]`.
+- **Full export / backfill / resync:** the engine's full-export script loops
+  `?org=<slug>&limit=5000&cursor=0`, then `cursor=5000`, `cursor=10000`, … until a
+  page returns fewer than `limit` rows. (`since` omitted for a full backfill.)
 
 ### Formatter method
-Add `ApiFormatter.export_changed(org_id, since, limit, after) -> rows` (or a
-dedicated `ExportFormatter`) issuing the windowed query above via
-`done_cards_storage`. Add a storage method
-`done_cards_storage.fetch_changed_since(org_id, since, limit, after)`.
+Add `ApiFormatter.export(org_id, since, limit, cursor) -> rows` (or a dedicated
+`ExportFormatter`) issuing the query above via `done_cards_storage`. Add a storage
+method `done_cards_storage.fetch_export(org_id, since, limit, cursor)` where
+`limit == 0` means no `LIMIT/OFFSET` clause.
 
 ## 5. Reconcile endpoint (hard deletes / DR)
 
@@ -108,8 +129,7 @@ expose the full guid set on demand for reconciliation:
 GET /cards/guids?org=<name>
 ```
 - Returns the complete set of `card_guid` for the org (reuse existing
-  `done_cards_storage.get_done_guids(organization_id)`), as NDJSON or a plain
-  list.
+  `done_cards_storage.get_done_guids(organization_id)`) as a plain JSON list.
 - The engine's manual `medkard_replica_resync.py <slug>` fetches this and
   deletes replica rows whose guid is absent. Not part of the nightly path.
 
@@ -126,18 +146,20 @@ GET /cards/guids?org=<name>
 ## 7. Testing
 - Trigger test: insert and update a `done_cards` row (via each upsert path,
   including ignored/broken) → `updated_at` advances each time.
-- Export test: `since` filters correctly; NDJSON lines carry native JSONB and
-  `organization_name`; cursor pagination returns every changed row exactly once;
-  org-scoping never leaks another org's rows.
+- Export test: `since` filters correctly; `limit=0` returns the full matching set
+  in one response; `limit>0` + `cursor` offset paging returns every row exactly
+  once with no skips/dups across pages (stable `ORDER BY`); rows carry native
+  JSONB and `organization_name`; org-scoping never leaks another org's rows.
 - Reconcile test: `guids` returns the full org set; matches `get_done_guids`.
 
 ## 8. Phasing
 1. `updated_at` migration + trigger + index.
-2. `fetch_changed_since` storage + `export` endpoint + tests.
+2. `fetch_export` storage + `export` endpoint + tests.
 3. `guids` reconcile endpoint.
 
 ## 9. Open items
-- Page size / streaming defaults tuned to real delta sizes (one day's batch per
-  clinic).
+- Default `limit` page size for the full-export loop (5000 is comfortable at
+  ~150 MB/page; can go higher — see companion spec's headroom note). Daily uses
+  `limit=0`.
 - Whether `card_data` should be trimmed in export (kept **whole** for now — the
   analyst needs card content per the mixed metrics+drill-down requirement).
