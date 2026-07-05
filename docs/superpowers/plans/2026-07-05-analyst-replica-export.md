@@ -4,7 +4,7 @@
 
 **Goal:** Give the engine a way to pull medkard's audited-card rows incrementally (daily delta) and in full (backfill), so it can populate a per-clinic analyst replica.
 
-**Architecture:** Add an `updated_at` change-tracking trigger to `done_cards` (the watermark), a `GET /cards/export` endpoint that returns rows as JSON (org-scoped, api-key auth), and a `GET /cards/guids` reconcile endpoint. Reads flow through `ApiFormatter` so route handlers stay parsing/auth-only, matching the existing `check`/`pull` routes.
+**Architecture:** Add an `updated_at` change-tracking trigger to `done_cards` (the watermark) and a `GET /cards/export` endpoint that returns rows as JSON (org-scoped, api-key auth) for both the daily delta (`since` + `limit=0`) and full backfill/resync (`limit`+`cursor` paging). Reads flow through `ApiFormatter` so route handlers stay parsing/auth-only, matching the existing `check`/`pull` routes.
 
 **Tech Stack:** Python 3, FastAPI, psycopg3 (`AsyncConnectionPool`, `dict_row`), PostgreSQL, pytest (`asyncio_mode=auto`), plain SQL migrations run by `migrations/migrate.sh`.
 
@@ -458,145 +458,16 @@ async def export(
 Run: `pytest tests/test_export_api.py -v`
 Expected: PASS (all three tests).
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/api/routes/cards.py tests/test_export_api.py
-git commit -m "feat(export): GET /cards/export endpoint (daily since + backfill paging)"
-```
-
----
-
-### Task 4: `GET /cards/guids` reconcile route
-
-**Files:**
-- Modify: `src/api/routes/cards.py`
-- Test: `tests/test_guids_api.py`
-
-**Interfaces:**
-- Consumes: `DoneCardsStorage.get_done_guids(organization_id)` (exists); `require_org_access`.
-- Produces: `GET /cards/guids?org=` returning a JSON array of `card_guid` strings for the org.
-
-- [ ] **Step 1: Write the failing test**
-
-`tests/test_guids_api.py`:
-```python
-"""
-Integration test for GET /cards/guids — returns the full card_guid set for the
-org, for the engine's replica reconcile. Real Postgres via TestClient.
-"""
-from __future__ import annotations
-
-import os
-import sys
-import uuid
-from pathlib import Path
-
-import psycopg
-import pytest
-from dotenv import load_dotenv
-from fastapi.testclient import TestClient
-
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
-load_dotenv(ROOT / ".env")
-
-from api.app import create_app  # noqa: E402
-from storage.api_keys_storage import ApiKeysStorage  # noqa: E402
-from storage.organizations_storage import OrganizationsStorage  # noqa: E402
-
-
-def _conninfo() -> str:
-    return (
-        f"host={os.environ['POSTGRES_HOST']} port={os.environ.get('POSTGRES_PORT','5432')} "
-        f"dbname={os.environ['POSTGRES_DB']} user={os.environ['POSTGRES_USER']} "
-        f"password={os.environ['POSTGRES_PASSWORD']}"
-    )
-
-
-def _auth(key: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {key}"}
-
-
-@pytest.fixture(scope="module")
-def client() -> TestClient:
-    return TestClient(create_app())
-
-
-@pytest.fixture
-async def alenka_org_id() -> str:
-    async with OrganizationsStorage() as orgs:
-        return await orgs.get_id_by_name("Alenka")
-
-
-@pytest.fixture
-async def test_key(alenka_org_id: str) -> str:
-    raw = f"medkard_test_{uuid.uuid4().hex}"
-    async with ApiKeysStorage() as api_keys:
-        key_id = await api_keys.create_key("pytest-guids", raw, [alenka_org_id])
-    yield raw
-    async with ApiKeysStorage() as api_keys:
-        await api_keys.revoke_key(key_id)
-
-
-@pytest.fixture
-async def seeded_guid(alenka_org_id: str):
-    guid = f"pytest-guids-{uuid.uuid4()}"
-    async with await psycopg.AsyncConnection.connect(_conninfo(), autocommit=True) as conn:
-        await conn.execute(
-            "INSERT INTO done_cards (card_guid, ignored, organization_id) "
-            "VALUES (%(g)s, FALSE, %(o)s)",
-            {"g": guid, "o": alenka_org_id},
-        )
-    yield guid
-    async with await psycopg.AsyncConnection.connect(_conninfo(), autocommit=True) as conn:
-        await conn.execute("DELETE FROM done_cards WHERE card_guid = %(g)s", {"g": guid})
-
-
-def test_guids_lists_org_guids(client, test_key, seeded_guid):
-    resp = client.get("/cards/guids?org=Alenka", headers=_auth(test_key))
-    assert resp.status_code == 200
-    body = resp.json()
-    assert isinstance(body, list)
-    assert seeded_guid in body
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `pytest tests/test_guids_api.py -v`
-Expected: FAIL — `404 Not Found` for `/cards/guids`.
-
-- [ ] **Step 3: Add the route**
-
-In `src/api/routes/cards.py`, add (after `export`):
-```python
-from storage.done_cards_storage import DoneCardsStorage  # add near top imports
-
-
-@router.get("/guids")
-async def guids(
-    org_access: tuple[str, str] = Depends(require_org_access),
-) -> list[str]:
-    org_id, _ = org_access
-    async with DoneCardsStorage() as storage:
-        return sorted(await storage.get_done_guids(org_id))
-```
-
-- [ ] **Step 4: Run the test to verify it passes**
-
-Run: `pytest tests/test_guids_api.py -v`
-Expected: PASS.
-
 - [ ] **Step 5: Run the full API suite to confirm no regressions**
 
-Run: `pytest tests/test_cards_api.py tests/test_export_api.py tests/test_guids_api.py -v`
+Run: `pytest tests/test_cards_api.py tests/test_export_api.py -v`
 Expected: PASS (existing pull/check tests still green).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/api/routes/cards.py tests/test_guids_api.py
-git commit -m "feat(export): GET /cards/guids reconcile endpoint"
+git add src/api/routes/cards.py tests/test_export_api.py
+git commit -m "feat(export): GET /cards/export endpoint (daily since + backfill paging)"
 ```
 
 ---
@@ -606,12 +477,12 @@ git commit -m "feat(export): GET /cards/guids reconcile endpoint"
 **Spec coverage:**
 - §3 `updated_at` trigger + index → Task 1. ✓
 - §4 export endpoint (`org` required, `since`, `limit=0` default, `cursor`-as-offset, native JSONB, `organization_name`, stable ORDER BY) → Tasks 2 (reader) + 3 (route). ✓
-- §5 `/cards/guids` reconcile → Task 4. ✓
+- Hard-delete reconcile is handled engine-side by a full resync (truncate the clinic replica + full re-export via `/cards/export` with no `since`), so **no dedicated guids endpoint is needed** — dropped from scope. ✓
 - §6 auth/exposure (reuse `require_org_access`, no PG exposure) → Tasks 3 & 4 use the existing dependency. ✓
-- §7 testing (trigger advances; since filter; limit=0 one-shot; offset paging exhaustive/no-dup; org-scoping; guids matches) → covered across the four test files. ✓
+- §7 testing (trigger advances; since filter; limit=0 one-shot; offset paging exhaustive/no-dup; org-scoping) → covered across the three test files. ✓
 
 **Placeholder scan:** No TBD/TODO; every code and test step is complete; commands have expected output.
 
 **Type consistency:** `ApiFormatter.export(organization_id, since, limit, cursor)` and `_ApiCardsReader.fetch_export(...)` share the same signature and are called identically in Task 3. Row dict keys used in tests (`card_guid`, `card_data`, `organization_name`) match the SELECT list in Task 2.
 
-**Notes for the engine-side consumer (out of scope here):** the daily pull calls `?org=&since=<watermark>` with `limit=0`; the backfill/resync loops `?org=&limit=5000&cursor=<offset>`; reconcile uses `/cards/guids`.
+**Notes for the engine-side consumer (out of scope here):** the daily pull calls `?org=&since=<watermark>` with `limit=0`; the backfill/resync loops `?org=&limit=5000&cursor=<offset>` (a resync omits `since` and full-replaces the clinic replica, which also clears any hard-deleted rows).
