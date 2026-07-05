@@ -87,27 +87,30 @@ GET /cards/export?org=<name>&since=<iso8601>&limit=<n=0>&cursor=<offset=0>
   together with `limit > 0`; the full-export script increments it by `limit` each
   loop.
 
-**Selection:**
+**Selection — audited cards only:**
 ```sql
-SELECT ... FROM done_cards
+SELECT card_guid, card_data, formal_result, diag_result, icd_check_result, updated_at
+FROM done_cards
 WHERE organization_id = :org_id
+  AND ignored = FALSE AND broken = FALSE   -- audited cards only
   AND (:since IS NULL OR updated_at > :since)
-ORDER BY updated_at, card_guid          -- stable order → correct OFFSET paging
-[ LIMIT :limit OFFSET :cursor ]         -- only when limit > 0
+ORDER BY updated_at, card_guid             -- stable order → correct OFFSET paging
+[ LIMIT :limit OFFSET :cursor ]            -- only when limit > 0
 ```
-The stable `ORDER BY` is required so `LIMIT/OFFSET` paging can't skip or duplicate
-rows across pages.
+Ignored and broken cards are **excluded** — the analyst replica holds only audited
+cards and their results. The stable `ORDER BY` is required so `LIMIT/OFFSET` paging
+can't skip or duplicate rows across pages.
 
-**Response:** a plain JSON array of `done_cards` rows (pages are bounded, so no
-streaming/NDJSON needed). Each object:
+**Response:** a plain JSON array, one object per audited card, carrying **only** the
+card and its audit results:
 ```
-card_guid, card_data, formal_result, diag_result, icd_check_result,
-token_count, time_ms, started_at, finished_at, ignored, broken,
-stacktrace, updated_at, organization_name
+card_guid, card_data, formal_result, diag_result, icd_check_result, updated_at
 ```
 JSONB columns are emitted as **native JSON** (not stringified) so the engine keeps
-nested structure. `organization_name` is included so the engine routes each row to
-the `medkard_<slug>` database without a second lookup.
+nested structure. Deliberately **omitted** (not needed by the analyst, and kept off
+the tunnel): `token_count`, `time_ms`, `started_at`, `finished_at`, `ignored`,
+`broken`, `stacktrace`, and any org identifier (the engine already knows the clinic
+from the `?org=` it requested, and routes to `medkard_<slug>` by that slug).
 
 **Two usage modes (engine side):**
 - **Daily pull:** `?org=<slug>&since=<watermark>` with `limit=0` → one request
@@ -126,11 +129,14 @@ method `done_cards_storage.fetch_export(org_id, since, limit, cursor)` where
 ## 5. Hard deletes / DR (no dedicated endpoint)
 
 Incremental `updated_at` cannot signal a **hard delete** (e.g.
-`delete_chinese_done_cards()`), which is rare. Rather than build a guid-diff
+`delete_chinese_done_cards()`), nor an **audited→broken/ignored transition** (a
+re-audit that fails makes a card drop out of the audited-only export, but the
+replica keeps its last audited copy). Both are rare. Rather than build a guid-diff
 endpoint, the engine's manual `medkard_replica_resync.py <slug>` **full-replaces**
 the clinic replica: truncate it and re-pull via `/cards/export` with no `since`
 (the `limit`/`cursor` backfill loop). A full rebuild inherently drops any
-hard-deleted rows, so no extra medkard surface is needed.
+now-absent (deleted or no-longer-audited) rows, so no extra medkard surface is
+needed.
 
 ## 6. Auth / exposure notes
 
@@ -148,7 +154,8 @@ hard-deleted rows, so no extra medkard surface is needed.
 - Export test: `since` filters correctly; `limit=0` returns the full matching set
   in one response; `limit>0` + `cursor` offset paging returns every row exactly
   once with no skips/dups across pages (stable `ORDER BY`); rows carry native
-  JSONB and `organization_name`; org-scoping never leaks another org's rows.
+  JSONB; **ignored/broken cards are never returned**; only the six audited columns
+  are present; org-scoping never leaks another org's rows.
 
 ## 8. Phasing
 1. `updated_at` migration + trigger + index.

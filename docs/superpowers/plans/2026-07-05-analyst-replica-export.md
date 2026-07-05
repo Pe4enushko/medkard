@@ -17,7 +17,7 @@
 - Storage uses **psycopg3** with `row_factory=dict_row`; SQL params are named `%(name)s`; rows are `dict`. Connections come from the shared pool via `async with self._pool.connection() as conn`.
 - Migrations are numbered `NNN_description.sql` in `migrations/`, applied in order by `migrations/migrate.sh` (idempotent SQL — `IF NOT EXISTS` / `CREATE OR REPLACE`). Next number is **019** (last is `018_api_key_organizations.sql`).
 - Tests hit the **real configured Postgres** (`.env` at repo root, `load_dotenv(ROOT/".env")`) via FastAPI `TestClient`. Org is selected per-request with `?org=<name>` plus a `Bearer` api key; api-key fixtures come from `ApiKeysStorage`/`OrganizationsStorage` (see `tests/test_cards_api.py`). Fixtures that create keys are **function-scoped**.
-- Export response emits JSONB columns as **native JSON** (select raw `jsonb`, not `::text`) and includes `organization_name`. `limit == 0` means **no `LIMIT/OFFSET`** (one-shot daily). `ORDER BY updated_at, card_guid` is required for correct offset paging.
+- Export returns **audited cards only** (`ignored = FALSE AND broken = FALSE`) and **only these six columns**: `card_guid, card_data, formal_result, diag_result, icd_check_result, updated_at`. JSONB columns are emitted as **native JSON** (select raw `jsonb`, not `::text`). No `token_count`/`time_ms`/`started_at`/`finished_at`/`ignored`/`broken`/`stacktrace`/org identifier. `limit == 0` means **no `LIMIT/OFFSET`** (one-shot daily). `ORDER BY updated_at, card_guid` is required for correct offset paging.
 - Card content (`card_data`) is exported **whole** (not trimmed).
 
 ---
@@ -159,7 +159,7 @@ git commit -m "feat(export): add done_cards.updated_at change-tracking trigger"
 - Consumes: `done_cards.updated_at` (Task 1); `require_org_access` is not used here (this is the DB layer).
 - Produces:
   - `ApiFormatter.export(organization_id: str, since: str | None, limit: int, cursor: int) -> list[dict]`
-    — rows ordered by `(updated_at, card_guid)`; when `limit == 0` no `LIMIT/OFFSET` is applied; each dict has keys `card_guid, card_data, formal_result, diag_result, icd_check_result, token_count, time_ms, started_at, finished_at, ignored, broken, stacktrace, updated_at, organization_name`. JSONB columns are native Python objects; timestamps are `datetime`.
+    — audited cards only (`ignored=FALSE AND broken=FALSE`), ordered by `(updated_at, card_guid)`; when `limit == 0` no `LIMIT/OFFSET` is applied; each dict has exactly the keys `card_guid, card_data, formal_result, diag_result, icd_check_result, updated_at`. JSONB columns are native Python objects; `updated_at` is a `datetime`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -228,7 +228,10 @@ async def test_export_limit_zero_returns_all_with_native_jsonb(seeded_guids):
     assert set(guids) <= got
     sample = next(r for r in rows if r["card_guid"] in guids)
     assert isinstance(sample["card_data"], dict)             # native JSONB, not str
-    assert sample["organization_name"] == "Alenka"
+    assert set(sample.keys()) == {
+        "card_guid", "card_data", "formal_result",
+        "diag_result", "icd_check_result", "updated_at",
+    }                                                        # trimmed, audited-only columns
 
 
 async def test_export_cursor_offset_paging_is_exhaustive(seeded_guids):
@@ -258,15 +261,13 @@ In `src/reporting/api_formatter.py`, add a method to `_ApiCardsReader` (after `f
         self, organization_id: str, since: str | None, limit: int, cursor: int
     ) -> list[dict[str, Any]]:
         query = (
-            "SELECT dc.card_guid, dc.card_data, dc.formal_result, dc.diag_result, "
-            "       dc.icd_check_result, dc.token_count, dc.time_ms, dc.started_at, "
-            "       dc.finished_at, dc.ignored, dc.broken, dc.stacktrace, dc.updated_at, "
-            "       o.name AS organization_name "
-            "FROM done_cards dc "
-            "JOIN organizations o ON o.id = dc.organization_id "
-            "WHERE dc.organization_id = %(org_id)s::uuid "
-            "  AND (%(since)s::timestamptz IS NULL OR dc.updated_at > %(since)s::timestamptz) "
-            "ORDER BY dc.updated_at, dc.card_guid "
+            "SELECT card_guid, card_data, formal_result, diag_result, "
+            "       icd_check_result, updated_at "
+            "FROM done_cards "
+            "WHERE organization_id = %(org_id)s::uuid "
+            "  AND ignored = FALSE AND broken = FALSE "        # audited cards only
+            "  AND (%(since)s::timestamptz IS NULL OR updated_at > %(since)s::timestamptz) "
+            "ORDER BY updated_at, card_guid "
         )
         params: dict[str, Any] = {"org_id": organization_id, "since": since}
         if limit and limit > 0:
@@ -412,7 +413,7 @@ def test_export_returns_seeded_rows_with_native_jsonb(client, test_key, seeded):
     assert set(seeded) <= set(by_guid)
     sample = by_guid[seeded[0]]
     assert isinstance(sample["card_data"], dict)          # native JSONB
-    assert sample["organization_name"] == "Alenka"
+    assert "token_count" not in sample and "organization_name" not in sample  # trimmed
 
 
 def test_export_cursor_offset_paging(client, test_key, seeded):
@@ -476,13 +477,13 @@ git commit -m "feat(export): GET /cards/export endpoint (daily since + backfill 
 
 **Spec coverage:**
 - §3 `updated_at` trigger + index → Task 1. ✓
-- §4 export endpoint (`org` required, `since`, `limit=0` default, `cursor`-as-offset, native JSONB, `organization_name`, stable ORDER BY) → Tasks 2 (reader) + 3 (route). ✓
+- §4 export endpoint (`org` required, `since`, `limit=0` default, `cursor`-as-offset, native JSONB, **audited-only** + trimmed to six columns, stable ORDER BY) → Tasks 2 (reader) + 3 (route). ✓
 - Hard-delete reconcile is handled engine-side by a full resync (truncate the clinic replica + full re-export via `/cards/export` with no `since`), so **no dedicated guids endpoint is needed** — dropped from scope. ✓
 - §6 auth/exposure (reuse `require_org_access`, no PG exposure) → Tasks 3 & 4 use the existing dependency. ✓
 - §7 testing (trigger advances; since filter; limit=0 one-shot; offset paging exhaustive/no-dup; org-scoping) → covered across the three test files. ✓
 
 **Placeholder scan:** No TBD/TODO; every code and test step is complete; commands have expected output.
 
-**Type consistency:** `ApiFormatter.export(organization_id, since, limit, cursor)` and `_ApiCardsReader.fetch_export(...)` share the same signature and are called identically in Task 3. Row dict keys used in tests (`card_guid`, `card_data`, `organization_name`) match the SELECT list in Task 2.
+**Type consistency:** `ApiFormatter.export(organization_id, since, limit, cursor)` and `_ApiCardsReader.fetch_export(...)` share the same signature and are called identically in Task 3. Row dict keys used in tests (`card_guid`, `card_data`, `updated_at`) match the trimmed SELECT list in Task 2.
 
 **Notes for the engine-side consumer (out of scope here):** the daily pull calls `?org=&since=<watermark>` with `limit=0`; the backfill/resync loops `?org=&limit=5000&cursor=<offset>` (a resync omits `since` and full-replaces the clinic replica, which also clears any hard-deleted rows).
