@@ -20,8 +20,12 @@ and (b) expose changed rows over the existing authenticated tunnel.
 
 In scope (medkard):
 - A change-tracking column so the engine can pull only what changed.
-- An incremental JSON export endpoint (org-scoped, api-key auth).
-- A full `card_guid` reconcile endpoint for the rare hard-delete case.
+- A JSON export endpoint (org-scoped, api-key auth) serving both the daily delta
+  and full backfill/resync.
+
+Hard deletes (rare) are **not** handled by a dedicated endpoint: the engine's
+manual resync full-replaces a clinic replica via the export endpoint (no
+`since`), which rebuilds from scratch and thereby drops any hard-deleted rows.
 
 Out of scope (engine, see companion spec): the replica databases, per-clinic
 roles, the sandbox tool, the `internal` network.
@@ -119,24 +123,19 @@ Add `ApiFormatter.export(org_id, since, limit, cursor) -> rows` (or a dedicated
 method `done_cards_storage.fetch_export(org_id, since, limit, cursor)` where
 `limit == 0` means no `LIMIT/OFFSET` clause.
 
-## 5. Reconcile endpoint (hard deletes / DR)
+## 5. Hard deletes / DR (no dedicated endpoint)
 
 Incremental `updated_at` cannot signal a **hard delete** (e.g.
-`delete_chinese_done_cards()`), which is rare. Rather than daily full scans,
-expose the full guid set on demand for reconciliation:
-
-```
-GET /cards/guids?org=<name>
-```
-- Returns the complete set of `card_guid` for the org (reuse existing
-  `done_cards_storage.get_done_guids(organization_id)`) as a plain JSON list.
-- The engine's manual `medkard_replica_resync.py <slug>` fetches this and
-  deletes replica rows whose guid is absent. Not part of the nightly path.
+`delete_chinese_done_cards()`), which is rare. Rather than build a guid-diff
+endpoint, the engine's manual `medkard_replica_resync.py <slug>` **full-replaces**
+the clinic replica: truncate it and re-pull via `/cards/export` with no `since`
+(the `limit`/`cursor` backfill loop). A full rebuild inherently drops any
+hard-deleted rows, so no extra medkard surface is needed.
 
 ## 6. Auth / exposure notes
 
-- No new trust boundary: `export`/`guids` reuse the existing api-key + `?org=`
-  scoping used by `pull`. The engine calls them over the same WireGuard tunnel
+- No new trust boundary: `export` reuses the existing api-key + `?org=`
+  scoping used by `pull`. The engine calls it over the same WireGuard tunnel
   and `MedkardClient` credentials.
 - **Postgres is not exposed** to the engine — export stays over HTTP. (The
   simpler-but-more-exposed alternative, a direct read-only DB role reachable over
@@ -150,12 +149,10 @@ GET /cards/guids?org=<name>
   in one response; `limit>0` + `cursor` offset paging returns every row exactly
   once with no skips/dups across pages (stable `ORDER BY`); rows carry native
   JSONB and `organization_name`; org-scoping never leaks another org's rows.
-- Reconcile test: `guids` returns the full org set; matches `get_done_guids`.
 
 ## 8. Phasing
 1. `updated_at` migration + trigger + index.
-2. `fetch_export` storage + `export` endpoint + tests.
-3. `guids` reconcile endpoint.
+2. `fetch_export` reader + `export` endpoint + tests.
 
 ## 9. Open items
 - Default `limit` page size for the full-export loop (5000 is comfortable at
