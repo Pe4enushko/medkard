@@ -146,3 +146,31 @@ def test_export_cursor_offset_paging(client, test_key, seeded):
         cursor += 2
     assert set(audited) <= set(seen)
     assert len(seen) == len(set(seen))                         # no dup across pages
+# --- append this test to tests/test_export_api.py (org-scoping, spec §7) ---
+
+
+async def test_export_is_org_scoped(client, test_key, mds_org_id, seeded):
+    """A row owned by another org (MDS) must never appear in an Alenka export,
+    even though the api key is authorized for both orgs — the WHERE
+    organization_id filter, not just auth, must exclude it."""
+    audited, _ign, _brk, cutoff = seeded
+    mds_guid = f"pytest-exapi-mds-{uuid.uuid4().hex[:8]}"
+    async with await psycopg.AsyncConnection.connect(_conninfo(), autocommit=True) as conn:
+        await conn.execute(
+            "INSERT INTO done_cards (card_guid, card_data, ignored, broken, organization_id) "
+            "VALUES (%(g)s, %(d)s::jsonb, FALSE, FALSE, %(o)s)",
+            {"g": mds_guid, "d": _CARD, "o": mds_org_id},
+        )
+    try:
+        resp = client.get(
+            "/cards/export",
+            params={"org": "Alenka", "since": cutoff},
+            headers=_auth(test_key),
+        )
+        assert resp.status_code == 200
+        got = {r["card_guid"] for r in resp.json()}
+        assert set(audited) <= got             # Alenka's own rows present
+        assert mds_guid not in got             # MDS row NOT leaked into an Alenka pull
+    finally:
+        async with await psycopg.AsyncConnection.connect(_conninfo(), autocommit=True) as conn:
+            await conn.execute("DELETE FROM done_cards WHERE card_guid = %(g)s", {"g": mds_guid})
