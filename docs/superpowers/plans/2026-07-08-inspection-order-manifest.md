@@ -464,7 +464,7 @@ def _read_inspection_cell(path):
 def test_writer_without_order_tokens_keeps_source_order(tmp_path):
     path = tmp_path / "r.xlsx"
     writer = AuditExcelWriter(path)
-    writer.append(_visit(), FormalStructureResult(sections=[]), diagnosis=[], icd_check=[])
+    writer.append(_visit(), FormalStructureResult(findings=[]), diagnosis=[], icd_check=[])
     text = _read_inspection_cell(path)
     assert text.index("Диагноз") < text.index("Жалобы на момент осмотра")
 
@@ -473,12 +473,12 @@ def test_writer_with_order_tokens_reorders(tmp_path):
     path = tmp_path / "r.xlsx"
     tokens = ["жалобы на момент осмотра", "анамнез заболевания", "диагноз"]
     writer = AuditExcelWriter(path, order_tokens=tokens)
-    writer.append(_visit(), FormalStructureResult(sections=[]), diagnosis=[], icd_check=[])
+    writer.append(_visit(), FormalStructureResult(findings=[]), diagnosis=[], icd_check=[])
     text = _read_inspection_cell(path)
     assert text.index("Жалобы на момент осмотра") < text.index("Анамнез заболевания") < text.index("Диагноз")
 ```
 
-Note: confirm `FormalStructureResult(sections=[])` is a valid construction — check `src/audit/models.py` and adjust the constructor call to whatever minimal valid form the dataclass requires (it only needs to render via `_pretty`).
+Note: `FormalStructureResult` is defined in `src/storage/models/result.py` (re-exported from `audit.models`); its only field is `findings: list[FormalFinding]` with a default factory, so `FormalStructureResult(findings=[])` — or even `FormalStructureResult()` — is valid. It only needs to render via `_pretty`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -849,4 +849,4 @@ git commit -m "test: add golden reorder test on Alenka data; document inspection
 
 - Run tests with `python -m pytest` from the repo root; `pytest.ini` sets `pythonpath = src` and `asyncio_mode=auto`, so `from parsers.inspection_order import ...` resolves without installation.
 - The default (no `--format`) path must stay identical to today's output. Every new argument defaults to `None`.
-- If `FormalStructureResult(sections=[])` in Task 3's test doesn't match the real dataclass, open `src/audit/models.py` and use the minimal valid constructor — the test only needs an object `_pretty()` can render; the assertion is about the ДанныеОсмотра cell, not the formal cell.
+- `FormalStructureResult` (from `audit.models`, defined in `storage/models/result.py`) has a single `findings` field with a default factory; `FormalStructureResult(findings=[])` is the minimal valid construction for Task 3's test. The assertion is about the ДанныеОсмотра cell, not the formal cell.
