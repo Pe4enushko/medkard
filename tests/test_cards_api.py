@@ -152,26 +152,16 @@ def test_pull_returns_xlsx_file_with_one_row_per_card(client: TestClient, test_k
     assert ws.max_row - 1 == expected_count  # minus header row
 
 
-def test_pull_guid_filter_narrows_results(client: TestClient, test_key: str):
-    target_guid = _first_guid_on(client, test_key, "Alenka", "2026-06-21")
-
-    resp = client.get(f"/cards/pull?date=2026-06-21&org=Alenka&guids={target_guid}", headers=_auth(test_key))
-    assert resp.status_code == 200
-
-    wb = _load_workbook(resp.content)
-    ws = wb.active
-    assert ws.max_row - 1 == 1  # header + exactly one card row
-    assert target_guid in ws.cell(row=2, column=3).value  # "Данные карты" contains the GUID
-
-
 def test_org_param_scopes_results(client: TestClient, test_key: str):
     alenka_count = client.get("/cards/check?date=2026-06-21&org=Alenka", headers=_auth(test_key)).json()["count"]
     mds_count = client.get("/cards/check?date=2026-06-21&org=MDS", headers=_auth(test_key)).json()["count"]
 
     alenka_guid = _first_guid_on(client, test_key, "Alenka", "2026-06-21")
-    resp = client.get(f"/cards/pull?date=2026-06-21&org=MDS&guids={alenka_guid}", headers=_auth(test_key))
+    resp = client.get("/cards/pull?date=2026-06-21&org=MDS", headers=_auth(test_key))
     wb = _load_workbook(resp.content)
-    assert wb.active.max_row == 1  # header only — MDS's cards don't include Alenka's guid
+    ws = wb.active
+    guids_in_mds = {ws.cell(row=r, column=3).value for r in range(2, ws.max_row + 1)}
+    assert not any(alenka_guid in (cell or "") for cell in guids_in_mds)  # MDS's cards don't include Alenka's guid
     assert alenka_count > 0 and mds_count >= 0
 
 

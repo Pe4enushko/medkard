@@ -49,19 +49,14 @@ class _ApiCardsReader(BaseStorage):
             row = await cur.fetchone()
         return row["n"]
 
-    async def fetch_by_date(
-        self, visit_date: date, organization_id: str, guids: list[str] | None = None
-    ) -> list[dict[str, Any]]:
+    async def fetch_by_date(self, visit_date: date, organization_id: str) -> list[dict[str, Any]]:
         query = (
             _VISIT_DATE_CTE
             + "SELECT card_guid, card_data::text, formal_result, diag_result, icd_check_result "
             "FROM cards WHERE visit_date = %(date)s::date "
+            "ORDER BY card_guid"
         )
         params: dict[str, Any] = {"org_id": organization_id, "date": visit_date}
-        if guids:
-            query += "AND card_guid = ANY(%(guids)s) "
-            params["guids"] = guids
-        query += "ORDER BY card_guid"
 
         async with self._pool.connection() as conn:
             cur = await conn.execute(query, params)
@@ -85,17 +80,13 @@ class ApiFormatter:
         """Return the number of audited cards for *organization_id* on *visit_date*."""
         return await self._reader.count_by_date(visit_date, organization_id)
 
-    async def make_xlsx(
-        self, visit_date: date, organization_id: str, guids: list[str] | None = None
-    ) -> bytes:
+    async def make_xlsx(self, visit_date: date, organization_id: str) -> bytes:
         """Return an in-memory xlsx workbook (bytes), one row per card.
 
         Same row layout as the Excel reports produced by
-        audit/excel_formatter.py — built in memory, no disk I/O. If *guids*
-        is given, only those cards are included (still scoped to the org
-        and date).
+        audit/excel_formatter.py — built in memory, no disk I/O.
         """
-        rows = await self._reader.fetch_by_date(visit_date, organization_id, guids)
+        rows = await self._reader.fetch_by_date(visit_date, organization_id)
         manifest_meta = load_manifest_meta()
 
         workbook_rows = []

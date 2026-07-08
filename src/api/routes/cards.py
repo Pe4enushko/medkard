@@ -43,12 +43,11 @@ async def check(
 @router.get("/pull")
 async def pull(
     date_: date = Query(..., alias="date"),
-    guids: list[str] | None = Query(default=None),
     org_access: tuple[str, str] = Depends(require_org_access),
 ) -> Response:
     org_id, org_name = org_access
     async with ApiFormatter() as formatter:
-        xlsx_bytes = await formatter.make_xlsx(date_, org_id, guids)
+        xlsx_bytes = await formatter.make_xlsx(date_, org_id)
 
     filename = f"report_{org_name}_{date_.strftime('%d-%m-%Y')}.xlsx"
     return Response(
