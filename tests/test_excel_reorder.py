@@ -40,3 +40,12 @@ def test_writer_with_order_tokens_reorders(tmp_path):
     writer.append(_visit(), FormalStructureResult(findings=[]), diagnosis=[], icd_check=[])
     text = _read_inspection_cell(path)
     assert text.index("Жалобы на момент осмотра") < text.index("Анамнез заболевания") < text.index("Диагноз")
+
+
+from audit.excel_formatter import ExcelFormatter
+
+
+def test_formatter_forwards_order_tokens_to_writer(tmp_path):
+    tokens = ["диагноз"]
+    fmt = ExcelFormatter(tmp_path / "r.xlsx", order_tokens=tokens)
+    assert fmt._excel._order_tokens == tokens

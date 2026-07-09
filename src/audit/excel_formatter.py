@@ -123,12 +123,20 @@ class ExcelFormatter:
     """Async context-manager that exports done_cards rows to an xlsx file.
 
     Args:
-        excel_path: Path to the output xlsx file (created if absent).
-        legacy:     Use the legacy 3-column layout (visits / formal / diagnosis).
+        excel_path:    Path to the output xlsx file (created if absent).
+        legacy:        Use the legacy 3-column layout (visits / formal / diagnosis).
+        order_tokens:  Optional canonical field order for ДанныеОсмотра; ``None``
+                       disables reordering.
     """
 
-    def __init__(self, excel_path: str | Path, *, legacy: bool = False) -> None:
-        self._excel = AuditExcelWriter(excel_path, legacy=legacy)
+    def __init__(
+        self,
+        excel_path: str | Path,
+        *,
+        legacy: bool = False,
+        order_tokens: list[str] | None = None,
+    ) -> None:
+        self._excel = AuditExcelWriter(excel_path, legacy=legacy, order_tokens=order_tokens)
         self._reader = _DoneCardsReader()
 
     async def __aenter__(self) -> "ExcelFormatter":
