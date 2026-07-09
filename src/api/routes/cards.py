@@ -55,7 +55,7 @@ async def pull(
             )
         xlsx_bytes = await formatter.make_xlsx(date_, org_id)
 
-    filename = f"report_{org_name}_{date_.strftime('%d-%m-%Y')}.xlsx"
+    filename = f"report_{org_name}_{date_.isoformat()}.xlsx"
     return Response(
         content=xlsx_bytes,
         media_type=_XLSX_MEDIA_TYPE,
