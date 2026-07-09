@@ -169,3 +169,8 @@ def test_check_empty_for_date_with_no_cards(client: TestClient, test_key: str):
     resp = client.get("/cards/check?date=1999-01-01&org=Alenka", headers=_auth(test_key))
     assert resp.status_code == 200
     assert resp.json()["count"] == 0
+
+
+def test_pull_is_404_for_date_with_no_cards(client: TestClient, test_key: str):
+    resp = client.get("/cards/pull?date=1999-01-01&org=Alenka", headers=_auth(test_key))
+    assert resp.status_code == 404
