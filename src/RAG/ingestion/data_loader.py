@@ -11,8 +11,8 @@ Chunk shape:
         "type": "text" | "table",
         "content": str | list[dict],   # str for text, list of row dicts for table
         "metadata": {
-            "ID": str,                 # original manifest ID / filename stem
-            # ... all other manifest columns
+            # chunk-intrinsic only — manifest columns (ID, Наименование, МКБ-10, ...)
+            # live in the `guidelines` table, joined by docs.file_id at read time.
             "content_type": "text" | "table",
             # text-only:
             "section": str | None,     # numbered section title (e.g. "1.1 Title"),
