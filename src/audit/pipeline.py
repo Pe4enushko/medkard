@@ -28,7 +28,7 @@ from audit.filters import CardFilter
 from audit.formal_structure.validator import FormalValidator
 from audit.icd_check.validator import check_icd_codes
 from audit.models import FormalFinding, FormalStructureResult
-from audit.diagnosis.clinic_recs import ClinicRecs, _is_age_eligible, _patient_age
+from audit.diagnosis.clinic_recs import _is_age_eligible, _patient_age
 from parsers.json_parser import AppointmentParser
 from storage.done_cards_storage import DoneCardsStorage
 from storage.guidelines_storage import GuidelinesStorage
@@ -209,7 +209,6 @@ class AuditPipeline:
             return Result(input=visit, formal=formal_result, diagnosis=[], token_count=formal_tokens)
 
         # ── ICD coding check (once per visit, all diagnoses together) ─────────
-        clinic_recs = ClinicRecs()
         age = _patient_age(patient)
         # TODO(guidelines-sql): фильтрацию по возрасту вынести в SQL —
         # GuidelinesStorage.all_age_eligible(age) вместо загрузки всего
