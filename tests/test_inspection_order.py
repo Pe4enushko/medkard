@@ -91,3 +91,44 @@ def test_empty_inputs():
     assert reorder_inspection_data([], ["диагноз"]) == []
     data = [_item("Диагноз")]
     assert [d["Параметр"] for d in reorder_inspection_data(data, [])] == ["Диагноз"]
+
+
+import json
+
+import pytest
+
+from parsers.inspection_order import load_inspection_format
+
+
+def _write_formats(tmp_path, data):
+    p = tmp_path / "inspection_formats.json"
+    p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+def test_load_comma_split_flattens_tokens(tmp_path):
+    p = _write_formats(
+        tmp_path,
+        {"Alenka": {"standard": ["температура, чсс, чд, вес, рост", "диагноз"]}},
+    )
+    tokens = load_inspection_format("Alenka", "standard", path=p)
+    assert tokens == ["температура", "чсс", "чд", "вес", "рост", "диагноз"]
+
+
+def test_load_real_manifest_default_path():
+    # the committed resources/inspection_formats.json must load and split
+    tokens = load_inspection_format("Alenka", "standard")
+    assert "температура" in tokens and "рост" in tokens
+    assert "жалобы на момент осмотра" in tokens
+
+
+def test_load_missing_clinic_raises(tmp_path):
+    p = _write_formats(tmp_path, {"Alenka": {"standard": ["диагноз"]}})
+    with pytest.raises((KeyError, ValueError)):
+        load_inspection_format("MDS", "standard", path=p)
+
+
+def test_load_missing_format_raises(tmp_path):
+    p = _write_formats(tmp_path, {"Alenka": {"standard": ["диагноз"]}})
+    with pytest.raises((KeyError, ValueError)):
+        load_inspection_format("Alenka", "typo", path=p)

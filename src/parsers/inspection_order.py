@@ -14,11 +14,15 @@ by Levenshtein distance with a small threshold (default 2).
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 _PARAM_KEY = "Параметр"
 _STRIP_CHARS = " .:;,-—"
+
+_DEFAULT_FORMATS_PATH = Path(__file__).resolve().parents[2] / "resources" / "inspection_formats.json"
 
 
 def _normalize(s: str) -> str:
@@ -94,3 +98,36 @@ def reorder_inspection_data(
             result.append(item)
 
     return result
+
+
+def load_inspection_format(
+    clinic: str,
+    format_name: str,
+    path: str | Path = _DEFAULT_FORMATS_PATH,
+) -> list[str]:
+    """Load the manifest JSON and return the flat, comma-split token list for
+    ``[clinic][format_name]``.
+
+    Raises ValueError with a clear message if the clinic or format is absent.
+    """
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    if clinic not in data:
+        raise ValueError(
+            f"Clinic {clinic!r} not found in {path} (have: {sorted(data)})"
+        )
+    formats = data[clinic]
+    if format_name not in formats:
+        raise ValueError(
+            f"Format {format_name!r} not found for clinic {clinic!r} in {path} "
+            f"(have: {sorted(formats)})"
+        )
+
+    tokens: list[str] = []
+    for line in formats[format_name]:
+        for tok in str(line).split(","):
+            tok = tok.strip()
+            if tok:
+                tokens.append(tok)
+    return tokens
