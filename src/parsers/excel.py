@@ -42,6 +42,7 @@ from openpyxl.styles import Alignment
 from openpyxl.worksheet.worksheet import Worksheet
 
 from audit.models import FormalStructureResult
+from parsers.inspection_order import reorder_inspection_data
 
 _HEADERS = [
     "Специализация",
@@ -160,17 +161,21 @@ def _build_row(
     icd_check: Any = None,
     *,
     legacy: bool = False,
+    order_tokens: list[str] | None = None,
 ) -> list[str]:
     if legacy:
         return [_pretty(visit), _pretty(formal), _pretty(diagnosis)]
 
     specialization = (visit.get("Врач") or {}).get("SPECIALIZATION") or "—"
     visit_date = (visit.get("Прием") or {}).get("DATE") or "—"
+    inspection = visit.get("ДанныеОсмотра") or []
+    if order_tokens:
+        inspection = reorder_inspection_data(inspection, order_tokens)
     return [
         specialization,
         visit_date,
         _card_data_text(visit),
-        _pretty(visit.get("ДанныеОсмотра") or []),
+        _pretty(inspection),
         _pretty(visit.get("Услуги") or []),
         _pretty(visit.get("Диагнозы") or []),
         _pretty(formal),
@@ -183,6 +188,7 @@ def build_workbook_bytes(
     rows: list[tuple[dict[str, Any], FormalStructureResult, Any, Any]],
     *,
     legacy: bool = False,
+    order_tokens: list[str] | None = None,
 ) -> bytes:
     """Build an xlsx workbook in memory from (visit, formal, diagnosis, icd_check)
     tuples and return its bytes — no disk I/O, for use in per-request API responses.
@@ -200,7 +206,7 @@ def build_workbook_bytes(
     ws.auto_filter.ref = autofilter
 
     for visit, formal, diagnosis, icd_check in rows:
-        row = _build_row(visit, formal, diagnosis, icd_check, legacy=legacy)
+        row = _build_row(visit, formal, diagnosis, icd_check, legacy=legacy, order_tokens=order_tokens)
         ws.append(row)
         new_row = ws.max_row
         for col_idx in range(1, len(row) + 1):
@@ -215,13 +221,22 @@ class AuditExcelWriter:
     """Append audit results to an xlsx file, creating it with a header row if absent.
 
     Args:
-        path:   Path to the xlsx output file (created automatically if missing).
-        legacy: Use the legacy 3-column layout (visits / formal / diagnosis).
+        path:         Path to the xlsx output file (created automatically if missing).
+        legacy:       Use the legacy 3-column layout (visits / formal / diagnosis).
+        order_tokens: Optional flat token list used to reorder each visit's
+                       ДанныеОсмотра before rendering (see reorder_inspection_data).
     """
 
-    def __init__(self, path: str | Path, *, legacy: bool = False) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        legacy: bool = False,
+        order_tokens: list[str] | None = None,
+    ) -> None:
         self._path = Path(path)
         self._legacy = legacy
+        self._order_tokens = order_tokens
 
     def _open_or_create(self) -> tuple[Workbook, Worksheet]:
         if self._path.exists():
@@ -260,7 +275,10 @@ class AuditExcelWriter:
             diagnosis: Diagnosis audit result(s) for this visit.
         """
         try:
-            row = _build_row(visit, formal, diagnosis, icd_check, legacy=self._legacy)
+            row = _build_row(
+                visit, formal, diagnosis, icd_check,
+                legacy=self._legacy, order_tokens=self._order_tokens,
+            )
             wb, ws = self._open_or_create()
             ws.append(row)
             new_row = ws.max_row
