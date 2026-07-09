@@ -177,6 +177,7 @@ class ExcelFormatter:
             diagnosis = _parse_diagnosis(row["diag_result"], manifest_meta)
             icd_check = _parse_icd_check(row.get("icd_check_result") or [])
             self._excel.append(visit=visit, formal=formal, diagnosis=diagnosis, icd_check=icd_check)
+            logger.debug("📊 exported card id=%s guid=%s", row["id"], guid)
             written += 1
         logger.info("📊 ExcelFormatter exported %d row(s)", written)
         return written
