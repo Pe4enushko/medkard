@@ -9,6 +9,11 @@ class Doc:
     file_id: str = ""                    # manifest ID (PDF filename stem)
     metadata: dict = field(default_factory=dict)
 
+    # Денормализованные из guidelines через JOIN по file_id (populated on read).
+    name: str | None = None
+    mkb: list[str] = field(default_factory=list)
+    age_category: list[str] = field(default_factory=list)
+
     # Assigned by the database on insert; None before insertion.
     id: str | None = None
 
@@ -34,9 +39,9 @@ class Doc:
         """
         content_type: str = self.metadata.get("content_type", "text")
 
-        name: str | None = self.metadata.get("Наименование")
-        mkb: str | None = self.metadata.get("МКБ-10")
-        age_cat: str | None = self.metadata.get("Возрастная категория")
+        name: str | None = self.name
+        mkb: str | None = ", ".join(self.mkb) if self.mkb else None
+        age_cat: str | None = ", ".join(self.age_category) if self.age_category else None
         section: str | None = self.metadata.get("section")
         chunk_idx = self.metadata.get("chunk_index")
 

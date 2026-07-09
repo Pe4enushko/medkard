@@ -22,6 +22,9 @@ def _row_to_doc(row: dict) -> Doc:
         fact_q=row.get("fact_q"),
         procedure_q=row.get("procedure_q"),
         constraint_q=row.get("constraint_q"),
+        name=row.get("g_name"),
+        mkb=list(row.get("g_mkb") or []),
+        age_category=list(row.get("g_age_category") or []),
     )
 
 
@@ -134,10 +137,12 @@ class DocsStorage(BaseStorage):
             cur = await conn.execute(
                 """
                 SELECT
-                    id::text, file_id, chunk, metadata,
-                    fact_q, procedure_q, constraint_q
+                    docs.id::text AS id, docs.file_id, docs.chunk, docs.metadata,
+                    docs.fact_q, docs.procedure_q, docs.constraint_q,
+                    g.name AS g_name, g.mkb AS g_mkb, g.age_category AS g_age_category
                 FROM docs
-                WHERE id = %(id)s::uuid
+                LEFT JOIN guidelines g ON g.file_id = docs.file_id
+                WHERE docs.id = %(id)s::uuid
                 """,
                 {"id": doc_id},
             )
@@ -150,10 +155,12 @@ class DocsStorage(BaseStorage):
             cur = await conn.execute(
                 """
                 SELECT
-                    id::text, file_id, chunk, metadata,
-                    fact_q, procedure_q, constraint_q
+                    docs.id::text AS id, docs.file_id, docs.chunk, docs.metadata,
+                    docs.fact_q, docs.procedure_q, docs.constraint_q,
+                    g.name AS g_name, g.mkb AS g_mkb, g.age_category AS g_age_category
                 FROM docs
-                WHERE id = ANY(%(ids)s::uuid[])
+                LEFT JOIN guidelines g ON g.file_id = docs.file_id
+                WHERE docs.id = ANY(%(ids)s::uuid[])
                 """,
                 {"ids": doc_ids},
             )
