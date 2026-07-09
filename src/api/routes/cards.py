@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from api.auth import require_org_access
 from api.models import CheckResponse
@@ -47,6 +47,12 @@ async def pull(
 ) -> Response:
     org_id, org_name = org_access
     async with ApiFormatter() as formatter:
+        count = await formatter.check(date_, org_id)
+        if count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No cards for {org_name} on {date_.isoformat()}",
+            )
         xlsx_bytes = await formatter.make_xlsx(date_, org_id)
 
     filename = f"report_{org_name}_{date_.strftime('%d-%m-%Y')}.xlsx"
