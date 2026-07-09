@@ -218,7 +218,6 @@ class PDFContentReader:
                         "type": "text",
                         "content": sub_chunk,
                         "metadata": {
-                            **self.metadata,
                             "section": section_title,
                             "content_type": "text",
                             "chunk_index": chunk_counter,
@@ -230,7 +229,6 @@ class PDFContentReader:
         for page_idx, bboxes in table_pages.items():
             section = _section_for_page(sorted_toc, page_idx)
             base_meta = {
-                **self.metadata,
                 "page": page_idx,
                 "section": section,
                 "content_type": "table",
