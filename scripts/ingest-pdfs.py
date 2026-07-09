@@ -59,10 +59,9 @@ def _chunk_text(chunk: dict) -> str:
     return content
 
 
-async def _process_chunk(chunk: dict) -> Doc | None:
+async def _process_chunk(chunk: dict, file_id: str) -> Doc | None:
     """Generate queries + embeddings for one chunk; return a ready-to-insert Doc."""
     chunk_text = _chunk_text(chunk)
-    file_id: str = chunk["metadata"]["ID"]
     try:
         _, queries = await generate_queries(chunk)
         embeddings = await embed_queries(queries)
@@ -88,9 +87,9 @@ async def _process_chunk(chunk: dict) -> Doc | None:
     )
 
 
-async def _process_batch(chunks: list[dict]) -> list[Doc | None]:
+async def _process_batch(chunks: list[dict], file_id: str) -> list[Doc | None]:
     """Process a batch of chunks concurrently."""
-    return list(await asyncio.gather(*[_process_chunk(c) for c in chunks]))
+    return list(await asyncio.gather(*[_process_chunk(c, file_id) for c in chunks]))
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -139,7 +138,7 @@ async def main() -> None:
 
                 for batch_start in range(0, len(all_chunks), QUERY_GENERATION_BATCH_SIZE):
                     batch = all_chunks[batch_start: batch_start + QUERY_GENERATION_BATCH_SIZE]
-                    docs = await _process_batch(batch)
+                    docs = await _process_batch(batch, current_file_id)
 
                     for chunk, doc in zip(batch, docs):
                         if doc is None:
