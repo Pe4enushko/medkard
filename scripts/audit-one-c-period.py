@@ -38,6 +38,7 @@ from integrations.ftp import load_creds, upload
 from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient
 from audit.filters import CardFilter
 from parsers.filter_config import load_card_filter
+from parsers.inspection_order import load_inspection_format
 from RAG.retrieval.vector_store import close_pool
 from storage.organizations_storage import OrganizationsStorage
 
@@ -51,7 +52,18 @@ _parser.add_argument("--excel", default=None, metavar="PATH", help="Output xlsx 
 _parser.add_argument("--num-batches", type=int, default=5, metavar="N", help="Max concurrent visits processed at a time (default: 5)")
 _parser.add_argument("--ftpcreds", default=None, metavar="FILE", help="Credentials file for FTP upload (ip=, port=, username=, password=)")
 _parser.add_argument("--legacy-report", action="store_true", help="Use legacy 3-column Excel layout (visits, formal, diagnosis)")
+_parser.add_argument(
+    "--format",
+    default=None,
+    metavar="NAME",
+    help="Reorder ДанныеОсмотра fields using resources/inspection_formats.json "
+         "[<org>][<NAME>]. Omit to leave field order unchanged.",
+)
 _args = _parser.parse_args()
+
+INSPECTION_ORDER = (
+    load_inspection_format(_args.org, _args.format) if _args.format else None
+)
 
 ONE_C_CLIENTS: dict[str, type[OneCClient]] = {
     "Alenka": AlenkaOneCClient,
@@ -155,7 +167,9 @@ async def main() -> None:
         # ── 3. Export the full period for this org from DB to Excel ───────────
         #     Independent of stage 2: runs whether or not new cards were processed,
         #     so the report always reflects every card in the period.
-        async with ExcelFormatter(EXCEL_PATH, legacy=_args.legacy_report) as fmt:
+        async with ExcelFormatter(
+            EXCEL_PATH, legacy=_args.legacy_report, order_tokens=INSPECTION_ORDER
+        ) as fmt:
             written = await fmt.export_period(PERIOD_FROM, PERIOD_TO, org_id)
         log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)
 
