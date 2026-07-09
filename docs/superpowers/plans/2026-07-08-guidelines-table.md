@@ -4,7 +4,7 @@
 
 **Goal:** Перенести справочник клинреков из `resources/manifest.csv` в таблицу БД `guidelines`, связать её с `docs` внешним ключом, убрать дублирование колонок манифеста в `docs.metadata`, и перевести всех четырёх читателей CSV на БД.
 
-**Architecture:** Новая таблица `guidelines` (PK = `file_id`, множественные поля `mkb`/`age_category` как `TEXT[]`) — единственный источник истины. Модель `Guideline` + `GuidelinesStorage` (psycopg3, паттерн `BaseStorage`). Матчинг МКБ уходит в SQL. Читаемые манифест-поля в `Doc` приходят через `LEFT JOIN docs → guidelines`. Для сохранения поведения LLM-агентов `Guideline` умеет отдавать себя как «строку манифеста» (dict с ключами как в CSV) — так `decider`/`icd_prefix_picker`/`_render_manifest_table` почти не меняются.
+**Architecture:** Новая таблица `guidelines` (PK = `file_id`, множественные поля `mkb`/`age_category` как `TEXT[]`) — единственный источник истины. Модель `Guideline` + `GuidelinesStorage` (psycopg3, паттерн `BaseStorage`). Матчинг МКБ уходит в SQL. Читаемые манифест-поля в `Doc` приходят через `LEFT JOIN docs → guidelines`. **`Guideline`-объекты передаются по всей цепочке как есть** — `clinic_recs`, `pipeline`, `icd_check._render_manifest_table`, `LLM.decider`, `LLM.icd_prefix_picker` все работают с `Guideline`, а не с dict-строками манифеста. Единственное место, где объект превращается в dict, — сериализация в JSON-промпт LLM внутри `decider`/`icd_prefix_picker` (через `dataclasses.asdict`), потому что это специфика LLM-вызова, а не контракт между модулями.
 
 **Tech Stack:** Python 3, psycopg3 (async, `dict_row`), PostgreSQL, pgvector, pytest (`asyncio_mode=auto`, `pythonpath=src`), openpyxl.
 
@@ -17,6 +17,7 @@
 - Два бэкенда БД сосуществуют: `psycopg3` (storage/) и `asyncpg` (RAG/retrieval/). Новый код — в `storage/`, psycopg3.
 - Возрастная семантика: только `Дети` → пациент-ребёнок (age ≤ 15); только `Взрослые` → взрослый; `Взрослые, дети` или пусто → пропускаем. Регистронезависимо.
 - `age_category` хранится **дословно как в CSV** (`Взрослые`, `Дети`).
+- **Никаких промежуточных dict-адаптеров манифеста.** Всюду, где раньше передавался `dict[str, str]` («строка манифеста»), теперь передаётся `Guideline`. Dict возникает только на самой границе с LLM-клиентом (JSON-сериализация промпта), не раньше.
 - Коммитить часто, каждый таск — отдельный самодостаточный коммит на ветке `guidelines-table`.
 
 ---
@@ -27,7 +28,7 @@
 - `migrations/019_guidelines.sql` — DDL таблицы + GIN-индекс
 - `migrations/020_docs_metadata_cleanup.sql` — удаление манифест-ключей из `docs.metadata`
 - `migrations/021_docs_guideline_fk.sql` — FK `docs.file_id → guidelines.file_id` + проверка сирот
-- `src/storage/models/guideline.py` — dataclass `Guideline` + `from_manifest_row` / `to_manifest_row`
+- `src/storage/models/guideline.py` — dataclass `Guideline` + `from_manifest_row`
 - `src/storage/guidelines_storage.py` — `GuidelinesStorage`
 - `scripts/seed-guidelines.py` — заливка `manifest.csv` → таблица
 - `tests/test_guideline_model.py` — юнит-тесты `Guideline` (локальные, без БД)
@@ -35,16 +36,19 @@
 - `tests/test_doc_format_chunk.py` — регрессия шапки чанка (локальный)
 - `tests/test_clinic_recs_age.py` — юнит `_is_age_eligible` (локальный)
 - `tests/test_report_meta.py` — юнит `build_manifest_meta` (локальный)
+- `tests/test_decider_guideline_input.py` — юнит: `decider`/`icd_prefix_picker` принимают `Guideline` (локальный)
 
 Изменяемые:
 - `src/storage/models/__init__.py` — экспорт `Guideline`
 - `src/storage/models/doc.py` — поля `name/mkb/age_category`, чтение из них
 - `src/storage/docs_storage.py` — JOIN guidelines в `get`/`get_many`
 - `src/RAG/ingestion/data_loader.py` — убрать splat манифеста в metadata
-- `src/audit/diagnosis/clinic_recs.py` — матчинг/возраст через `GuidelinesStorage`
-- `src/audit/pipeline.py` — источник `manifest_rows` + `TODO(guidelines-sql)`
-- `src/audit/icd_check/validator.py` — докстринг (формат рендера не меняется)
-- `src/reporting/result_parser.py` — убрать `load_manifest_meta` (CSV)
+- `src/audit/diagnosis/clinic_recs.py` — матчинг/возраст через `GuidelinesStorage`, работает с `Guideline`
+- `src/audit/pipeline.py` — источник `manifest_rows` (`list[Guideline]`) + `TODO(guidelines-sql)`
+- `src/audit/icd_check/validator.py` — `_render_manifest_table` и `check_icd_codes` принимают `list[Guideline]`
+- `src/LLM/decider.py` — `decide_file_id` принимает `list[Guideline]`, сериализует в JSON сам
+- `src/LLM/icd_prefix_picker.py` — `IcdPrefixPicker.pick` принимает `list[Guideline]`, сериализует сам
+- `src/reporting/result_parser.py` — убрать `load_manifest_meta` (CSV), добавить `build_manifest_meta(list[Guideline])`
 - `src/reporting/api_formatter.py` — meta из `GuidelinesStorage` + `TODO`
 - `src/audit/excel_formatter.py` — meta из `GuidelinesStorage`
 
@@ -62,7 +66,8 @@
 - Produces:
   - `@dataclass Guideline` с полями: `file_id: str`, `name: str | None`, `mkb: list[str]`, `age_category: list[str]`, `developer: str | None`, `nps_status: str | None`, `published_at: str | None`, `usage_status: str | None`.
   - `Guideline.from_manifest_row(row: dict[str, str]) -> Guideline` — парсит CSV-строку (ключи: `ID`, `Наименование`, `МКБ-10`, `Возрастная категория`, `Разработчик`, `Статус одобрения НПС`, `Дата размещения`, `Статус применения`). `mkb`/`age_category` — split по запятой + strip; для `mkb` дополнительно `.upper()`; пустые ячейки → `[]`.
-  - `Guideline.to_manifest_row() -> dict[str, str]` — обратно в dict с CSV-ключами (`ID`, `Наименование`, `МКБ-10`, `Возрастная категория`); `mkb`/`age_category` склеиваются через `", "`. Используется `decider`/`icd_prefix_picker`/`icd_check`.
+
+Никакого `to_manifest_row()` — объект передаётся дальше как есть; JSON-сериализация (если понадобится) делается точечно на границе с LLM (см. Task 6).
 
 - [ ] **Step 1: Написать падающие тесты**
 
@@ -129,14 +134,6 @@ def test_from_manifest_row_maps_all_scalar_fields():
     assert g.nps_status == "Одобрено"
     assert g.published_at == "01.01.2020"
     assert g.usage_status == "Действует"
-
-
-def test_to_manifest_row_roundtrips_csv_keys():
-    out = Guideline.from_manifest_row(_row()).to_manifest_row()
-    assert out["ID"] == "581_2"
-    assert out["Наименование"] == "Острый бронхит"
-    assert out["МКБ-10"] == "J20.0, J20.1"
-    assert out["Возрастная категория"] == "Взрослые, дети"
 ```
 
 - [ ] **Step 2: Запустить — убедиться, что падает**
@@ -195,19 +192,6 @@ class Guideline:
             published_at=row.get(_PUBLISHED) or None,
             usage_status=row.get(_USAGE) or None,
         )
-
-    def to_manifest_row(self) -> dict[str, str]:
-        """Отдать себя как «строку манифеста» с CSV-ключами.
-
-        Нужно потребителям, работающим с dict-строками манифеста:
-        LLM.decider, LLM.icd_prefix_picker, icd_check._render_manifest_table.
-        """
-        return {
-            _ID: self.file_id,
-            _NAME: self.name or "",
-            _MKB: ", ".join(self.mkb),
-            _AGE: ", ".join(self.age_category),
-        }
 ```
 
 Добавить в `src/storage/models/__init__.py` (рядом с существующими экспортами):
@@ -219,7 +203,7 @@ from .guideline import Guideline  # noqa: F401
 - [ ] **Step 4: Запустить — убедиться, что проходит**
 
 Run: `pytest tests/test_guideline_model.py -v`
-Expected: PASS (7 passed)
+Expected: PASS (6 passed)
 
 - [ ] **Step 5: Коммит**
 
@@ -793,17 +777,278 @@ git commit -m "feat: Doc читает name/mkb/age из guidelines через JO
 
 ---
 
-## Task 6: `clinic_recs` — матчинг и возраст через `GuidelinesStorage`
+## Task 6: `decider` и `icd_prefix_picker` — принимают `list[Guideline]`
+
+Эти два модуля — единственное место, где кандидаты реально нужно сериализовать в dict/JSON (промпт LLM). Переводим их сигнатуру на `Guideline` первыми, чтобы Task 7 (`clinic_recs`) мог сразу передавать объекты, не городя адаптер.
+
+**Files:**
+- Modify: `src/LLM/decider.py`
+- Modify: `src/LLM/icd_prefix_picker.py`
+- Test: `tests/test_decider_guideline_input.py`
+
+**Interfaces:**
+- Consumes: `Guideline` (Task 1).
+- Produces:
+  - `decide_file_id(patient: dict, diagnosis: dict, candidates: list[Guideline]) -> tuple[str | None, int]` — сериализует `candidates` через `dataclasses.asdict` перед `json.dumps`; валидирует ответ по `{g.file_id for g in candidates}`.
+  - `IcdPrefixPicker.pick(patient: dict, diagnosis: dict, candidates: list[Guideline]) -> tuple[str | None, int]` — аналогично.
+
+- [ ] **Step 1: Написать падающие тесты**
+
+Создать `tests/test_decider_guideline_input.py` — проверяем только сериализацию и валидацию ответа, не реальный вызов LLM (мокаем `_client.call` / `self._client.call`):
+
+```python
+"""decider/icd_prefix_picker принимают list[Guideline] напрямую (без dict-адаптера)."""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from storage.models.guideline import Guideline
+
+_CANDIDATES = [
+    Guideline(file_id="581_2", name="Острый бронхит", mkb=["J20.0"], age_category=["Взрослые"]),
+    Guideline(file_id="581_3", name="Хронический бронхит", mkb=["J20.1"], age_category=["Взрослые"]),
+]
+
+
+async def test_decide_file_id_accepts_guideline_list_and_serializes_them():
+    from LLM.decider import decide_file_id
+
+    with patch("LLM.decider._client") as mock_client:
+        mock_client.call = AsyncMock(return_value=("581_2", 10))
+        chosen, tokens = await decide_file_id({"Возраст": 30}, {"КодМКБ": "J20.0"}, _CANDIDATES)
+
+    assert chosen == "581_2"
+    assert tokens == 10
+    # candidates были сериализованы в промпт (JSON с их именами)
+    user_msg = mock_client.call.call_args.kwargs["messages"][1]["content"]
+    assert "Острый бронхит" in user_msg
+    assert "581_2" in user_msg
+
+
+async def test_decide_file_id_rejects_answer_outside_candidates():
+    from LLM.decider import decide_file_id
+
+    with patch("LLM.decider._client") as mock_client:
+        mock_client.call = AsyncMock(return_value=("not_a_real_id", 5))
+        chosen, tokens = await decide_file_id({}, {"КодМКБ": "J20.0"}, _CANDIDATES)
+
+    assert chosen is None
+    assert tokens == 5
+
+
+async def test_icd_prefix_picker_accepts_guideline_list():
+    from LLM.icd_prefix_picker import IcdPrefixPicker
+
+    picker = IcdPrefixPicker()
+    with patch.object(picker, "_client") as mock_client:
+        mock_client.call = AsyncMock(return_value=("581_3", 7))
+        chosen, tokens = await picker.pick({}, {"КодМКБ": "J20.1"}, _CANDIDATES)
+
+    assert chosen == "581_3"
+    assert tokens == 7
+```
+
+- [ ] **Step 2: Запустить — убедиться, что падает**
+
+Run: `pytest tests/test_decider_guideline_input.py -v`
+Expected: FAIL — текущий код читает `row.get("ID", "")` из dict; `Guideline` не поддерживает `.get()` → `AttributeError`.
+
+- [ ] **Step 3: Переписать `decider.py`**
+
+В `src/LLM/decider.py` изменить сигнатуру и тело:
+
+```python
+"""
+decider.py — LLM-based selection of the most relevant clinical-guideline
+document when multiple candidates match an МКБ-10 code.
+
+Given patient metadata, the diagnosis record, and the list of matching
+Guideline candidates, the LLM picks the single most relevant file_id.
+
+Usage::
+    from LLM.decider import decide_file_id
+
+    file_id, tokens = await decide_file_id(patient, diagnosis, candidates)
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+import json
+import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+from LLM.client import LLMClient
+from storage.models.guideline import Guideline
+
+_client = LLMClient()
+
+
+async def decide_file_id(
+    patient: dict[str, Any],
+    diagnosis: dict[str, Any],
+    candidates: list[Guideline],
+) -> tuple[str | None, int]:
+    """Ask the LLM to pick the most relevant guideline file_id.
+
+    Args:
+        patient:    The «Пациент» dict from the raw visit JSON.
+        diagnosis:  A single entry from «Диагнозы».
+        candidates: Guideline objects that matched the МКБ code.
+
+    Returns:
+        (chosen file_id or None, tokens spent).
+    """
+    candidate_json = json.dumps([asdict(c) for c in candidates], ensure_ascii=False, indent=2)
+    diagnosis_json = json.dumps(diagnosis, ensure_ascii=False, indent=2)
+    patient_json = json.dumps(patient, ensure_ascii=False, indent=2)
+
+    system = (
+        "Ты — медицинский эксперт. Тебе даны данные о пациенте, диагноз и список "
+        "клинических рекомендаций, подходящих по коду МКБ-10. "
+        "Выбери ОДНУ наиболее подходящую рекомендацию для данного пациента и диагноза. "
+        "Ответь ТОЛЬКО значением поля file_id выбранной рекомендации, без пояснений."
+    )
+
+    user = (
+        f"## Пациент\n{patient_json}\n\n"
+        f"## Диагноз\n{diagnosis_json}\n\n"
+        f"## Кандидаты (клинические рекомендации)\n{candidate_json}"
+    )
+
+    raw_content, tokens = await _client.call(
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.4,
+    )
+
+    logger.debug("[decider] raw LLM answer: %s", raw_content)
+    chosen = raw_content.strip().strip('"').strip("'")
+    valid_ids = {c.file_id for c in candidates}
+    return (chosen if chosen in valid_ids else None), tokens
+```
+
+(Промпт теперь просит `file_id` вместо `ID` — согласовано с полем `Guideline.file_id`, которое и сериализуется в JSON через `asdict`.)
+
+- [ ] **Step 4: Переписать `icd_prefix_picker.py`**
+
+В `src/LLM/icd_prefix_picker.py` изменить сигнатуру и тело:
+
+```python
+"""
+icd_prefix_picker.py — LLM-based selection of a clinical guideline when the
+exact МКБ-10 code had no match and a prefix-only lookup returned candidates.
+
+Usage::
+    from LLM.icd_prefix_picker import IcdPrefixPicker
+
+    picker = IcdPrefixPicker()
+    file_id, tokens = await picker.pick(patient, diagnosis, candidates)
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+import json
+import logging
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+from LLM.client import LLMClient
+from storage.models.guideline import Guideline
+
+_PROMPT_PATH = Path(__file__).parent / "prompts" / "icd_prefix_picker.txt"
+
+
+class IcdPrefixPicker:
+    """Pick a guideline file_id from prefix-matched candidates using an LLM."""
+
+    def __init__(self) -> None:
+        self._system = _PROMPT_PATH.read_text(encoding="utf-8").strip()
+        self._client = LLMClient()
+
+    async def pick(
+        self,
+        patient: dict[str, Any],
+        diagnosis: dict[str, Any],
+        candidates: list[Guideline],
+    ) -> tuple[str | None, int]:
+        """Return the most relevant guideline file_id among prefix-matched *candidates*.
+
+        Args:
+            patient:    Patient info dict.
+            diagnosis:  Diagnosis dict with at least ``КодМКБ`` key.
+            candidates: Guideline objects matched by the ICD prefix (e.g. ``J20``).
+
+        Returns:
+            (chosen file_id or None, tokens spent).
+        """
+        candidate_json = json.dumps([asdict(c) for c in candidates], ensure_ascii=False, indent=2)
+        user = (
+            f"## Пациент\n{json.dumps(patient, ensure_ascii=False, indent=2)}\n\n"
+            f"## Диагноз\n{json.dumps(diagnosis, ensure_ascii=False, indent=2)}\n\n"
+            f"## Кандидаты (клинические рекомендации)\n{candidate_json}"
+        )
+
+        raw, tokens = await self._client.call(
+            messages=[
+                {"role": "system", "content": self._system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.4,
+        )
+
+        logger.debug("[icd_prefix_picker] raw answer: %s", raw)
+        chosen = raw.strip().strip('"').strip("'")
+        if chosen.lower() == "none":
+            return None, tokens
+        valid_ids = {c.file_id for c in candidates}
+        return (chosen if chosen in valid_ids else None), tokens
+```
+
+- [ ] **Step 5: Проверить промпт-файл на упоминание поля `ID`**
+
+Run: `grep -n "\bID\b" src/LLM/prompts/icd_prefix_picker.txt`
+Если найдено упоминание поля `ID` как ключа ответа — заменить на `file_id` для согласованности с сериализацией через `asdict` (ключ dataclass — `file_id`, не `ID`).
+
+- [ ] **Step 6: Запустить тесты**
+
+Run: `pytest tests/test_decider_guideline_input.py -v`
+Expected: PASS (3 passed)
+
+- [ ] **Step 7: Коммит**
+
+```bash
+git add src/LLM/decider.py src/LLM/icd_prefix_picker.py tests/test_decider_guideline_input.py
+git commit -m "refactor: decider/icd_prefix_picker принимают Guideline вместо dict"
+```
+
+---
+
+## Task 7: `clinic_recs` — матчинг и возраст через `GuidelinesStorage`
 
 **Files:**
 - Modify: `src/audit/diagnosis/clinic_recs.py`
 - Test: `tests/test_clinic_recs_age.py`
 
 **Interfaces:**
-- Consumes: `GuidelinesStorage.find_by_code`, `find_by_prefix` (Task 3); `Guideline.to_manifest_row` (Task 1).
+- Consumes: `GuidelinesStorage.find_by_code`, `find_by_prefix` (Task 3); `decide_file_id`, `IcdPrefixPicker.pick` принимающие `list[Guideline]` (Task 6).
 - Produces:
   - `_is_age_eligible(guideline: Guideline, age: int | None) -> bool` — принимает `Guideline`, читает `guideline.age_category` (список), регистронезависимо.
-  - `ClinicRecs.pick_recs` — без изменений сигнатуры (`async`, `-> tuple[str | None, int]`).
+  - `ClinicRecs.pick_recs` — без изменений сигнатуры (`async`, `-> tuple[str | None, int]`); внутри работает с `Guideline` от начала до конца, без dict-конверсий.
   - `ClinicRecs.__init__()` — больше не принимает `manifest_path`.
   - `_patient_age`, `_ADULT_THRESHOLD`, `_SKIP_CODES` — сохраняются.
 
@@ -906,8 +1151,7 @@ from storage.models.guideline import Guideline
                 if prefix != normalised:
                     candidates = [g for g in await store.find_by_prefix(prefix) if _is_age_eligible(g, age)]
                     if candidates:
-                        rows = [g.to_manifest_row() for g in candidates]
-                        return await self._prefix_picker.pick(patient, diagnosis, rows)
+                        return await self._prefix_picker.pick(patient, diagnosis, candidates)
                 return None, 0
 
         if len(matched) == 1:
@@ -921,8 +1165,7 @@ from storage.models.guideline import Guideline
             best = matched[scores.index(best_score)]
             return best.file_id or None, 0
 
-        rows = [g.to_manifest_row() for g in matched]
-        return await decide_file_id(patient, diagnosis, rows)
+        return await decide_file_id(patient, diagnosis, matched)
 ```
 
 Удалить константы `_ICD_COLUMN`, `_ID_COLUMN`, `_NAME_COLUMN`, `_AGE_COLUMN`, `_MANIFEST_PATH` и `import csv` (больше не нужны).
@@ -941,22 +1184,88 @@ Expected: PASS на стенде (бьют БД/LLM). Локально без Б
 
 ```bash
 git add src/audit/diagnosis/clinic_recs.py tests/test_clinic_recs_age.py
-git commit -m "refactor: clinic_recs матчит МКБ через GuidelinesStorage"
+git commit -m "refactor: clinic_recs матчит МКБ через GuidelinesStorage, работает с Guideline"
 ```
 
 ---
 
-## Task 7: `pipeline` + `icd_check` — источник manifest_rows из БД
+## Task 8: `pipeline` + `icd_check` — источник `manifest_rows` из БД, тип `list[Guideline]`
 
 **Files:**
 - Modify: `src/audit/pipeline.py:211-215,31`
-- Modify: `src/audit/icd_check/validator.py` (докстринг)
+- Modify: `src/audit/icd_check/validator.py` — `_render_manifest_table` и `check_icd_codes` типизация
 
 **Interfaces:**
-- Consumes: `GuidelinesStorage.all` (Task 3); `_is_age_eligible(Guideline, age)` (Task 6); `Guideline.to_manifest_row` (Task 1).
-- Produces: `check_icd_codes(..., manifest_rows=...)` получает список dict-строк манифеста (как раньше), сформированных из `Guideline.to_manifest_row()`. Сигнатура `check_icd_codes` не меняется.
+- Consumes: `GuidelinesStorage.all` (Task 3); `_is_age_eligible(Guideline, age)` (Task 7).
+- Produces: `check_icd_codes(..., manifest_rows: list[Guideline])`. `_render_manifest_table(rows: list[Guideline])` рендерит `g.file_id`/`g.name`/`", ".join(g.mkb)`/`", ".join(g.age_category)` напрямую — без промежуточного dict.
 
-- [ ] **Step 1: Заменить загрузку манифеста в pipeline**
+- [ ] **Step 1: Переписать `_render_manifest_table` под `Guideline`**
+
+В `src/audit/icd_check/validator.py` заменить:
+
+```python
+def _render_manifest_table(rows: list[dict[str, str]]) -> str:
+    """Render age-filtered manifest rows as a plain text table for the agent."""
+    header = "ID | Наименование | МКБ-10 | Возрастная категория"
+    sep = "-" * len(header)
+    lines = [header, sep]
+    for row in rows:
+        lines.append(
+            f"{row.get('ID', '')} | {row.get('Наименование', '')} | "
+            f"{row.get('МКБ-10', '')} | {row.get('Возрастная категория', '')}"
+        )
+    return "\n".join(lines)
+```
+
+на:
+
+```python
+def _render_manifest_table(rows: list["Guideline"]) -> str:
+    """Render age-filtered guideline rows as a plain text table for the agent."""
+    header = "ID | Наименование | МКБ-10 | Возрастная категория"
+    sep = "-" * len(header)
+    lines = [header, sep]
+    for g in rows:
+        lines.append(
+            f"{g.file_id} | {g.name or ''} | "
+            f"{', '.join(g.mkb)} | {', '.join(g.age_category)}"
+        )
+    return "\n".join(lines)
+```
+
+Добавить импорт в начало файла:
+
+```python
+from storage.models.guideline import Guideline
+```
+
+- [ ] **Step 2: Обновить сигнатуру и докстринг `check_icd_codes`**
+
+В том же файле изменить:
+
+```python
+async def check_icd_codes(
+    patient: dict[str, Any],
+    diagnoses: list[dict[str, Any]],
+    manifest_rows: list[dict[str, str]],
+    inspection_data: list[dict[str, Any]] | None = None,
+) -> tuple[list[IcdCodingIssue], int]:
+```
+
+на:
+
+```python
+async def check_icd_codes(
+    patient: dict[str, Any],
+    diagnoses: list[dict[str, Any]],
+    manifest_rows: list[Guideline],
+    inspection_data: list[dict[str, Any]] | None = None,
+) -> tuple[list[IcdCodingIssue], int]:
+```
+
+В докстринге заменить `manifest_rows: Age-filtered rows from manifest.csv.` на `manifest_rows: Age-filtered Guideline rows from GuidelinesStorage.`.
+
+- [ ] **Step 3: Заменить загрузку манифеста в pipeline**
 
 В `src/audit/pipeline.py`, блок около 211-215:
 
@@ -976,26 +1285,16 @@ git commit -m "refactor: clinic_recs матчит МКБ через GuidelinesSt
         # GuidelinesStorage.all_age_eligible(age) вместо загрузки всего
         # справочника и фильтра в Python. См. spec §5.
         async with GuidelinesStorage() as _store:
-            all_guidelines = await _store.all()
-        manifest_rows = [g.to_manifest_row() for g in all_guidelines if _is_age_eligible(g, age)]
+            manifest_rows = [g for g in await _store.all() if _is_age_eligible(g, age)]
 ```
 
-- [ ] **Step 2: Добавить импорт в pipeline**
+- [ ] **Step 4: Добавить импорт в pipeline**
 
-В `src/audit/pipeline.py` добавить (строка импортов остаётся, `_is_age_eligible`/`_patient_age` всё ещё из clinic_recs):
+В `src/audit/pipeline.py` добавить:
 
 ```python
 from storage.guidelines_storage import GuidelinesStorage
 ```
-
-- [ ] **Step 3: Обновить докстринг `check_icd_codes`**
-
-В `src/audit/icd_check/validator.py` в докстринге заменить `Age-filtered rows from manifest.csv.` на `Age-filtered guideline rows (dicts with manifest keys) from GuidelinesStorage.`. Код `_render_manifest_table` не трогаем — он читает `row.get("ID"/"Наименование"/"МКБ-10"/"Возрастная категория")`, а `to_manifest_row()` даёт ровно эти ключи.
-
-- [ ] **Step 4: Проверить ключи manifest-row**
-
-Run: `python -c "import sys; sys.path.insert(0,'src'); from storage.models.guideline import Guideline; g=Guideline(file_id='1',name='N',mkb=['J20.0'],age_category=['Взрослые']); r=g.to_manifest_row(); print(all(k in r for k in ('ID','Наименование','МКБ-10','Возрастная категория')))"`
-Expected: `True`
 
 - [ ] **Step 5: Прогнать pipeline-тест (стенд)**
 
@@ -1006,12 +1305,12 @@ Expected: PASS на стенде.
 
 ```bash
 git add src/audit/pipeline.py src/audit/icd_check/validator.py
-git commit -m "refactor: pipeline берёт манифест для ICD-чека из GuidelinesStorage"
+git commit -m "refactor: pipeline/icd_check работают с list[Guideline] вместо dict-манифеста"
 ```
 
 ---
 
-## Task 8: Отчёт — meta из `GuidelinesStorage` вместо CSV
+## Task 9: Отчёт — meta из `GuidelinesStorage` вместо CSV
 
 **Files:**
 - Modify: `src/reporting/result_parser.py`
@@ -1020,10 +1319,10 @@ git commit -m "refactor: pipeline берёт манифест для ICD-чек�
 - Test: `tests/test_report_meta.py`
 
 **Interfaces:**
-- Consumes: `GuidelinesStorage.all` (Task 3).
+- Consumes: `GuidelinesStorage.all` (Task 3), `Guideline` (Task 1).
 - Produces:
   - `result_parser.build_manifest_meta(guidelines: list[Guideline]) -> dict[str, dict]` — заменяет `load_manifest_meta()`; строит `{file_id: {"name", "date", "age_group"}}`. `date` = `published_at`, `age_group` = `", ".join(age_category)`.
-  - `load_manifest_meta()` удаляется. `parse_diagnosis(data, manifest_meta)` — без изменений сигнатуры.
+  - `load_manifest_meta()` удаляется. `parse_diagnosis(data, manifest_meta)` — без изменений сигнатуры (принимает готовый dict, не `Guideline`).
   - `ExcelFormatter` и `api_formatter` подгружают meta через `GuidelinesStorage` в async-контексте и передают dict в `parse_diagnosis`.
 
 - [ ] **Step 1: Написать падающий тест**
@@ -1167,7 +1466,7 @@ git commit -m "refactor: отчёт берёт meta клинреков из Guid
 
 ---
 
-## Task 9: Миграции бэкфилла — cleanup metadata + FK
+## Task 10: Миграции бэкфилла — cleanup metadata + FK
 
 **Files:**
 - Create: `migrations/020_docs_metadata_cleanup.sql`
@@ -1253,26 +1552,31 @@ git commit -m "feat: миграции бэкфилла metadata + FK docs→guid
 
 ---
 
-## Task 10: Прогон стенда и финальная проверка
+## Task 11: Прогон стенда и финальная проверка
 
 **Files:**
 - Проверка: `resources/manifest.csv` остаётся в репо как seed-данные (НЕ удалять).
 
 **Interfaces:**
 - Consumes: всё выше.
-- Produces: рабочая система на стенде; `manifest.csv` не читается рантаймом.
+- Produces: рабочая система на стенде; `manifest.csv` не читается рантаймом; нигде в рантайме не осталось dict-адаптеров манифеста.
 
 - [ ] **Step 1: Убедиться, что рантайм больше не читает manifest.csv**
 
 Run: `grep -rn "manifest.csv\|MANIFEST_PATH\|load_manifest_meta\|_load_manifest\b" src/`
 Expected: пусто (упоминания допустимы только в комментариях/докстрингах). `scripts/seed-guidelines.py` и `resources/manifest.csv` — легитимные seed-места.
 
-- [ ] **Step 2: Локальные (без-БД) тесты**
+- [ ] **Step 2: Убедиться, что не осталось dict-строк манифеста в сигнатурах**
 
-Run: `pytest tests/test_guideline_model.py tests/test_doc_format_chunk.py tests/test_clinic_recs_age.py tests/test_report_meta.py -v`
+Run: `grep -rn "list\[dict\[str, str\]\]" src/audit/diagnosis/clinic_recs.py src/audit/icd_check/validator.py src/LLM/decider.py src/LLM/icd_prefix_picker.py`
+Expected: пусто — все эти сигнатуры теперь типизированы как `list[Guideline]`.
+
+- [ ] **Step 3: Локальные (без-БД) тесты**
+
+Run: `pytest tests/test_guideline_model.py tests/test_doc_format_chunk.py tests/test_clinic_recs_age.py tests/test_report_meta.py tests/test_decider_guideline_input.py -v`
 Expected: PASS (все).
 
-- [ ] **Step 3: Стенд — миграции + seed (runbook)**
+- [ ] **Step 4: Стенд — миграции + seed (runbook)**
 
 На стенде, по порядку:
 
@@ -1284,17 +1588,17 @@ bash migrations/migrate.sh        # теперь 021 (FK) пройдёт; 019/02
 
 Expected: первый прогон останавливается на 021 с сообщением про сирот; после seed второй прогон — «All migrations applied.»
 
-- [ ] **Step 4: Стенд — проверить очистку metadata**
+- [ ] **Step 5: Стенд — проверить очистку metadata**
 
 Run: `psql "host=$POSTGRES_HOST dbname=$POSTGRES_DB user=$POSTGRES_USER" -c "SELECT count(*) FROM docs WHERE metadata ?| array['Наименование','МКБ-10'];"`
 Expected: `0`.
 
-- [ ] **Step 5: Стенд — полный pytest**
+- [ ] **Step 6: Стенд — полный pytest**
 
 Run: `pytest -v`
-Expected: PASS (весь набор против БД).
+Expected: PASS (весь набор против БД и LLM).
 
-- [ ] **Step 6: Финальный коммит (если были правки на стенде)**
+- [ ] **Step 7: Финальный коммит (если были правки на стенде)**
 
 ```bash
 git add -A
@@ -1308,10 +1612,13 @@ git commit -m "chore: guidelines-таблица — прогон стенда з
 **Покрытие спеки:**
 - §1 схема → Task 2 ✓
 - §2 модель/storage/ingestion/seed → Tasks 1, 3, 4 ✓
-- §3 читатели: doc.py/docs_storage JOIN → Task 5; clinic_recs → Task 6; icd_check/pipeline → Task 7; result_parser/api/excel → Task 8 ✓
-- §4 миграции/seed/бэкфилл + защита порядка → Tasks 2, 9, 10 ✓
-- §5 TODO(guidelines-sql) → Task 7 (pipeline age-фильтр помечен); отчёт (Task 8) переведён на `all()` с загрузкой всего справочника — соответствует «оставить как есть, пометить» из спеки ✓
-- §6 тесты + verification-разрыв → тест-шаги в каждом таске, стенд-прогон Task 10 ✓
+- §3 читатели: doc.py/docs_storage JOIN → Task 5; decider/icd_prefix_picker (граница с LLM) → Task 6; clinic_recs → Task 7; icd_check/pipeline → Task 8; result_parser/api/excel → Task 9 ✓
+- §4 миграции/seed/бэкфилл + защита порядка → Tasks 2, 10, 11 ✓
+- §5 TODO(guidelines-sql) → Task 8 (pipeline age-фильтр помечен); отчёт (Task 9) переведён на `all()` с загрузкой всего справочника — соответствует «оставить как есть, пометить» из спеки ✓
+- §6 тесты + verification-разрыв → тест-шаги в каждом таске, стенд-прогон Task 11 ✓
+- Апдейт от пользователя (dict → объекты без костылей): `to_manifest_row()` убран полностью; `decider`/`icd_prefix_picker`/`_render_manifest_table`/`clinic_recs`/`pipeline` работают с `Guideline` от начала до конца; единственная точка перехода в dict — `dataclasses.asdict()` внутри `decider`/`icd_prefix_picker` непосредственно перед `json.dumps` для LLM-промпта, что является границей с внешней системой (LLM API), а не внутренним контрактом ✓
 
-**Типы/имена согласованы:** `Guideline` (`file_id`/`mkb`/`age_category`) едины; `to_manifest_row()` ключи (`ID`/`Наименование`/`МКБ-10`/`Возрастная категория`) совпадают с тем, что читают `decider`/`icd_prefix_picker`/`_render_manifest_table`; `GuidelinesStorage` методы (`all`/`find_by_code`/`find_by_prefix`/`upsert_many`/`get`) названы одинаково в Tasks 3/6/7/8; `build_manifest_meta` (Task 8); `Doc` поля `name`/`mkb`/`age_category` + алиасы `g_name`/`g_mkb`/`g_age_category` согласованы между Task 5 SELECT и `_row_to_doc`.
+**Типы/имена согласованы:** `Guideline` (`file_id`/`mkb`/`age_category`/`name`) едины во всех тасках; `GuidelinesStorage` методы (`all`/`find_by_code`/`find_by_prefix`/`upsert_many`/`get`) названы одинаково в Tasks 3/7/8/9; `decide_file_id`/`IcdPrefixPicker.pick` типизированы `list[Guideline]` (Task 6) и вызываются с этим типом в Task 7; `_render_manifest_table`/`check_icd_codes` типизированы `list[Guideline]` (Task 8) и заполняются из `GuidelinesStorage.all()` там же; `build_manifest_meta` (Task 9) остаётся на dict-выходе намеренно — это формат, ожидаемый `parse_diagnosis`, отдельный от «манифест как dict-строка», трогать не требовалось; `Doc` поля `name`/`mkb`/`age_category` + алиасы `g_name`/`g_mkb`/`g_age_category` согласованы между Task 5 SELECT и `_row_to_doc`.
+
+**Изменённый порядок тасков:** Task 6 (decider/icd_prefix_picker) теперь идёт ДО Task 7 (clinic_recs), потому что `clinic_recs.pick_recs` вызывает оба и должен сразу передавать им `Guideline` — без этого порядка Task 7 пришлось бы писать против ещё dict-based сигнатур и переписывать заново.
 ```
