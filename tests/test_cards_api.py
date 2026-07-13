@@ -130,7 +130,7 @@ def test_org_param_is_case_insensitive(client: TestClient, test_key: str):
 
     # filename always uses the DB's canonical casing, regardless of what the client sent
     resp = client.get("/cards/pull?date=2026-06-21&org=alenka", headers=_auth(test_key))
-    assert 'filename="report_Alenka_21-06-2026.xlsx"' in resp.headers["content-disposition"]
+    assert 'filename="report_Alenka_2026-06-21.xlsx"' in resp.headers["content-disposition"]
 
 
 def test_pull_returns_xlsx_file_with_one_row_per_card(client: TestClient, test_key: str):
@@ -143,7 +143,7 @@ def test_pull_returns_xlsx_file_with_one_row_per_card(client: TestClient, test_k
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     assert "attachment" in resp.headers["content-disposition"]
-    assert 'filename="report_Alenka_21-06-2026.xlsx"' in resp.headers["content-disposition"]
+    assert 'filename="report_Alenka_2026-06-21.xlsx"' in resp.headers["content-disposition"]
 
     wb = _load_workbook(resp.content)
     ws = wb.active
@@ -169,3 +169,8 @@ def test_check_empty_for_date_with_no_cards(client: TestClient, test_key: str):
     resp = client.get("/cards/check?date=1999-01-01&org=Alenka", headers=_auth(test_key))
     assert resp.status_code == 200
     assert resp.json()["count"] == 0
+
+
+def test_pull_is_404_for_date_with_no_cards(client: TestClient, test_key: str):
+    resp = client.get("/cards/pull?date=1999-01-01&org=Alenka", headers=_auth(test_key))
+    assert resp.status_code == 404
