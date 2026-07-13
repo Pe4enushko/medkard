@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from audit.excel_formatter import ExcelFormatter  # noqa: E402
+from parsers.inspection_order import load_inspection_format  # noqa: E402
 from storage.organizations_storage import OrganizationsStorage  # noqa: E402
 
 # ── Args ──────────────────────────────────────────────────────────────────────
@@ -33,7 +34,18 @@ _parser.add_argument("--to",   dest="date_to",   required=True, metavar="YYYY-MM
 _parser.add_argument("--output", default=None, metavar="DIR", help="Directory for the report file (default: project root)")
 _parser.add_argument("--org", required=True, choices=("Alenka", "MDS"), help="Organization to export (required: a report is always scoped to one org)")
 _parser.add_argument("--legacy-report", action="store_true", help="Use legacy 3-column Excel layout (visits, formal, diagnosis)")
+_parser.add_argument(
+    "--format",
+    default=None,
+    metavar="NAME",
+    help="Reorder ДанныеОсмотра fields using resources/inspection_formats.json "
+         "[<org>][<NAME>]. Omit to leave field order unchanged.",
+)
 _args = _parser.parse_args()
+
+INSPECTION_ORDER = (
+    load_inspection_format(_args.org, _args.format) if _args.format else None
+)
 
 
 def _parse_date(value: str, label: str) -> datetime:
@@ -66,7 +78,9 @@ async def main() -> None:
         "Creating report for %s — %s (org=%s) → %s",
         _args.date_from, _args.date_to, _args.org, excel_path,
     )
-    async with ExcelFormatter(excel_path, legacy=_args.legacy_report) as fmt:
+    async with ExcelFormatter(
+        excel_path, legacy=_args.legacy_report, order_tokens=INSPECTION_ORDER
+    ) as fmt:
         written = await fmt.export_period(date_from, date_to, org_id)
     if written:
         log.info("Done: wrote %d row(s) to %s", written, excel_path)
