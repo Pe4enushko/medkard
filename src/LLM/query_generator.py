@@ -15,6 +15,7 @@ Usage::
     # queries.fact_query, queries.procedural_query, queries.constraint_query
 """
 
+import json
 import logging
 from pathlib import Path
 
@@ -68,5 +69,15 @@ async def generate_queries(chunk: dict) -> tuple[dict, HypotheticalQueries]:
         response_model=HypotheticalQueries,
     )
 
-    queries = HypotheticalQueries.model_validate_json(raw_content)
+    try:
+        queries = HypotheticalQueries.model_validate_json(raw_content)
+    except Exception:
+        meta = chunk.get("metadata", {})
+        logger.error(
+            "HypotheticalQueries JSON parse failed — %s #%s section=%r; "
+            "raw LLM output (%d chars): %r",
+            meta.get("content_type"), meta.get("chunk_index"), meta.get("section"),
+            len(raw_content), raw_content[:500],
+        )
+        raise
     return chunk, queries

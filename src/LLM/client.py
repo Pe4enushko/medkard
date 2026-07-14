@@ -102,6 +102,12 @@ class LLMClient:
 
         if last_exc is not None:
             raise last_exc
+        # Exhausted retries with a non-'stop' finish (usually 'length' → truncated/empty).
+        # Surface it: the caller's JSON parse is about to fail and this is the real cause.
+        logger.error(
+            "[llm_client] exhausted %d attempt(s), finish_reason=%r — returning %d-char content: %r",
+            self._max_retries + 1, finish_reason, len(content), content[:200],
+        )
         return content, total_tokens  # last attempt's content even on bad finish_reason
 
     async def call_agent(
