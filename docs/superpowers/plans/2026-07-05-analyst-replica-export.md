@@ -25,7 +25,7 @@
 ### Task 1: `updated_at` change-tracking on `done_cards`
 
 **Files:**
-- Create: `migrations/019_done_cards_updated_at.sql`
+- Create: `migrations/022_done_cards_updated_at.sql`
 - Test: `tests/test_done_cards_updated_at.py`
 
 **Interfaces:**
@@ -105,7 +105,7 @@ Expected: FAIL — `psycopg.errors.UndefinedColumn: column "updated_at" does not
 
 - [ ] **Step 3: Write the migration**
 
-`migrations/019_done_cards_updated_at.sql`:
+`migrations/022_done_cards_updated_at.sql`:
 ```sql
 -- Migration 019: change-tracking column for incremental export to the engine's
 -- analyst replica. updated_at is bumped to transaction now() on every insert
@@ -133,7 +133,7 @@ CREATE INDEX IF NOT EXISTS done_cards_updated_at_idx ON done_cards (updated_at);
 - [ ] **Step 4: Apply the migration**
 
 Run: `bash migrations/migrate.sh`
-Expected: prints `Applying 019_done_cards_updated_at.sql ...` then `All migrations applied.` (earlier migrations are idempotent, so re-running is safe).
+Expected: prints `Applying 022_done_cards_updated_at.sql ...` then `All migrations applied.` (earlier migrations are idempotent, so re-running is safe).
 
 - [ ] **Step 5: Run the test to verify it passes**
 
@@ -143,7 +143,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add migrations/019_done_cards_updated_at.sql tests/test_done_cards_updated_at.py
+git add migrations/022_done_cards_updated_at.sql tests/test_done_cards_updated_at.py
 git commit -m "feat(export): add done_cards.updated_at change-tracking trigger"
 ```
 

@@ -36,7 +36,7 @@ roles, the sandbox tool, the `internal` network.
 `uuid_generate_v4()` (not time-ordered), and `started_at`/`finished_at` are
 NULL for ignored/broken cards. So a watermark needs a new column.
 
-**Migration (`migrations/019_done_cards_updated_at.sql`):**
+**Migration (`migrations/022_done_cards_updated_at.sql`):**
 ```sql
 ALTER TABLE done_cards
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
