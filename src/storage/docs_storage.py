@@ -19,9 +19,7 @@ def _row_to_doc(row: dict) -> Doc:
         file_id=row["file_id"],
         chunk=row["chunk"],
         metadata=row["metadata"],
-        fact_q=row.get("fact_q"),
-        procedure_q=row.get("procedure_q"),
-        constraint_q=row.get("constraint_q"),
+        embedding=row.get("embedding"),
         name=row.get("g_name"),
         mkb=list(row.get("g_mkb") or []),
         age_category=list(row.get("g_age_category") or []),
@@ -29,15 +27,8 @@ def _row_to_doc(row: dict) -> Doc:
 
 
 _INSERT_DOC_SQL = """
-    INSERT INTO docs (
-        file_id, chunk, metadata,
-        fact_q, procedure_q, constraint_q,
-        fact_q_embedding, procedure_q_embedding, constraint_q_embedding
-    ) VALUES (
-        %(file_id)s, %(chunk)s, %(metadata)s,
-        %(fact_q)s, %(procedure_q)s, %(constraint_q)s,
-        %(fact_q_embedding)s, %(procedure_q_embedding)s, %(constraint_q_embedding)s
-    )
+    INSERT INTO docs (file_id, chunk, metadata, embedding)
+    VALUES (%(file_id)s, %(chunk)s, %(metadata)s, %(embedding)s)
     RETURNING id::text
 """
 
@@ -47,12 +38,7 @@ def _doc_params(doc: Doc) -> dict:
         "file_id": doc.file_id,
         "chunk": doc.chunk,
         "metadata": json.dumps(doc.metadata),
-        "fact_q": doc.fact_q,
-        "procedure_q": doc.procedure_q,
-        "constraint_q": doc.constraint_q,
-        "fact_q_embedding": doc.fact_q_embedding,
-        "procedure_q_embedding": doc.procedure_q_embedding,
-        "constraint_q_embedding": doc.constraint_q_embedding,
+        "embedding": doc.embedding,
     }
 
 
@@ -131,7 +117,6 @@ class DocsStorage(BaseStorage):
                 """
                 SELECT
                     docs.id::text AS id, docs.file_id, docs.chunk, docs.metadata,
-                    docs.fact_q, docs.procedure_q, docs.constraint_q,
                     g.name AS g_name, g.mkb AS g_mkb, g.age_category AS g_age_category
                 FROM docs
                 LEFT JOIN guidelines g ON g.file_id = docs.file_id
@@ -149,7 +134,6 @@ class DocsStorage(BaseStorage):
                 """
                 SELECT
                     docs.id::text AS id, docs.file_id, docs.chunk, docs.metadata,
-                    docs.fact_q, docs.procedure_q, docs.constraint_q,
                     g.name AS g_name, g.mkb AS g_mkb, g.age_category AS g_age_category
                 FROM docs
                 LEFT JOIN guidelines g ON g.file_id = docs.file_id
