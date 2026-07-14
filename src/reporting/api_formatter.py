@@ -17,8 +17,9 @@ from datetime import date
 from typing import Any
 
 from parsers.excel import build_workbook_bytes
-from reporting.result_parser import load_manifest_meta, parse_diagnosis, parse_formal, parse_icd_check
+from reporting.result_parser import build_manifest_meta, parse_diagnosis, parse_formal, parse_icd_check
 from storage.base import BaseStorage
+from storage.guidelines_storage import GuidelinesStorage
 
 _VISIT_DATE_CTE = (
     "WITH cards AS ("
@@ -87,7 +88,8 @@ class ApiFormatter:
         audit/excel_formatter.py — built in memory, no disk I/O.
         """
         rows = await self._reader.fetch_by_date(visit_date, organization_id)
-        manifest_meta = load_manifest_meta()
+        async with GuidelinesStorage() as _store:
+            manifest_meta = build_manifest_meta(await _store.all())
 
         workbook_rows = []
         for row in rows:

@@ -28,9 +28,10 @@ from audit.filters import CardFilter
 from audit.formal_structure.validator import FormalValidator
 from audit.icd_check.validator import check_icd_codes
 from audit.models import FormalFinding, FormalStructureResult
-from audit.diagnosis.clinic_recs import ClinicRecs, _is_age_eligible, _patient_age
+from audit.diagnosis.clinic_recs import _is_age_eligible, _patient_age
 from parsers.json_parser import AppointmentParser
 from storage.done_cards_storage import DoneCardsStorage
+from storage.guidelines_storage import GuidelinesStorage
 from storage.models.result import DiagnosisIssue, DiagnosisResult, IcdCodingIssue, Result
 
 logger = logging.getLogger(__name__)
@@ -208,10 +209,12 @@ class AuditPipeline:
             return Result(input=visit, formal=formal_result, diagnosis=[], token_count=formal_tokens)
 
         # ── ICD coding check (once per visit, all diagnoses together) ─────────
-        clinic_recs = ClinicRecs()
         age = _patient_age(patient)
-        all_manifest_rows = clinic_recs._load_manifest()
-        manifest_rows = [r for r in all_manifest_rows if _is_age_eligible(r, age)]
+        # TODO(guidelines-sql): фильтрацию по возрасту вынести в SQL —
+        # GuidelinesStorage.all_age_eligible(age) вместо загрузки всего
+        # справочника и фильтра в Python. См. spec §5.
+        async with GuidelinesStorage() as _store:
+            manifest_rows = [g for g in await _store.all() if _is_age_eligible(g, age)]
 
         logger.info("🔎 [pipeline] running ICD checker for visit %s (%d diagnoses)", visit_id, len(diagnoses))
         icd_issues, icd_tokens = await check_icd_codes(

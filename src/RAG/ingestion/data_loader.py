@@ -11,8 +11,8 @@ Chunk shape:
         "type": "text" | "table",
         "content": str | list[dict],   # str for text, list of row dicts for table
         "metadata": {
-            "ID": str,                 # original manifest ID / filename stem
-            # ... all other manifest columns
+            # chunk-intrinsic only — manifest columns (ID, Наименование, МКБ-10, ...)
+            # live in the `guidelines` table, joined by docs.file_id at read time.
             "content_type": "text" | "table",
             # text-only:
             "section": str | None,     # numbered section title (e.g. "1.1 Title"),
@@ -221,7 +221,6 @@ class PDFContentReader:
                         "type": "text",
                         "content": sub_chunk,
                         "metadata": {
-                            **self.metadata,
                             "section": section_title,
                             "content_type": "text",
                             "chunk_index": chunk_counter,
@@ -233,7 +232,6 @@ class PDFContentReader:
         for page_idx, bboxes in table_pages.items():
             section = _section_for_page(sorted_toc, page_idx)
             base_meta = {
-                **self.metadata,
                 "page": page_idx,
                 "section": section,
                 "content_type": "table",
