@@ -1,8 +1,7 @@
 """
 Vector store interface for pgvector-backed doc retrieval.
 
-Three pure vector-search helpers (search_fact / search_procedure / search_constraint)
-plus a hybrid_search that fuses vector similarity (Postgres HNSW) with BM25 lexical
+A hybrid_search that fuses vector similarity (Postgres HNSW) with BM25 lexical
 ranking (rank_bm25 in Python) via Reciprocal Rank Fusion (RRF).
 
 Hybrid search result shape:
@@ -10,9 +9,6 @@ Hybrid search result shape:
         "id":        str,          # UUID of the docs row
         "chunk":     str,          # original text / serialised table rows
         "metadata":  dict,         # JSONB metadata from docs row
-        "fact_q":    str | None,
-        "procedure_q": str | None,
-        "constraint_q": str | None,
         "rrf_score": float,        # fused rank score (higher = more relevant)
     }
 """
@@ -20,7 +16,6 @@ Hybrid search result shape:
 import json
 import logging
 import os
-from typing import Literal
 from urllib.parse import quote_plus
 
 import asyncpg
@@ -43,21 +38,10 @@ CANDIDATES_FACTOR: int = 6
 RRF_K: int = 50
 # ─────────────────────────────────────────────────────────────────────────────
 
-QueryType = Literal["fact", "procedure", "constraint"]
-
-_EMBEDDING_COL: dict[QueryType, str] = {
-    "fact":       "fact_q_embedding",
-    "procedure":  "procedure_q_embedding",
-    "constraint": "constraint_q_embedding",
-}
-
 _SELECT_COLS = """
     id::text,
     chunk,
-    metadata,
-    fact_q,
-    procedure_q,
-    constraint_q
+    metadata
 """
 
 _EXCLUDED_CHUNK_PHRASES = (
@@ -113,19 +97,15 @@ def _chunk_text_exclusion_clauses() -> list[str]:
     ]
 
 
-async def _vector_search(
-    embedding: list[float],
-    col: str,
-    limit: int,
-) -> list[dict]:
-    """Fetch rows closest to *embedding* in *col* using cosine distance."""
+async def _vector_search(embedding: list[float], limit: int) -> list[dict]:
+    """Fetch rows closest to *embedding* in the embedding column (cosine distance)."""
     pool = await _get_pool()
     vec = np.array(embedding, dtype=np.float32)
-    where_sql = " AND ".join([f"{col} IS NOT NULL", *_chunk_text_exclusion_clauses()])
+    where_sql = " AND ".join(["embedding IS NOT NULL", *_chunk_text_exclusion_clauses()])
     rows = await pool.fetch(
         f"""
         SELECT {_SELECT_COLS},
-            {col} <=> $1 AS distance
+            embedding <=> $1 AS distance
         FROM docs
         WHERE {where_sql}
         ORDER BY distance ASC
@@ -142,14 +122,13 @@ async def _vector_search_filtered(
     file_id: str,
     limit: int,
     section_filter: str | None = None,
-    col: str = "fact_q_embedding",
 ) -> list[dict]:
     """Fetch rows by cosine distance with file_id, optional section, and text filters."""
     pool = await _get_pool()
     vec = np.array(embedding, dtype=np.float32)
 
     where_clauses = [
-        f"{col} IS NOT NULL",
+        "embedding IS NOT NULL",
         *_chunk_text_exclusion_clauses(),
         "file_id = $2",
     ]
@@ -157,16 +136,14 @@ async def _vector_search_filtered(
 
     if section_filter:
         params.append(f"%{section_filter}%")
-        where_clauses.append(
-            f"lower(metadata->>'section') LIKE ${len(params)}"
-        )
+        where_clauses.append(f"lower(metadata->>'section') LIKE ${len(params)}")
 
     where_sql = " AND ".join(where_clauses)
 
     rows = await pool.fetch(
         f"""
         SELECT {_SELECT_COLS},
-               {col} <=> $1 AS distance
+               embedding <=> $1 AS distance
         FROM docs
         WHERE {where_sql}
         ORDER BY distance ASC
@@ -176,30 +153,6 @@ async def _vector_search_filtered(
         limit,
     )
     return [dict(r) for r in rows]
-
-
-async def search_fact(
-    embedding: list[float],
-    top_k: int = 20,
-) -> list[dict]:
-    """Return top_k docs ranked by cosine similarity to *embedding* on fact_q_embedding."""
-    return await _vector_search(embedding, "fact_q_embedding", top_k)
-
-
-async def search_procedure(
-    embedding: list[float],
-    top_k: int = 20,
-) -> list[dict]:
-    """Return top_k docs ranked by cosine similarity to *embedding* on procedure_q_embedding."""
-    return await _vector_search(embedding, "procedure_q_embedding", top_k)
-
-
-async def search_constraint(
-    embedding: list[float],
-    top_k: int = 20,
-) -> list[dict]:
-    """Return top_k docs ranked by cosine similarity to *embedding* on constraint_q_embedding."""
-    return await _vector_search(embedding, "constraint_q_embedding", top_k)
 
 
 # ── Hybrid search internals ───────────────────────────────────────────────────
@@ -243,13 +196,11 @@ def _metadata_dict(raw_metadata: object) -> dict:
 
 def _log_hybrid_chunks(
     query_text: str,
-    query_type: QueryType,
     top_k: int,
     results: list[dict],
 ) -> None:
     lines = [
         "🔎 [retrieval] hybrid_search raw chunks",
-        f"query_type: {query_type}",
         f"top_k: {top_k}",
         f"query: {query_text}",
         f"count: {len(results)}",
@@ -281,14 +232,13 @@ def _log_hybrid_chunks(
 async def hybrid_search(
     query_text: str,
     embedding: list[float],
-    query_type: QueryType,
     top_k: int = 10,
 ) -> list[dict]:
     """Hybrid retrieval: HNSW vector search → BM25 rerank → RRF fusion.
 
     Steps:
         1. Fetch top_k * CANDIDATES_FACTOR candidates from Postgres using HNSW
-           cosine search on the column matching *query_type*.
+           cosine search on the embedding column.
         2. Re-rank the same candidate set with BM25 against *query_text*.
         3. Apply RRF to merge vector rank and BM25 rank.
         4. Return the top_k highest-scoring results.
@@ -296,27 +246,18 @@ async def hybrid_search(
     Args:
         query_text:  Raw query string used for BM25 lexical scoring.
         embedding:   Query embedding vector (must match EMBEDDING_DIM).
-        query_type:  Which embedding column to search — "fact", "procedure",
-                     or "constraint".
         top_k:       Number of results to return.
 
     Returns:
-        List of dicts with keys: id, chunk, metadata, fact_q, procedure_q,
-        constraint_q, rrf_score. Sorted by rrf_score descending.
+        List of dicts with keys: id, chunk, metadata, rrf_score. Sorted by
+        rrf_score descending.
     """
-    if query_type not in _EMBEDDING_COL:
-        raise ValueError(
-            f"query_type must be one of {list(_EMBEDDING_COL)}, got {query_type!r}"
-        )
-
-    col = _EMBEDDING_COL[query_type]
     n_candidates = top_k * CANDIDATES_FACTOR
 
-    candidates = await _vector_search(embedding, col, n_candidates)
+    candidates = await _vector_search(embedding, n_candidates)
     if not candidates:
         logger.info(
-            "🔎 [retrieval] hybrid_search found no chunks query_type=%s top_k=%d query=%r",
-            query_type,
+            "🔎 [retrieval] hybrid_search found no chunks top_k=%d query=%r",
             top_k,
             query_text,
         )
@@ -344,7 +285,6 @@ async def hybrid_search(
 
     _log_hybrid_chunks(
         query_text=query_text,
-        query_type=query_type,
         top_k=top_k,
         results=results,
     )
