@@ -13,6 +13,7 @@ import asyncio
 import csv
 import logging
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -71,24 +72,35 @@ def _read_manifest_rows(manifest_path: Path) -> dict:
 async def _full_reingest(file_id, row, pdfs_dir, manifest_path,
                          docs_storage, guidelines_storage, runs_storage):
     await runs_storage.upsert_pending(file_id)
+    t0 = time.perf_counter()
     try:
         readers = list(load_documents(manifest_path=manifest_path, pdfs_dir=pdfs_dir, only={file_id}))
         if not readers:
             raise FileNotFoundError(f"no reader for {file_id} (missing PDF?)")
         chunks = list(readers[0].iter_chunks())
+        total = len(chunks)
+        log.info("    %s: chunked into %d chunk(s), generating queries+embeddings…", file_id, total)
 
         docs = []
-        for start in range(0, len(chunks), QUERY_GENERATION_BATCH_SIZE):
+        for start in range(0, total, QUERY_GENERATION_BATCH_SIZE):
             batch = chunks[start:start + QUERY_GENERATION_BATCH_SIZE]
             docs.extend(d for d in await process_batch(batch, file_id) if d is not None)
+            done = min(start + QUERY_GENERATION_BATCH_SIZE, total)
+            elapsed = time.perf_counter() - t0
+            rate = done / elapsed if elapsed else 0.0
+            eta = (total - done) / rate if rate else 0.0
+            log.info("    %s: %d/%d chunks (%.1f chunk/s, ~%.0fs left)",
+                     file_id, done, total, rate, eta)
 
         await docs_storage.replace_by_file_id(file_id, docs)
         await guidelines_storage.upsert_many([Guideline.from_manifest_row(row)])
         await runs_storage.mark_done(file_id, sha256_file(_pdf_path(file_id, pdfs_dir)))
-        log.info("Reingested %s — %d chunk(s)", file_id, len(docs))
+        dt = time.perf_counter() - t0
+        log.info("Reingested %s — %d/%d chunk(s) kept in %.1fs (%.1f chunk/s)",
+                 file_id, len(docs), total, dt, len(docs) / dt if dt else 0.0)
     except Exception as exc:  # per-file: never halt the whole run
         await runs_storage.mark_failed(file_id, str(exc))
-        log.error("FAILED %s: %s", file_id, exc)
+        log.error("FAILED %s after %.1fs: %s", file_id, time.perf_counter() - t0, exc)
 
 
 async def _metadata_only(file_id, row, guidelines_storage):
@@ -144,17 +156,23 @@ async def main() -> None:
             log.info("[dry-run] no changes written.")
             return
 
-        for file_id, decision in worklist:
-            row = manifest_rows.get(file_id)
-            if decision == "skip" or row is None:
-                continue
+        # Files that actually do work (skip/no-manifest are no-ops) — drives [i/N] progress.
+        actionable = [(fid, dec) for fid, dec in worklist
+                      if dec != "skip" and manifest_rows.get(fid) is not None]
+        log.info("Processing %d file(s) (skipping %d).",
+                 len(actionable), len(worklist) - len(actionable))
+
+        run_start = time.perf_counter()
+        for i, (file_id, decision) in enumerate(actionable, 1):
+            row = manifest_rows[file_id]
+            log.info("[%d/%d] %s — %s", i, len(actionable), file_id, decision)
             if decision == "metadata_only":
                 await _metadata_only(file_id, row, guidelines_storage)
             else:
                 await _full_reingest(file_id, row, pdfs_dir, manifest_path,
                                      docs_storage, guidelines_storage, runs_storage)
-
-    log.info("Reingest complete. Log: %s", log_filename)
+        log.info("Reingest complete: %d file(s) in %.1fs. Log: %s",
+                 len(actionable), time.perf_counter() - run_start, log_filename)
 
 
 if __name__ == "__main__":
