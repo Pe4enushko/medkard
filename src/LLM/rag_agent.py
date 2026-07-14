@@ -53,7 +53,6 @@ async def retrieve(query: str) -> str:
     results = await hybrid_search(
         query_text=query,
         embedding=embedding,
-        query_type="fact",
         top_k=RAG_TOP_K,
     )
     if not results:
