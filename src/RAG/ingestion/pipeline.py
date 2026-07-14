@@ -1,13 +1,13 @@
-"""pipeline.py — shared per-chunk ingest pipeline: chunk → LLM queries → embeddings → Doc.
+"""pipeline.py — shared per-chunk ingest pipeline: chunk → contextual embedding → Doc.
 
-Extracted from scripts/ingest-pdfs.py so ingest-pdfs.py and reingest-pdfs.py share it.
+Shared by scripts/ingest-pdfs.py and scripts/reingest-pdfs.py. Embeds the chunk's
+contextual text ("[section]\\n<body>") — NOT hypothetical queries (reverse HyDE removed).
 """
 import asyncio
 import json
 import logging
 
-from LLM.embed_queries import embed_queries
-from LLM.query_generator import generate_queries
+from RAG.retrieval.embeddings import embed
 from storage.models import Doc
 
 log = logging.getLogger(__name__)
@@ -20,16 +20,22 @@ def chunk_text(chunk: dict) -> str:
     return content
 
 
+def embed_text(chunk: dict) -> str:
+    """Contextual text to embed: section header (if any) + chunk body."""
+    section = (chunk.get("metadata") or {}).get("section")
+    body = chunk_text(chunk)
+    return f"[{section}]\n{body}" if section else body
+
+
 async def process_chunk(chunk: dict, file_id: str) -> Doc | None:
-    """Generate queries + embeddings for one chunk; return a ready-to-insert Doc (None on LLM error)."""
-    text = chunk_text(chunk)
+    """Embed the chunk's contextual text; return a ready-to-insert Doc (None on embed error)."""
+    body = chunk_text(chunk)
     try:
-        _, queries = await generate_queries(chunk)
-        embeddings = await embed_queries(queries)
+        vector = await embed(embed_text(chunk))
     except Exception as exc:
         meta = chunk.get("metadata", {})
         log.error(
-            "Query/embedding generation failed for %s [%s #%s section=%r]: %s",
+            "Embedding failed for %s [%s #%s section=%r]: %s",
             file_id, meta.get("content_type"), meta.get("chunk_index"),
             meta.get("section"), exc,
         )
@@ -37,14 +43,9 @@ async def process_chunk(chunk: dict, file_id: str) -> Doc | None:
 
     return Doc(
         file_id=file_id,
-        chunk=text,
+        chunk=body,
         metadata=chunk["metadata"],
-        fact_q=queries.fact_query,
-        procedure_q=queries.procedural_query,
-        constraint_q=queries.constraint_query,
-        fact_q_embedding=embeddings.fact_embedding,
-        procedure_q_embedding=embeddings.procedural_embedding,
-        constraint_q_embedding=embeddings.constraint_embedding,
+        embedding=vector,
     )
 
 
