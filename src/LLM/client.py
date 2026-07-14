@@ -2,7 +2,7 @@
 client.py — unified LLM client with retry logic.
 
 Provides LLMClient with two methods:
-- call(): raw chat completion, optional Pydantic response_model for guided_json
+- call(): raw chat completion, optional Pydantic response_model for json_schema
 - call_agent(): LangChain ReAct agent invocation
 
 Both methods retry up to max_retries times, bumping temperature and injecting
@@ -44,20 +44,31 @@ class LLMClient:
         temperature: float,
         response_model: type[BaseModel] | None = None,
     ) -> tuple[str, int]:
-        """Chat completion with optional guided_json and retry.
+        """Chat completion with optional json_schema structured output and retry.
 
         Args:
             messages:       OpenAI messages list (mutated in-place on retry).
             temperature:    Initial sampling temperature.
-            response_model: Pydantic model whose JSON schema is used for
-                            guided_json. Pass None for free-form text output.
+            response_model: Pydantic model whose JSON schema constrains decoding
+                            via response_format (OpenAI-standard json_schema —
+                            vLLM enforces it). Pass None for free-form text.
 
         Returns:
             (content_str, total_tokens)
         """
-        extra_body: dict[str, Any] | None = None
+        # Use the OpenAI-standard response_format=json_schema, NOT the legacy
+        # extra_body={"guided_json": ...}: this vLLM build silently ignores the
+        # latter ("fields ignored: {'guided_json'}"), so the schema was never
+        # enforced and the model free-formed prose / hit the length cap.
+        response_format: dict[str, Any] | None = None
         if response_model is not None:
-            extra_body = {"guided_json": response_model.model_json_schema()}
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": response_model.__name__,
+                    "schema": response_model.model_json_schema(),
+                },
+            }
 
         total_tokens = 0
         temp = temperature
@@ -70,8 +81,8 @@ class LLMClient:
                     messages=messages,
                     temperature=temp,
                 )
-                if extra_body:
-                    kwargs["extra_body"] = extra_body
+                if response_format is not None:
+                    kwargs["response_format"] = response_format
 
                 resp = await get_openai_client().chat.completions.create(**kwargs)
                 total_tokens += resp.usage.total_tokens if resp.usage else 0
