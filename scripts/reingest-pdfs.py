@@ -39,12 +39,18 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def _resolve_paths(data_dir: Path | None) -> tuple[Path, Path]:
-    """(pdfs_dir, manifest_path). --data-dir holds both the PDFs and manifest.csv;
-    without it, fall back to the project layout (pdfs/ + resources/manifest.csv)."""
-    if data_dir is not None:
-        return data_dir, data_dir / "manifest.csv"
-    return PDFS_DIR, MANIFEST_PATH
+def _resolve_paths(data_dir: Path | None, manifest_path: Path | None) -> tuple[Path, Path]:
+    """(pdfs_dir, manifest). --data-dir sets the PDFs folder (and manifest.csv inside it,
+    unless --manifest-path overrides). Without either, use the project layout
+    (pdfs/ + resources/manifest.csv). --manifest-path always wins for the manifest."""
+    pdfs_dir = data_dir if data_dir is not None else PDFS_DIR
+    if manifest_path is not None:
+        manifest = manifest_path
+    elif data_dir is not None:
+        manifest = data_dir / "manifest.csv"
+    else:
+        manifest = MANIFEST_PATH
+    return pdfs_dir, manifest
 
 
 def _pdf_path(file_id: str, pdfs_dir: Path) -> Path:
@@ -100,15 +106,17 @@ def _summarize(worklist) -> dict:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Reingest PDFs / sync guidelines with resume.")
     parser.add_argument("--data-dir", type=Path,
-                        help="folder holding the PDFs and manifest.csv "
+                        help="folder holding the PDFs (and manifest.csv unless --manifest-path is set) "
                              "(default: project pdfs/ + resources/manifest.csv)")
+    parser.add_argument("--manifest-path", type=Path,
+                        help="explicit path to manifest.csv (overrides --data-dir/manifest.csv)")
     parser.add_argument("--only-failed", action="store_true", help="only files with status='failed'")
     parser.add_argument("--file-id", help="force full reingest of one file_id (bypass diff logic)")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the work-list decisions and exit without writing to the DB")
     args = parser.parse_args()
 
-    pdfs_dir, manifest_path = _resolve_paths(args.data_dir)
+    pdfs_dir, manifest_path = _resolve_paths(args.data_dir, args.manifest_path)
     log.info("PDFs: %s | manifest: %s", pdfs_dir, manifest_path)
     manifest_rows = _read_manifest_rows(manifest_path)
 
