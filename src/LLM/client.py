@@ -43,6 +43,7 @@ class LLMClient:
         *,
         temperature: float,
         response_model: type[BaseModel] | None = None,
+        reasoning_effort: str | None = None,
     ) -> tuple[str, int]:
         """Chat completion with optional json_schema structured output and retry.
 
@@ -70,6 +71,13 @@ class LLMClient:
                 },
             }
 
+        # gpt-oss reasons at 'medium' by default; for mechanical tasks the
+        # reasoning tokens eat the context budget and truncate the answer.
+        # 'low' is the floor (reasoning can't be fully disabled on gpt-oss).
+        extra_body: dict[str, Any] | None = None
+        if reasoning_effort is not None:
+            extra_body = {"reasoning_effort": reasoning_effort}
+
         total_tokens = 0
         temp = temperature
         last_exc: Exception | None = None
@@ -83,6 +91,8 @@ class LLMClient:
                 )
                 if response_format is not None:
                     kwargs["response_format"] = response_format
+                if extra_body is not None:
+                    kwargs["extra_body"] = extra_body
 
                 resp = await get_openai_client().chat.completions.create(**kwargs)
                 total_tokens += resp.usage.total_tokens if resp.usage else 0
