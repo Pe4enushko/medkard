@@ -67,6 +67,7 @@ async def generate_queries(chunk: dict) -> tuple[dict, HypotheticalQueries]:
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
         response_model=HypotheticalQueries,
+        reasoning_effort="low",  # mechanical extraction — don't waste the token budget on CoT
     )
 
     try:
