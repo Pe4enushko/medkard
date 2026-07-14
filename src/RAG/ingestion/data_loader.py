@@ -284,6 +284,7 @@ def load_documents(
     manifest_path: Path = MANIFEST_PATH,
     pdfs_dir: Path = PDFS_DIR,
     exceptions: set[str] | None = None,
+    only: set[str] | None = None,
 ) -> Generator[PDFContentReader, None, None]:
     """Generator over all documents listed in manifest.csv.
 
@@ -294,6 +295,9 @@ def load_documents(
         manifest_path: Path to the CSV manifest.
         pdfs_dir:      Directory containing PDFs.
         exceptions:    Optional set of ID strings to skip (e.g. already ingested).
+        only:          Optional set of ID strings to yield exclusively (everything
+                       else is skipped). Applied together with `exceptions`
+                       (exceptions win).
 
     Example::
         for reader in load_documents():
@@ -303,6 +307,8 @@ def load_documents(
     with open(manifest_path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             file_id = row["ID"]
+            if only is not None and file_id not in only:
+                continue
             if exceptions is not None and file_id in exceptions:
                 continue
             filename = file_id + PDF_EXTENSION
