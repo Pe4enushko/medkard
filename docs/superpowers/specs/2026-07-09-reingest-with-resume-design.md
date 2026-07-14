@@ -1,145 +1,170 @@
 # Реингест RAG-документов с resume-состоянием
 
-**Дата:** 2026-07-09 · **Статус:** проект · **Ветка:** `clinrec-section-regex`
-**Связано:** `2026-07-08-guidelines-table-design.md` (параллельная задача — чистка
-manifest-полей из metadata чанков; вынесена в отдельные ветки/worktree
-`guidelines-table` / `guidelines-table-impl`), коммит `40c1777` /
-`b4951d6` (3-уровневый regex подсекций — причина, по которой существующие
-чанки в `docs` нужно переписать).
+**Дата:** 2026-07-09 · **Ревизия:** 2026-07-14 · **Статус:** утверждён · **Ветка:** `reingest-with-resume`
+**Связано:** `2026-07-08-guidelines-table-design.md` (таблица `guidelines` — уже влита в main,
+хранит колонки манифеста денормализованно), коммит 3-уровневого regex подсекций (`\d+\.\d+(?:\.\d+)?`,
+уже в main — причина, по которой существующие чанки в `docs` нужно переписать).
 
 ## Зачем
 
-3-уровневый regex подсекций (`\d+\.\d+(?:\.\d+)?`, см. коммит на этой ветке)
-меняет разбивку `section` в metadata уже занесённых документов: там, где
-раньше была одна секция «3.1 …» на ~67к токенов, теперь будет «3.1» +
-«3.1.1» + «3.1.2» и т.д. Чтобы это попало в БД `docs`, файлы нужно
-**переингестить** — не точечный UPDATE metadata (текст чанков и их границы
-по `TEXT_CHUNK_SIZE`/overlap не меняются, но какой сплошной кусок текста
-считается какой секцией — меняется, а значит меняется и сам набор чанков
-внутри секции).
+Две причины перегнать документы в БД:
 
-`scripts/ingest-pdfs.py` для этого не подходит: он читает
-`get_ingested_file_ids()` и **скипает** файлы, которые уже есть в `docs` —
-то есть именно те файлы, которые нам надо переписать.
+1. **Сменился код чанкинга.** 3-уровневый regex подсекций меняет разбивку `section` в metadata уже
+   занесённых чанков: где раньше была одна секция «3.1 …» на ~67к токенов, теперь «3.1» + «3.1.1» +
+   «3.1.2». Меняется набор чанков внутри секции — нужен не точечный UPDATE, а перечанкинг.
+2. **Приехал новый манифест / новые/изменённые PDF.** Reingest синхронизирует БД с текущим
+   состоянием `resources/manifest.csv` и файлов `pdfs/`.
 
-## Что делаем
+`scripts/ingest-pdfs.py` для этого не подходит: он читает `get_ingested_file_ids()` и **скипает** файлы,
+уже присутствующие в `docs` — то есть именно те, которые надо переписать.
 
-Новый скрипт `scripts/reingest-pdfs.py` (по образцу `ingest-pdfs.py`, тот же
-пайплайн: чанкер → генерация hypothetical queries через LLM → эмбеддинги →
-запись), но:
+Reingest — устойчивый к прерываниям инструмент синка: `docs` (чанки PDF) + `guidelines` (метаданные
+манифеста) приводятся в соответствие текущим манифесту и PDF, с resume-состоянием в служебной таблице.
 
-1. Не скипает файлы, у которых уже есть чанки в `docs` — наоборот, идёт по
-   ним по одному и **транзакционно заменяет** их чанки (delete+insert одной
-   транзакцией на файл — по образцу `replace_guideline` в Искре,
-   `clinical_guideline_store.py`).
-2. Держит **resume-состояние в отдельной служебной таблице**, чтобы прогон
-   можно было прерывать и продолжать без потери прогресса и без файлов на
-   диске.
+## Что делаем с каждым файлом манифеста (work-list)
+
+Для каждого `file_id` (= колонка `ID` манифеста) считаем `current_hash = sha256(PDF на диске)` и берём
+строку `ingest_runs[file_id]` (её может не быть). Дальше — по приоритету:
+
+1. **Полный reingest** (re-chunk `docs` + upsert `guidelines`), если выполнено **любое**:
+   - нет записи в `ingest_runs` — новый файл;
+   - `status != 'done'` — `pending`/`failed` (resume после прерывания / долечивание упавших);
+   - `current_hash != ingest_runs.content_hash` — **PDF изменился** (в т.ч. откат к другой версии).
+2. **Только метаданные** (upsert строки `guidelines`, БЕЗ re-chunk и LLM), если файл `done`, хеш
+   совпал, но строка манифеста **отличается** от строки в `guidelines`. Сравнение — на уровне
+   нормализованного `Guideline` (`Guideline.from_manifest_row(new)` vs строка из `guidelines`: МКБ в
+   upper, list-поля разбиты по запятой), чтобы косметические различия CSV не считались diff'ом.
+3. Иначе (`done` + хеш совпал + метаданные совпали) → **skip**.
+
+Ключевое: **re-chunk (дорогая LLM-генерация) делаем только при изменении хеша PDF.** Изменение одних
+метаданных манифеста при том же PDF обходится дешёвым upsert'ом в `guidelines` — лишней работы нет.
+
+`content_hash` — хеш PDF на момент **последнего успешного** (`done`) reingest этого файла (одна строка
+на `file_id`, PK; истории прежних хешей не держим). Сравниваем всегда с ним: если файл откатили к
+прежней версии, `current_hash` не совпадёт с последним `done` → делаем reingest, синкаясь к тому, что
+на диске сейчас.
+
+## Действия
+
+### Путь 1 — полный reingest (сменился хеш / новый / не-done)
+
+```
+upsert ingest_runs(file_id, status='pending')      # content_hash НЕ трогаем
+
+попытаться:
+    reader = единственный из load_documents(only={file_id})
+    chunks = list(reader.iter_chunks())
+    docs   = process(chunks)           # LLM hypothetical queries + embeddings (общий пайплайн)
+
+    replace_by_file_id(file_id, docs)  # атомарно: DELETE docs + INSERT bulk в ОДНОЙ транзакции
+    guidelines.upsert_many([new_guideline])
+    mark_done(file_id, content_hash=current_hash)   # status='done', hash=current — ПОСЛЕДНИМ
+
+кроме Exception as e:
+    mark_failed(file_id, error=str(e))              # status='failed', content_hash СОХРАНЯЕМ
+    залогировать и идти дальше — ошибка одного файла не останавливает прогон
+    (per-file try/except; LLM-генерация — самая медленная и хрупкая часть)
+```
+
+Замена `docs` и upsert `guidelines` — **две отдельные атомарные операции**, не одна кросс-табличная
+транзакция (это два разных storage-класса на общем пуле — плести общую транзакцию хрупко и не нужно).
+Корректность держится порядком: `mark_done` идёт **последним**, поэтому крах между заменой docs и
+`mark_done` оставит `status='pending'` → следующий запуск переделает файл целиком (идемпотентно).
+
+### Путь 2 — только метаданные (хеш тот же, изменились колонки манифеста)
+
+```
+upsert guidelines ← новая строка манифеста        # дёшево, без LLM/эмбеддингов
+# ingest_runs не трогаем: чанки актуальны, status остаётся 'done', hash тот же
+```
 
 ## Таблица `ingest_runs`
 
-Новая миграция `migrations/0NN_ingest_runs.sql`:
+Миграция `migrations/023_ingest_runs.sql` (следующий свободный номер: guidelines заняли 019/020/021,
+export — 022):
 
 ```sql
-CREATE TABLE ingest_runs (
-    file_id    TEXT PRIMARY KEY,
-    status     TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'done' | 'failed'
-    error      TEXT,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS ingest_runs (
+    file_id      TEXT PRIMARY KEY,
+    status       TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'done' | 'failed'
+    content_hash TEXT,                             -- sha256 PDF на момент успешного reingest
+    error        TEXT,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
-Не связана FK с `docs` (реингест по своей природе может перезаписывать
-файлы, которых временно нет в `docs` между delete и insert внутри
-транзакции — если таблицы жёстко связать, это создаст паразитную связь).
-Прогресс смотрится обычным SQL:
+Идемпотентна (`IF NOT EXISTS`). **Не** связана FK с `docs`/`guidelines`: реингест перезаписывает файл,
+которого временно нет в `docs` между delete и insert внутри транзакции — жёсткая связь создала бы
+паразитную зависимость. Прогресс смотрится обычным SQL:
 
 ```sql
 SELECT status, count(*) FROM ingest_runs GROUP BY status;
 SELECT file_id, error FROM ingest_runs WHERE status = 'failed';
 ```
 
-## Алгоритм скрипта
+## Возобновление и прерывание
 
-```
-для каждого file_id из manifest.csv (порядок — как в manifest, стабильный):
-    если ingest_runs.status(file_id) == 'done': skip
+Возобновление — просто повторный запуск: work-list заново вычисляется по правилам выше (`pending`/
+`failed`/отсутствующие/изменённые подбираются, неизменённые `done` скипаются).
 
-    upsert ingest_runs(file_id, status='pending')
+Прерывание (Ctrl+C) между файлами безопасно. Прерывание **посреди** транзакции по файлу: транзакция
+docs+guidelines атомарна (частичной записи не будет), но `ingest_runs` останется `pending` — следующий
+запуск увидит не-`done` и переделает файл заново.
 
-    попытаться:
-        reader = load_documents(only=[file_id])   # тот же loader, что и ingest-pdfs.py
-        chunks = list(reader.iter_chunks())
-        docs = [process_chunk(c) for c in chunks]  # LLM queries + embeddings, как сейчас
+## Флаги CLI
 
-        транзакция:
-            DELETE FROM docs WHERE file_id = :file_id
-            INSERT новые docs (bulk)
+- `--data-dir <dir>` — папка, где лежат PDF и `manifest.csv` (для перегона нового батча из отдельной
+  директории). Без флага — проектная раскладка (`pdfs/` + `resources/manifest.csv`).
+- `--only-failed` — перегнать только `status='failed'` (долечить упавшие, не трогая остальное).
+- `--file-id <id>` — принудительный реингест одного файла **вне** diff/status-логики (точечная проверка).
+- `--dry-run` — вычислить и распечатать work-list (что было бы сделано) и выйти **без записи в БД**.
 
-        upsert ingest_runs(file_id, status='done', error=NULL)
+## Изменения кода
 
-    кроме Exception as e:
-        upsert ingest_runs(file_id, status='failed', error=str(e))
-        ログировать и идти дальше — ошибка одного файла не должна
-        останавливать весь прогон (см. п.2 фиксов синка в Искре,
-        [[clinic-rag-sync-fixes]] — тот же принцип per-file try/except)
-```
-
-Прерывание (Ctrl+C) между файлами безопасно само по себе: текущий файл либо
-успел стать `done`, либо остался `pending`/`failed` и будет подобран
-следующим запуском. Прерывание **посреди** транзакции по одному файлу не
-оставляет частичной записи в `docs` (транзакция атомарна) — но `ingest_runs`
-для этого файла останется в `pending`, что и требуется: следующий запуск
-увидит `pending` (не `done`) и переделает файл заново.
-
-## Возобновление
-
-Просто повторный запуск скрипта: он выбирает файлы `WHERE status IS DISTINCT
-FROM 'done'` (включая ещё не встречавшиеся в `ingest_runs` и `failed` —
-`failed` тоже подбираются заново, чтобы транзиентные ошибки типа сетевого
-сбоя LLM не требовали ручного вмешательства).
-
-Флаг `--only-failed` — принудительно перегнать только файлы со
-`status='failed'` (для случаев, когда `pending`-файлы намеренно ещё не
-трогаем, а хотим долечить упавшие).
-
-Флаг `--file-id <id>` — принудительный реингест одного файла вне очереди
-(для точечной проверки).
-
-## Отличие от идемпотентности контента
-
-Это **не** дедупликация по содержимому чанка. При неизменном чанкере повторный
-прогон одного и того же PDF даёт тот же набор `chunk_text` (детерминированный
-парсинг fitz/tabula + фиксированные `TEXT_CHUNK_SIZE`/`TEXT_CHUNK_OVERLAP|
-секции по regex) — но сам факт «уже обрабатывали» фиксируется не сравнением
-текста, а таблицей `ingest_runs`. Это чисто resume-механизм для устойчивости
-к прерываниям длинного прогона (LLM-генерация queries — самая медленная и
-хрупкая часть пайплайна), а не гарантия неизменности данных.
+1. **`src/RAG/ingestion/pipeline.py`** (новый) — вынести из `scripts/ingest-pdfs.py` чистую часть
+   пайплайна: `chunk_text(chunk)`, `process_chunk(chunk, file_id) -> Doc | None` (LLM queries +
+   embeddings), батч-обёртку. `ingest-pdfs.py` начинает импортировать оттуда — **поведение не меняется**,
+   покрываем тестами до и после.
+2. **`load_documents(..., only: set[str] | None = None)`** в `src/RAG/ingestion/data_loader.py` — новый
+   параметр, симметрично существующему `exceptions`. При заданном `only` yield-им только эти `file_id`.
+3. **`DocsStorage.replace_by_file_id(file_id, docs)`** — атомарно `delete_by_file_id` + `insert_many`
+   в одном `async with self._pool.connection()` (psycopg3 оборачивает блок в транзакцию).
+4. **`IngestRunsStorage`** (новый, `src/storage/ingest_runs_storage.py`, паттерн `BaseStorage`) —
+   `get_all() -> dict[file_id, (status, content_hash)]`, `upsert_pending(file_id)`,
+   `mark_done(file_id, content_hash)`, `mark_failed(file_id, error)`. Экспорт в `storage/__init__.py`.
+   Инвариант: `content_hash` пишется **только** в `mark_done`; `upsert_pending`/`mark_failed`
+   существующий `content_hash` сохраняют — чтобы он всегда отражал последний успешный ingest.
+5. **`GuidelinesStorage.upsert_many`** уже есть — используем для одной строки при полном reingest.
+6. **`scripts/reingest-pdfs.py`** (новый) — оркестрация: собрать манифест, прочитать статусы/хеши/
+   `guidelines`, вычислить work-list, прогнать по файлам с per-file try/except и логированием (по образцу
+   `ingest-pdfs.py`), поддержать флаги.
 
 ## Область охвата этой сессии
 
-Только сам механизм реингеста + resume-таблица. НЕ входит в эту спеку:
+Входит: механизм reingest + resume-таблица + триггеры (PDF-hash-diff → полный reingest; manifest-diff
+при том же хеше → metadata-only upsert `guidelines`) + вынос общего пайплайна + `only=` +
+`replace_by_file_id` + `IngestRunsStorage`.
 
-- Чистка manifest-полей из metadata чанков и таблица `guidelines`
-  (`2026-07-08-guidelines-table-design.md`, ведётся параллельно на
-  `guidelines-table` / `guidelines-table-impl` — при мердже реингест-скрипт,
-  вероятно, стоит переиспользовать и там, но контракт `Doc.metadata` до
-  завершения той чистки не трогаем).
-- Само изменение regex подсекций — уже сделано, коммит `40c1777` на этой
-  ветке.
-
-## Порядок мерджа
-
-Ветки этой параллельной работы (`clinrec-section-regex`,
-`guidelines-table`, `guidelines-table-impl`) сливаются в одну по сигналу
-пользователя, когда все допишутся. Эта спека и сам реингест-скрипт
-пишутся здесь заранее, чтобы не блокировать написание кода на решение по
-структуре таблицы `guidelines` из параллельной задачи.
+Не входит: удаление из БД файлов, пропавших из манифеста (только add/update); версионная история хешей
+(храним только последний `done`).
 
 ## Тесты
 
-- Чистые (без БД): логика выбора следующего file_id по статусу
-  (`pending`/`failed`/отсутствует → брать, `done` → скип), формирование
-  апдейта `ingest_runs` после успеха/ошибки.
-- На стенде (с БД): транзакционная замена чанков файла, повторный запуск
-  подбирает `failed`, не трогает `done`.
+**Чистые (без БД):** решает `classify(file_id) -> full | metadata_only | skip`:
+- матрица (status ∈ {отсутствует, pending, failed, done}) × (hash-diff да/нет) × (manifest-diff да/нет)
+  → ожидаемое решение. Ключевые случаи: `done`+hash-diff → `full` (даже если метаданные совпали);
+  `done`+hash-same+manifest-diff → `metadata_only`; `done`+всё совпало → `skip`; откат PDF (hash ≠
+  последнему `done`) → `full`.
+- Формирование записи `ingest_runs`: `mark_done` пишет hash; `upsert_pending`/`mark_failed` сохраняют
+  прежний `content_hash`.
+- Хеш-функция PDF (детерминизм, чувствительность к изменению байт).
+- `pipeline.process_chunk` на фейковом чанке с моками `generate_queries`/`embed_queries` → корректный `Doc`.
+- Регресс: `ingest-pdfs.py` после выноса `pipeline.py` собирает тот же `Doc` (мок LLM/embeddings).
+
+**На стенде (с БД):**
+- Путь 1: транзакционная замена `docs` + upsert `guidelines` для одного файла; `ingest_runs` → `done`+hash.
+- Путь 2 (metadata-only): изменили только колонку манифеста при том же PDF → `guidelines` обновлён,
+  строки `docs` НЕ тронуты (те же id/количество), LLM не вызывался.
+- Откат PDF к прежней версии (hash ≠ последнему `done`) → полный reingest.
+- Повторный запуск: подбирает `failed`, скипает неизменённые `done`.
+- Прерывание посреди файла не оставляет частичных чанков; `pending` подбирается следующим запуском.
