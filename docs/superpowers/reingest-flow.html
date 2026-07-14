@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reingest with resume — процесс</title>
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --panel: #ffffff;
+    --ink: #1a2230;
+    --muted: #5c6a7e;
+    --line: #d3dae4;
+    --accent: #2f6df0;
+    --full: #b7791f;      --full-bg: #fdf6e7;   --full-line: #e6c069;
+    --meta: #2f6df0;      --meta-bg: #eef3fe;   --meta-line: #a9c3f7;
+    --skip: #4f7a55;      --skip-bg: #eef5ef;   --skip-line: #a9cbb0;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10151d; --panel: #182029; --ink: #e6ecf4; --muted: #94a2b6; --line: #2b3644;
+      --accent: #6ea0ff;
+      --full: #e6b95c; --full-bg: #2a2114; --full-line: #5c4a24;
+      --meta: #7fa8ff; --meta-bg: #16223b; --meta-line: #2f4b7e;
+      --skip: #8fc79a; --skip-bg: #172b1d; --skip-line: #2e5238;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f9; --panel: #ffffff; --ink: #1a2230; --muted: #5c6a7e; --line: #d3dae4;
+    --accent: #2f6df0;
+    --full: #b7791f; --full-bg: #fdf6e7; --full-line: #e6c069;
+    --meta: #2f6df0; --meta-bg: #eef3fe; --meta-line: #a9c3f7;
+    --skip: #4f7a55; --skip-bg: #eef5ef; --skip-line: #a9cbb0;
+  }
+  :root[data-theme="dark"] {
+    --bg: #10151d; --panel: #182029; --ink: #e6ecf4; --muted: #94a2b6; --line: #2b3644;
+    --accent: #6ea0ff;
+    --full: #e6b95c; --full-bg: #2a2114; --full-line: #5c4a24;
+    --meta: #7fa8ff; --meta-bg: #16223b; --meta-line: #2f4b7e;
+    --skip: #8fc79a; --skip-bg: #172b1d; --skip-line: #2e5238;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.5;
+    padding: 2.5rem 1.25rem 4rem;
+  }
+  .wrap { max-width: 60rem; margin: 0 auto; }
+
+  header { margin-bottom: 2rem; }
+  .eyebrow {
+    font-size: .72rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; margin: 0 0 .35rem;
+  }
+  h1 { font-size: 1.7rem; margin: 0 0 .5rem; text-wrap: balance; letter-spacing: -.01em; }
+  .lede { color: var(--muted); margin: 0; max-width: 42rem; }
+  .lede code { font-family: var(--mono); font-size: .85em; }
+
+  .flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
+
+  .node {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: .85rem 1.1rem; width: 100%; max-width: 40rem;
+  }
+  .node h3 {
+    margin: 0 0 .4rem; font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600;
+  }
+  .node p { margin: .15rem 0; }
+  .node .k { font-family: var(--mono); font-size: .82rem; }
+  .muted-node { border-style: dashed; background: transparent; }
+  .muted-node p { color: var(--muted); }
+
+  .conn { width: 2px; height: 1.6rem; background: var(--line); }
+  .conn.arrow { position: relative; }
+  .conn.arrow::after {
+    content: ""; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid var(--line);
+  }
+  .label-on-conn {
+    font-size: .78rem; color: var(--muted); font-style: italic;
+    padding: .35rem 0;
+  }
+
+  /* three-way branch */
+  .branch { display: grid; grid-template-columns: repeat(3, 1fr); gap: .9rem; width: 100%; max-width: 52rem; }
+  @media (max-width: 620px) { .branch { grid-template-columns: 1fr; } }
+  .card {
+    border-radius: 10px; padding: .9rem 1rem; border: 1px solid;
+  }
+  .card .tag {
+    display: inline-block; font-family: var(--mono); font-size: .74rem; font-weight: 700;
+    letter-spacing: .04em; padding: .12rem .5rem; border-radius: 5px; margin-bottom: .55rem;
+  }
+  .card .cond { font-size: .82rem; color: var(--muted); margin: 0; }
+  .card .act { font-size: .82rem; margin: .55rem 0 0; }
+  .card.full { background: var(--full-bg); border-color: var(--full-line); }
+  .card.full .tag { background: var(--full); color: #fff; }
+  .card.meta { background: var(--meta-bg); border-color: var(--meta-line); }
+  .card.meta .tag { background: var(--meta); color: #fff; }
+  .card.skip { background: var(--skip-bg); border-color: var(--skip-line); }
+  .card.skip .tag { background: var(--skip); color: #fff; }
+
+  section.block { margin-top: 2.75rem; }
+  section.block > h2 {
+    font-size: 1.05rem; margin: 0 0 .9rem; display: flex; align-items: center; gap: .55rem;
+  }
+  section.block > h2 .pill {
+    font-family: var(--mono); font-size: .68rem; font-weight: 700; padding: .1rem .45rem;
+    border-radius: 5px; color: #fff;
+  }
+
+  /* pipeline steps */
+  ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0;
+    border-left: 2px solid var(--full-line); }
+  ol.steps li { counter-increment: s; position: relative; padding: .5rem 0 .5rem 2.4rem; }
+  ol.steps li::before {
+    content: counter(s); position: absolute; left: -.85rem; top: .45rem;
+    width: 1.55rem; height: 1.55rem; border-radius: 50%;
+    background: var(--full); color: #fff; font-family: var(--mono); font-weight: 700; font-size: .8rem;
+    display: grid; place-items: center;
+  }
+  ol.steps code { font-family: var(--mono); font-size: .82rem; }
+  ol.steps .note { color: var(--muted); font-size: .8rem; }
+  li.err::before { background: #c0392b; content: "!"; }
+
+  .invariants { display: flex; flex-direction: column; gap: .7rem; }
+  .inv {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: .7rem .95rem;
+  }
+  .inv b { color: var(--ink); }
+  .inv p { margin: .2rem 0 0; color: var(--muted); font-size: .88rem; }
+  .inv code { font-family: var(--mono); font-size: .82em; }
+
+  footer { margin-top: 3rem; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+  footer code { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">medkard · RAG ingestion</p>
+    <h1>Reingest with resume — от папки до завершения</h1>
+    <p class="lede">Как файлы из <code>pdfs/</code> и строки <code>manifest.csv</code> синхронизируются
+      с таблицами <code>docs</code> и <code>guidelines</code>, переживая прерывания и перегоняя LLM
+      только когда это правда нужно.</p>
+  </header>
+
+  <div class="flow">
+    <div class="node">
+      <h3>Вход · оператор</h3>
+      <p class="k">pdfs/&lt;file_id&gt;.pdf</p><p class="cond" style="color:var(--muted);font-size:.82rem">новые / изменённые / откатанные PDF</p>
+      <p class="k" style="margin-top:.4rem">resources/manifest.csv</p><p class="cond" style="color:var(--muted);font-size:.82rem">строки: ID + метаданные (Наим., МКБ-10, возраст…)</p>
+    </div>
+    <div class="conn arrow"></div>
+
+    <div class="label-on-conn">первый прогон / после смены схемы БД — один раз</div>
+    <div class="node muted-node">
+      <h3>Разовая подготовка</h3>
+      <p class="k">bash migrations/migrate.sh</p><p>→ docs, guidelines, ingest_runs (019–023)</p>
+      <p class="k" style="margin-top:.4rem">python scripts/seed-guidelines.py</p><p>→ guidelines := снимок манифеста «как есть»</p>
+    </div>
+    <div class="conn arrow"></div>
+
+    <div class="node" style="border-color:var(--accent)">
+      <h3>Запуск</h3>
+      <p class="k">python scripts/reingest-pdfs.py <span style="color:var(--muted)">[--only-failed] [--file-id ID]</span></p>
+    </div>
+    <div class="conn arrow"></div>
+
+    <div class="node">
+      <h3>Сбор состояния</h3>
+      <p class="k">manifest_rows ← manifest.csv</p>
+      <p class="k">runs          ← ingest_runs (status, content_hash)</p>
+      <p class="k">guidelines    ← таблица guidelines («старый» манифест)</p>
+      <p class="k">current_hash  ← sha256(pdfs/&lt;id&gt;.pdf) для каждого id</p>
+    </div>
+    <div class="conn arrow"></div>
+
+    <div class="label-on-conn"><code style="font-family:var(--mono)">build_worklist → classify(file_id)</code> на каждый файл</div>
+
+    <div class="branch">
+      <div class="card full">
+        <span class="tag">FULL</span>
+        <p class="cond">нет записи в runs · <code>status != done</code> · хеш PDF изменился (в т.ч. откат)</p>
+        <p class="act"><b style="color:var(--full)">→ полный re-chunk</b> + upsert guidelines</p>
+      </div>
+      <div class="card meta">
+        <span class="tag">METADATA_ONLY</span>
+        <p class="cond"><code>done</code>, хеш тот же, но строка манифеста ≠ guidelines</p>
+        <p class="act"><b style="color:var(--meta)">→ upsert guidelines</b> · дёшево, без LLM · docs и ingest_runs не трогаем</p>
+      </div>
+      <div class="card skip">
+        <span class="tag">SKIP</span>
+        <p class="cond"><code>done</code> + хеш совпал + манифест совпал</p>
+        <p class="act"><b style="color:var(--skip)">→ ничего</b></p>
+      </div>
+    </div>
+  </div>
+
+  <section class="block">
+    <h2><span class="pill" style="background:var(--full)">FULL</span> ветка полного reingest — на один файл</h2>
+    <ol class="steps">
+      <li><code>upsert ingest_runs(id, status='pending')</code> <span class="note">— content_hash сохраняем</span></li>
+      <li><code>load_documents(only={id}) → iter_chunks()</code> <span class="note">— fitz: секции 3-ур. regex + таблицы</span></li>
+      <li><code>process_batch → LLM queries + embeddings</code> <span class="note">— самая медленная и хрупкая часть</span></li>
+      <li><code>replace_by_file_id(id, docs)</code> <span class="note">— атомарно: DELETE + INSERT в одной транзакции</span></li>
+      <li><code>guidelines.upsert_many([Guideline.from_manifest_row])</code></li>
+      <li><code>mark_done(id, content_hash=current_hash)</code> <span class="note">— ПОСЛЕДНИМ: точка «файл готов»</span></li>
+      <li class="err"><code>Exception → mark_failed(id, error)</code> <span class="note">— логируем и идём к следующему файлу</span></li>
+    </ol>
+  </section>
+
+  <section class="block">
+    <h2>Завершение · прерывание · повтор</h2>
+    <div class="node" style="max-width:none">
+      <p><b>Ctrl+C / падение между файлами</b> — текущий файл уже <code class="k">done</code> либо остался <code class="k">pending</code>/<code class="k">failed</code>.</p>
+      <p><b>Ctrl+C посреди файла</b> — docs-транзакция атомарна (нет полу-записи), но <code class="k">mark_done</code> не дошёл → <code class="k">status='pending'</code>.</p>
+      <p style="margin-top:.5rem"><b>Повторный запуск</b> → <code class="k">build_worklist</code> заново: <code class="k">pending/failed/нет записи</code> → переделать; <code class="k">done</code> + хеш + манифест совпали → skip.</p>
+      <p class="k" style="margin-top:.5rem;color:var(--muted)">SELECT status, count(*) FROM ingest_runs GROUP BY status;</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>Три инварианта корректности</h2>
+    <div class="invariants">
+      <div class="inv"><b>Хеш решает re-chunk.</b><p>Дорогая LLM-генерация — только если <code>sha256(PDF)</code> разошёлся с последней <code>done</code>-записью. Смена одних метаданных → дешёвый upsert <code>guidelines</code>.</p></div>
+      <div class="inv"><b><code>mark_done</code> последним.</b><p>Крах в любой момент оставляет файл не-<code>done</code> → следующий прогон переделает его идемпотентно, без ручного вмешательства.</p></div>
+      <div class="inv"><b><code>content_hash</code> пишется только на <code>done</code>.</b><p><code>pending</code>/<code>failed</code> его сохраняют — сравнение всегда с последним успешным состоянием, поэтому откат файла ловится как «изменился».</p></div>
+    </div>
+  </section>
+
+  <footer>
+    Источник: <code>docs/superpowers/specs/2026-07-09-reingest-with-resume-design.md</code> ·
+    <code>docs/superpowers/plans/2026-07-14-reingest-with-resume.md</code>
+  </footer>
+</div>
+</body>
+</html>
