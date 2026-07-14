@@ -19,7 +19,7 @@
         python scripts/seed-guidelines.py → guidelines := снимок манифеста «как есть»
                                      │
                                      ▼
-        python scripts/reingest-pdfs.py  [--only-failed] [--file-id ID]
+        python scripts/reingest-pdfs.py  [--data-dir DIR] [--only-failed] [--file-id ID] [--dry-run]
                                      │
       ┌──────────────────────── СБОР СОСТОЯНИЯ ────────────────────────┐
       │  manifest_rows ← manifest.csv                                   │

@@ -39,25 +39,34 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def _pdf_path(file_id: str) -> Path:
-    return PDFS_DIR / (file_id + PDF_EXTENSION)
+def _resolve_paths(data_dir: Path | None) -> tuple[Path, Path]:
+    """(pdfs_dir, manifest_path). --data-dir holds both the PDFs and manifest.csv;
+    without it, fall back to the project layout (pdfs/ + resources/manifest.csv)."""
+    if data_dir is not None:
+        return data_dir, data_dir / "manifest.csv"
+    return PDFS_DIR, MANIFEST_PATH
 
 
-def _current_hash(file_id: str):
-    p = _pdf_path(file_id)
+def _pdf_path(file_id: str, pdfs_dir: Path) -> Path:
+    return pdfs_dir / (file_id + PDF_EXTENSION)
+
+
+def _current_hash(file_id: str, pdfs_dir: Path):
+    p = _pdf_path(file_id, pdfs_dir)
     return sha256_file(p) if p.exists() else None
 
 
-def _read_manifest_rows() -> dict:
-    with open(MANIFEST_PATH, newline="", encoding="utf-8") as fh:
+def _read_manifest_rows(manifest_path: Path) -> dict:
+    with open(manifest_path, newline="", encoding="utf-8") as fh:
         return {(r.get("ID") or "").strip(): r
                 for r in csv.DictReader(fh) if (r.get("ID") or "").strip()}
 
 
-async def _full_reingest(file_id, row, docs_storage, guidelines_storage, runs_storage):
+async def _full_reingest(file_id, row, pdfs_dir, manifest_path,
+                         docs_storage, guidelines_storage, runs_storage):
     await runs_storage.upsert_pending(file_id)
     try:
-        readers = list(load_documents(only={file_id}))
+        readers = list(load_documents(manifest_path=manifest_path, pdfs_dir=pdfs_dir, only={file_id}))
         if not readers:
             raise FileNotFoundError(f"no reader for {file_id} (missing PDF?)")
         chunks = list(readers[0].iter_chunks())
@@ -69,7 +78,7 @@ async def _full_reingest(file_id, row, docs_storage, guidelines_storage, runs_st
 
         await docs_storage.replace_by_file_id(file_id, docs)
         await guidelines_storage.upsert_many([Guideline.from_manifest_row(row)])
-        await runs_storage.mark_done(file_id, sha256_file(_pdf_path(file_id)))
+        await runs_storage.mark_done(file_id, sha256_file(_pdf_path(file_id, pdfs_dir)))
         log.info("Reingested %s — %d chunk(s)", file_id, len(docs))
     except Exception as exc:  # per-file: never halt the whole run
         await runs_storage.mark_failed(file_id, str(exc))
@@ -81,13 +90,27 @@ async def _metadata_only(file_id, row, guidelines_storage):
     log.info("Metadata-only update for %s (PDF unchanged)", file_id)
 
 
+def _summarize(worklist) -> dict:
+    summary: dict[str, int] = {}
+    for _, decision in worklist:
+        summary[decision] = summary.get(decision, 0) + 1
+    return summary
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Reingest PDFs / sync guidelines with resume.")
+    parser.add_argument("--data-dir", type=Path,
+                        help="folder holding the PDFs and manifest.csv "
+                             "(default: project pdfs/ + resources/manifest.csv)")
     parser.add_argument("--only-failed", action="store_true", help="only files with status='failed'")
     parser.add_argument("--file-id", help="force full reingest of one file_id (bypass diff logic)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print the work-list decisions and exit without writing to the DB")
     args = parser.parse_args()
 
-    manifest_rows = _read_manifest_rows()
+    pdfs_dir, manifest_path = _resolve_paths(args.data_dir)
+    log.info("PDFs: %s | manifest: %s", pdfs_dir, manifest_path)
+    manifest_rows = _read_manifest_rows(manifest_path)
 
     async with DocsStorage() as docs_storage, \
             GuidelinesStorage() as guidelines_storage, \
@@ -99,12 +122,20 @@ async def main() -> None:
         if args.file_id:
             worklist = [(args.file_id, "full")]
         else:
-            worklist = build_worklist(manifest_rows, runs, guidelines_by_id, _current_hash)
+            worklist = build_worklist(manifest_rows, runs, guidelines_by_id,
+                                      lambda fid: _current_hash(fid, pdfs_dir))
             if args.only_failed:
                 worklist = [(fid, "full") for fid, _ in worklist
                             if runs.get(fid, (None, None))[0] == "failed"]
 
-        log.info("Work-list: %d file(s)", len(worklist))
+        log.info("Work-list: %d file(s) — %s", len(worklist), _summarize(worklist))
+
+        if args.dry_run:
+            for file_id, decision in worklist:
+                log.info("[dry-run] %-14s %s", decision, file_id)
+            log.info("[dry-run] no changes written.")
+            return
+
         for file_id, decision in worklist:
             row = manifest_rows.get(file_id)
             if decision == "skip" or row is None:
@@ -112,7 +143,8 @@ async def main() -> None:
             if decision == "metadata_only":
                 await _metadata_only(file_id, row, guidelines_storage)
             else:
-                await _full_reingest(file_id, row, docs_storage, guidelines_storage, runs_storage)
+                await _full_reingest(file_id, row, pdfs_dir, manifest_path,
+                                     docs_storage, guidelines_storage, runs_storage)
 
     log.info("Reingest complete. Log: %s", log_filename)
 
