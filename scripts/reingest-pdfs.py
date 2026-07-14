@@ -108,6 +108,11 @@ async def _metadata_only(file_id, row, guidelines_storage):
     log.info("Metadata-only update for %s (PDF unchanged)", file_id)
 
 
+def _forced_full_worklist(manifest_rows: dict) -> list[tuple[str, str]]:
+    """Every manifested file classified as 'full' — bypasses hash/status (re-embed rollout)."""
+    return [(file_id, "full") for file_id in manifest_rows]
+
+
 def _summarize(worklist) -> dict:
     summary: dict[str, int] = {}
     for _, decision in worklist:
@@ -124,6 +129,9 @@ async def main() -> None:
                         help="explicit path to manifest.csv (overrides --data-dir/manifest.csv)")
     parser.add_argument("--only-failed", action="store_true", help="only files with status='failed'")
     parser.add_argument("--file-id", help="force full reingest of one file_id (bypass diff logic)")
+    parser.add_argument("--force-all", action="store_true",
+                        help="reingest every manifested file (bypass hash/status) — e.g. after "
+                             "an embedding representation change")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the work-list decisions and exit without writing to the DB")
     args = parser.parse_args()
@@ -141,6 +149,8 @@ async def main() -> None:
 
         if args.file_id:
             worklist = [(args.file_id, "full")]
+        elif args.force_all:
+            worklist = _forced_full_worklist(manifest_rows)
         else:
             worklist = build_worklist(manifest_rows, runs, guidelines_by_id,
                                       lambda fid: _current_hash(fid, pdfs_dir))

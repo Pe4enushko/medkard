@@ -38,3 +38,16 @@ def test_resolve_paths_manifest_only():
 def test_summarize_counts():
     wl = [("A", "full"), ("B", "full"), ("C", "skip"), ("D", "metadata_only")]
     assert reingest._summarize(wl) == {"full": 2, "skip": 1, "metadata_only": 1}
+
+
+def test_forced_full_worklist_marks_all_full():
+    manifest_rows = {"A": {"ID": "A"}, "B": {"ID": "B"}}
+    wl = reingest._forced_full_worklist(manifest_rows)
+    assert wl == [("A", "full"), ("B", "full")]
+
+
+def test_force_all_flag_parses():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--force-all", action="store_true")
+    assert parser.parse_args(["--force-all"]).force_all is True
