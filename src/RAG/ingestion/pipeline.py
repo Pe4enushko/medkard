@@ -27,9 +27,11 @@ async def process_chunk(chunk: dict, file_id: str) -> Doc | None:
         _, queries = await generate_queries(chunk)
         embeddings = await embed_queries(queries)
     except Exception as exc:
+        meta = chunk.get("metadata", {})
         log.error(
-            "Query/embedding generation failed for %s page %s: %s",
-            file_id, chunk["metadata"].get("page"), exc,
+            "Query/embedding generation failed for %s [%s #%s section=%r]: %s",
+            file_id, meta.get("content_type"), meta.get("chunk_index"),
+            meta.get("section"), exc,
         )
         return None
 
