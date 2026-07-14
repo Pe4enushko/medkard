@@ -67,9 +67,9 @@ class ChineseDetector:
         return False
 
     def check_hypothetical_queries(self, queries: Any) -> bool:
-        """Check a HypotheticalQueries object from query_generator.py.
+        """Check an object with fact/procedural/constraint query fields.
 
-        Accepts a pydantic ``HypotheticalQueries`` instance or a plain dict.
+        Accepts a pydantic model instance or a plain dict.
         """
         if isinstance(queries, dict):
             values = (

@@ -3,7 +3,7 @@ import json, re
 
 @dataclass
 class Doc:
-    """A single ingested PDF chunk with its hypothetical queries and embeddings."""
+    """A single ingested PDF chunk with its contextual embedding."""
 
     chunk: str
     file_id: str = ""                    # manifest ID (PDF filename stem)

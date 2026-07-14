@@ -5,7 +5,7 @@ ingest-pdfs.py — ingest PDF chunks from manifest.csv into the docs table.
 Run from the project root::
     python scripts/ingest-pdfs.py
 
-For each chunk: generates hypothetical queries via the LLM, embeds them,
+For each chunk: embeds its contextual text (section + body),
 then stores everything in the docs table.
 Already-ingested files (by file_id) are skipped automatically.
 Progress and errors are written to both stdout and a timestamped log file.
