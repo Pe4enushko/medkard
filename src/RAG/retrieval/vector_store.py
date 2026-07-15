@@ -151,6 +151,25 @@ def _section_like_patterns(anchor_sections: list[str]) -> list[str]:
     return patterns
 
 
+async def _section_anchor_sections(pool, file_id: str, keyword_like: str) -> list[str]:
+    """Distinct numbered section titles in *file_id* whose title matches the keyword.
+
+    *keyword_like* is the already-wrapped LIKE argument, e.g. '%лечен%'.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT DISTINCT metadata->>'section' AS section
+        FROM docs
+        WHERE file_id = $1
+          AND lower(metadata->>'section') LIKE $2
+          AND metadata->>'section' ~ '^[0-9]'
+        """,
+        file_id,
+        keyword_like,
+    )
+    return [r["section"] for r in rows if r["section"]]
+
+
 async def _vector_search_filtered(
     embedding: list[float],
     file_id: str,
@@ -169,8 +188,18 @@ async def _vector_search_filtered(
     params: list = [vec, file_id]
 
     if section_filter:
-        params.append(f"%{section_filter}%")
-        where_clauses.append(f"lower(metadata->>'section') LIKE ${len(params)}")
+        keyword_like = f"%{section_filter}%"
+        anchors = await _section_anchor_sections(pool, file_id, keyword_like)
+        patterns = _section_like_patterns(anchors)
+
+        params.append(keyword_like)
+        kw_idx = len(params)
+        params.append(patterns)
+        pat_idx = len(params)
+        where_clauses.append(
+            f"(lower(metadata->>'section') LIKE ${kw_idx} "
+            f"OR metadata->>'section' LIKE ANY(${pat_idx}::text[]))"
+        )
 
     where_sql = " AND ".join(where_clauses)
 
