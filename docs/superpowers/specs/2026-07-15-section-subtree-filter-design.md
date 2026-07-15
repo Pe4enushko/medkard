@@ -42,6 +42,9 @@ WHERE file_id = $1
 
 ### Шаг 2 — чистые Python-хелперы (юнит-тестируются без БД)
 
+Python — **единственный** парсер номера. SQL номер не разбирает (см. шаг 3), поэтому
+дублирования логики нет.
+
 ```python
 _SECTION_NUM_RE = re.compile(r"^\d+(?:\.\d+)*")
 
@@ -50,34 +53,39 @@ def _extract_section_number(section: str) -> str | None:
     m = _SECTION_NUM_RE.match(section or "")
     return m.group(0) if m else None
 
-def _section_number_matchers(anchor_sections: list[str]) -> tuple[list[str], list[str]]:
-    """Return (exact_numbers, prefix_patterns) for the anchor sections.
+def _section_like_patterns(anchor_sections: list[str]) -> list[str]:
+    """LIKE-паттерны, покрывающие саму якорную секцию и её нумерованных потомков.
 
-    '3'   -> exact '3',   prefix '3.%'
-    '2.1' -> exact '2.1', prefix '2.1.%'
-    Non-numbered anchors are skipped. Deduplicated, order-stable.
+    '3 Лечение'   -> ['3 %', '3.%']
+    '2.1 Жалобы'  -> ['2.1 %', '2.1.%']
+    Не-нумерованные якоря пропускаются. Дедуп по номеру, порядок стабилен.
+
+    Границы: '<num> %' ловит саму секцию (номер + пробел + заголовок),
+    '<num>.%' — потомков. Точка в LIKE — литерал, поэтому '3.1 %'/'3.1.%'
+    НЕ ловят «3.10 …» (после '3.1' идёт '0', а не пробел/точка).
     """
-    exact, prefixes, seen = [], [], set()
+    pats, seen = [], set()
     for s in anchor_sections:
         num = _extract_section_number(s)
         if num and num not in seen:
             seen.add(num)
-            exact.append(num)
-            prefixes.append(f"{num}.%")
-    return exact, prefixes
+            pats.append(f"{num} %")   # сама секция: номер + пробел + заголовок
+            pats.append(f"{num}.%")   # нумерованные потомки
+    return pats
 ```
 
 ### Шаг 3 — предикат в главном вектор-запросе
 
-Секционный `WHERE` в `_vector_search_filtered` становится (keyword-подстраховка сохранена):
+Секционный `WHERE` в `_vector_search_filtered` становится (keyword-подстраховка сохранена).
+Никакого разбора номера в SQL — только `LIKE ANY` по готовым паттернам:
 ```sql
 (
     lower(metadata->>'section') LIKE $kw
-    OR (regexp_match(metadata->>'section', '^[0-9]+(?:\.[0-9]+)*'))[1] = ANY($exact)
-    OR (regexp_match(metadata->>'section', '^[0-9]+(?:\.[0-9]+)*'))[1] LIKE ANY($prefixes)
+    OR metadata->>'section' LIKE ANY($patterns)
 )
 ```
-`$exact` / `$prefixes` — массивы из шага 2 (пустые, если якорей нет).
+`$patterns` — массив из шага 2 (пустой, если якорей нет → предикат вырождается в голый keyword).
+Номер начинается с цифры, поэтому регистр на паттерны не влияет — `lower()` для них не нужен.
 
 ## Поведение (граничные случаи)
 
@@ -88,19 +96,20 @@ def _section_number_matchers(anchor_sections: list[str]) -> tuple[list[str], lis
 | `3.1 …` | `3.1`, `3.1.x` | `3.10` (не начинается на `3.1.`), `3.2` |
 
 - **Соседей одного уровня не подтягиваем никогда** — расширение строго вниз от узла.
-- **Граница по точке:** `= '3.1'` + `LIKE '3.1.%'`. `«3.10»` под якорем `3.1` не попадает; под
-  якорем `3` — попадает (`3.10 LIKE '3.%'`, и это верно: 3.10 — часть главы 3).
-- **Якорей нет** (keyword не дал числовых секций) → `ANY('{}')` = false → работает ровно как
-  сегодня (голый keyword). Безопасная деградация.
+- **Граница пробел/точка:** паттерны `'3.1 %'` + `'3.1.%'`. `«3.10»` под якорем `3.1` не попадает
+  (после `3.1` идёт `0`, а не пробел/точка); под якорем `3` — попадает (`«3.10 …» LIKE '3.%'`, и
+  это верно: 3.10 — часть главы 3).
+- **Якорей нет** (keyword не дал числовых секций) → `$patterns = '{}'` → `LIKE ANY('{}')` = false
+  → работает ровно как сегодня (голый keyword). Безопасная деградация.
 - **`section = NULL`** — исключается, как и сейчас (`lower(NULL) LIKE …` = NULL).
 
 ## Где меняется код
 
 - `src/RAG/retrieval/vector_store.py`:
-  - новые чистые хелперы `_extract_section_number`, `_section_number_matchers`;
+  - новые чистые хелперы `_extract_section_number`, `_section_like_patterns`;
   - новый `async _section_anchor_sections(pool, file_id, keyword) -> list[str]` (шаг 1);
-  - `_vector_search_filtered`: когда `section_filter` задан — резолвит якоря, строит
-    `exact`/`prefixes`, добавляет предикат из шага 3. Сигнатура функции **не меняется**
+  - `_vector_search_filtered`: когда `section_filter` задан — резолвит якоря, строит `patterns`,
+    добавляет предикат из шага 3 (`LIKE ANY`). Сигнатура функции **не меняется**
     (`section_filter` остаётся keyword-подстрокой), поэтому вызовы из `searches.py` не трогаются.
 - Больше ничего: `_hybrid_filtered` в `searches.py` и три публичные `search_*` — без изменений
   (передают тот же `section_filter`).
@@ -124,10 +133,11 @@ def _section_number_matchers(anchor_sections: list[str]) -> tuple[list[str], lis
 **Dev-машина (без БД):**
 - `_extract_section_number`: `'3.1.2 Наружная терапия'→'3.1.2'`; `'3 Лечение'→'3'`;
   `'Приложение А'→None`; `''`/`None`→`None`.
-- `_section_number_matchers`: `['3 Лечение']→(['3'],['3.%'])`; `['2.1 Жалобы и анамнез']→
-  (['2.1'],['2.1.%'])`; дедуп повторов; пропуск не-числовых; пустой вход → `([],[])`.
-- Логика границы на уровне матчеров: якорь `3.1` даёт `exact='3.1'`, `prefix='3.1.%'` — так что
-  `3.10` не покрывается (проверяется как свойство построенных матчеров).
+- `_section_like_patterns`: `['3 Лечение']→['3 %','3.%']`; `['2.1 Жалобы и анамнез']→
+  ['2.1 %','2.1.%']`; дедуп повторов; пропуск не-числовых; пустой вход → `[]`.
+- Свойство границы: для якоря `3.1` (паттерны `['3.1 %','3.1.%']`) `fnmatch`-проверкой
+  подтвердить, что `«3.10 …»` не матчит ни один паттерн, а `«3.1 …»`/`«3.1.2 …»` матчат
+  (SQL `LIKE` без `%`/`_` в номере ≡ префикс-матч, эмулируется в тесте).
 
 **Стенд (с pgvector):**
 - `search_treatment(file_id, q)` возвращает чанки `3.1.2 Наружная терапия` под главой `3 Лечение`.
