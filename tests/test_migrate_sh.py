@@ -86,3 +86,29 @@ def test_skips_already_recorded_file(tmp_path):
     # 001 must NOT be applied (no -f for it); 002 must be applied
     assert not any("-f" in l and "001_a.sql" in l for l in lines)
     assert any("--single-transaction" in l and "002_b.sql" in l for l in lines)
+
+
+def test_skip_until_records_earlier_files_without_applying(tmp_path):
+    env, migs, log = _harness(
+        tmp_path, ["001_a.sql", "002_b.sql", "023_x.sql", "024_docs_reconcile.sql"]
+    )
+    env["APPLIED"] = ""
+    _run(env, migs, "--skip-until", "024_docs_reconcile.sql")
+    lines = log.read_text().splitlines()
+
+    # 001/002/023 recorded via ON CONFLICT INSERT, never applied with -f
+    for earlier in ("001_a.sql", "002_b.sql", "023_x.sql"):
+        assert any("ON CONFLICT" in l and earlier in l for l in lines), earlier
+        assert not any("-f" in l and earlier in l for l in lines), earlier
+
+    # 024 (== FILE) is applied for real
+    assert any("--single-transaction" in l and "024_docs_reconcile.sql" in l for l in lines)
+
+
+def test_skip_until_unknown_arg_rejected(tmp_path):
+    env, migs, _ = _harness(tmp_path, ["001_a.sql"])
+    r = subprocess.run(
+        ["bash", str(migs / "migrate.sh"), "--bogus"],
+        env=env, capture_output=True, text=True,
+    )
+    assert r.returncode != 0

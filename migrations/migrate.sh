@@ -25,6 +25,14 @@ done < "$ENV_FILE"
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
+SKIP_UNTIL=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-until) SKIP_UNTIL="${2:?--skip-until needs a filename}"; shift 2 ;;
+        *) echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
 echo "Running migrations against $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB ..."
 
 run_psql() {
@@ -58,6 +66,11 @@ apply_and_record() {  # $1 = path, $2 = basename — file + ledger row in ONE tr
 
 for sql_file in "$SCRIPT_DIR"/[0-9]*.sql; do
     name="$(basename "$sql_file")"
+    if [[ -n "$SKIP_UNTIL" && "$name" < "$SKIP_UNTIL" ]]; then
+        echo "  baseline (record only) $name"
+        record_only "$name"
+        continue
+    fi
     if is_applied "$name"; then
         echo "  skip (already applied) $name"
         continue
