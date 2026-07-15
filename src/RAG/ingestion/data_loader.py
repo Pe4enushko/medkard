@@ -41,20 +41,23 @@ TABLE_ROW_CHUNK_SIZE: int = 8   # max rows per table chunk yielded to the pipeli
 TEXT_CHUNK_SIZE: int = 2000     # characters per text chunk
 TEXT_CHUNK_OVERLAP: int = 200   # character overlap between consecutive text chunks
 
-# Regex that matches numbered sections like "1.1 Title" 
-# ignoring fake sections indicated by more than 2 dots in text (so we ignore trailing dots from ToC but match titles containing just some dots).
+# Regex that matches numbered sections like "1.1 Title" or "1.1.1 Title"
+# (2 or 3 numbering levels), ignoring fake sections indicated by more than
+# 2 dots in a row in the title line (so we ignore trailing dots from ToC
+# entries like "Список литературы....5" but still match titles containing
+# just single dots, e.g. the "3.1.1" numbering itself).
 _SECTION_PATTERN: re.Pattern = re.compile(
     r'^('
-    r'\d+\.\d+\s+'
+    r'\d+\.\d+(?:\.\d+)?\s+'
     r'(?=[^\n]*[A-Za-zА-Яа-я])'
     r'(?![^\n]*\.{2,})'
     r'.*?'
-    r')(?=^\d+\.\d+\s+|\Z)',
+    r')(?=^\d+\.\d+(?:\.\d+)?\s+|\Z)',
     re.MULTILINE | re.DOTALL
 )
 _SECTION_TITLE_PATTERN: re.Pattern = re.compile(
     r'^('
-    r'\d+\.\d+\s+'
+    r'\d+\.\d+(?:\.\d+)?\s+'
     r'(?=[^\n]*[A-Za-zА-Яа-я])'
     r'(?![^\n]*\.{2,})'
     r'[^\n]+'

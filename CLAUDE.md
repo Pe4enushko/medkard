@@ -85,6 +85,7 @@ src/
 │   └── ftp.py               # FTP upload for Excel reports
 └── parsers/
     ├── excel.py             # Input Excel parser
+    ├── inspection_order.py  # Optional canonical reorder of ДанныеОсмотра (manifest-driven, fuzzy match)
     └── json_parser.py       # Visit JSON normalization
 ```
 
