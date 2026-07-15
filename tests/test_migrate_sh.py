@@ -105,6 +105,26 @@ def test_skip_until_records_earlier_files_without_applying(tmp_path):
     assert any("--single-transaction" in l and "024_docs_reconcile.sql" in l for l in lines)
 
 
+def test_help_prints_usage_and_exits_zero(tmp_path):
+    env, migs, log = _harness(tmp_path, ["001_a.sql"])
+    r = _run(env, migs, "--help")
+    assert "Usage" in r.stdout
+    assert "--skip-until" in r.stdout
+    # help short-circuits before touching the DB
+    assert (not log.exists()) or log.read_text() == ""
+
+
+def test_help_works_without_env(tmp_path):
+    env, migs, _ = _harness(tmp_path, ["001_a.sql"])
+    (migs.parent / ".env").unlink()  # help must not require a configured DB
+    r = subprocess.run(
+        ["bash", str(migs / "migrate.sh"), "-h"],
+        env=env, capture_output=True, text=True,
+    )
+    assert r.returncode == 0
+    assert "Usage" in r.stdout
+
+
 def test_skip_until_unknown_arg_rejected(tmp_path):
     env, migs, _ = _harness(tmp_path, ["001_a.sql"])
     r = subprocess.run(

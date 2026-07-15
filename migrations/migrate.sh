@@ -4,6 +4,33 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$(dirname "$SCRIPT_DIR")/.env"
 
+usage() {
+    cat <<'EOF'
+Usage: migrate.sh [--skip-until FILE]
+
+Applies every migration in migrations/[0-9]*.sql not yet recorded in the
+schema_migrations ledger. Reads DB connection from ../.env (POSTGRES_*).
+
+Options:
+  --skip-until FILE   Baseline mode: record each migration whose name sorts
+                      strictly before FILE as applied WITHOUT running it, then
+                      apply from FILE onward. One-time use on a pre-existing DB.
+  -h, --help          Show this help and exit.
+
+Stand rollout on the drifted DB (see migrations/RUNBOOK.md):
+  1. migrate.sh --skip-until 024_docs_reconcile.sql   # baseline 001-023
+  2. python scripts/reingest-pdfs.py --force-all       # fill docs.embedding
+  3. migrate.sh                                        # apply 024 reconcile
+EOF
+}
+
+# Help short-circuits before .env / DB — so it works on an unconfigured checkout.
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage; exit 0 ;;
+    esac
+done
+
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "ERROR: .env not found at $ENV_FILE" >&2
     exit 1
