@@ -139,6 +139,82 @@ async def test_vector_search(seeded_docs):
         assert isinstance(r["distance"], float)
 
 
+@pytest_asyncio.fixture
+async def seeded_section_docs():
+    """Insert 1 test guideline + 4 test Doc rows under one file_id for section-subtree tests."""
+    file_id = "test_file_sections"
+    docs = [
+        Doc(
+            file_id=file_id,
+            chunk="Общие принципы лечения заболевания.",
+            metadata={"page": 0, "section": "3 Лечение"},
+            embedding=_rand_vec(),
+        ),
+        Doc(
+            file_id=file_id,
+            chunk="Мази и кремы применяются местно.",
+            metadata={"page": 1, "section": "3.1.2 Наружная терапия"},
+            embedding=_rand_vec(),
+        ),
+        Doc(
+            file_id=file_id,
+            chunk="Прочие рекомендации по ведению пациента.",
+            metadata={"page": 2, "section": "3.10 Иное"},
+            embedding=_rand_vec(),
+        ),
+        Doc(
+            file_id=file_id,
+            chunk="Диагностические критерии и обследования.",
+            metadata={"page": 3, "section": "2.2 Диагностика prm"},
+            embedding=_rand_vec(),
+        ),
+    ]
+
+    async with GuidelinesStorage() as guidelines_storage:
+        await guidelines_storage.upsert_many(
+            [Guideline(file_id=file_id, name=f"Test guideline {file_id}")]
+        )
+
+    async with DocsStorage() as storage:
+        ids = await storage.insert_many(docs)
+
+    yield file_id, ids
+
+    # Teardown: delete docs first (FK references guidelines), then the guideline row.
+    async with DocsStorage() as storage:
+        async with storage._pool.connection() as conn:
+            await conn.execute(
+                "DELETE FROM docs WHERE id = ANY(%(ids)s::uuid[])",
+                {"ids": ids},
+            )
+
+    async with GuidelinesStorage() as guidelines_storage:
+        async with guidelines_storage._pool.connection() as conn:
+            await conn.execute(
+                "DELETE FROM guidelines WHERE file_id = %(file_id)s",
+                {"file_id": file_id},
+            )
+
+    await close_pool()
+
+
+@pytest.mark.asyncio
+async def test_section_filter_pulls_numbered_subtree(seeded_section_docs):
+    """search via _vector_search_filtered('лечен') returns the whole '3 Лечение' subtree,
+    including differently-named children, but not sibling chapters."""
+    from RAG.retrieval.vector_store import _vector_search_filtered
+
+    file_id, ids = seeded_section_docs
+
+    results = await _vector_search_filtered(_rand_vec(), file_id, 50, "лечен")
+    sections = {r["metadata"].get("section") for r in results}
+
+    assert "3 Лечение" in sections
+    assert "3.1.2 Наружная терапия" in sections   # child, title lacks 'лечен' — the fix
+    assert "3.10 Иное" in sections                # 3.10 belongs to chapter 3
+    assert "2.2 Диагностика prm" not in sections  # different chapter, not pulled
+
+
 @pytest.mark.asyncio
 async def test_hybrid_search(seeded_docs):
     """hybrid_search returns results with rrf_score and correct field set."""
