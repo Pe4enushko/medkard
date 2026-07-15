@@ -10,28 +10,21 @@ onto FormalStructureResult / DiagnosisResult / IcdCodingIssue.
 
 from __future__ import annotations
 
-import csv
-from pathlib import Path
-
+from storage.models.guideline import Guideline
 from storage.models.result import DiagnosisResult, FormalFinding, FormalStructureResult, IcdCodingIssue, IssueSource
 
-_MANIFEST_PATH = Path(__file__).resolve().parent.parent.parent / "resources" / "manifest.csv"
 
-
-def load_manifest_meta() -> dict[str, dict]:
-    """Return {ID: {name, date, age_group}} from manifest.csv."""
-    if not _MANIFEST_PATH.exists():
-        return {}
-    with open(_MANIFEST_PATH, newline="", encoding="utf-8") as fh:
-        return {
-            row["ID"]: {
-                "name": row.get("Наименование", ""),
-                "date": row.get("Дата размещения", ""),
-                "age_group": row.get("Возрастная категория", ""),
-            }
-            for row in csv.DictReader(fh)
-            if row.get("ID")
+def build_manifest_meta(guidelines: list["Guideline"]) -> dict[str, dict]:
+    """Return {file_id: {name, date, age_group}} from Guideline objects."""
+    return {
+        g.file_id: {
+            "name": g.name or "",
+            "date": g.published_at or "",
+            "age_group": ", ".join(g.age_category),
         }
+        for g in guidelines
+        if g.file_id
+    }
 
 
 def parse_formal(data: list[dict]) -> FormalStructureResult:

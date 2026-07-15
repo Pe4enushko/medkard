@@ -6,11 +6,12 @@ Usage::
     from LLM.icd_prefix_picker import IcdPrefixPicker
 
     picker = IcdPrefixPicker()
-    file_id = await picker.pick(patient, diagnosis, candidates)
+    file_id, tokens = await picker.pick(patient, diagnosis, candidates)
 """
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import json
 import logging
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 from LLM.client import LLMClient
+from storage.models.guideline import Guideline
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "icd_prefix_picker.txt"
 
@@ -34,23 +36,23 @@ class IcdPrefixPicker:
         self,
         patient: dict[str, Any],
         diagnosis: dict[str, Any],
-        candidates: list[dict[str, str]],
-    ) -> str | None:
-        """Return the most relevant guideline ID among prefix-matched *candidates*.
+        candidates: list[Guideline],
+    ) -> tuple[str | None, int]:
+        """Return the most relevant guideline file_id among prefix-matched *candidates*.
 
         Args:
             patient:    Patient info dict.
             diagnosis:  Diagnosis dict with at least ``КодМКБ`` key.
-            candidates: Manifest rows matched by the ICD prefix (e.g. ``J20``).
+            candidates: Guideline objects matched by the ICD prefix (e.g. ``J20``).
 
         Returns:
-            The chosen ``ID`` string, or ``None`` if the response is unusable.
+            (chosen file_id or None, tokens spent).
         """
+        candidate_json = json.dumps([asdict(c) for c in candidates], ensure_ascii=False, indent=2)
         user = (
             f"## Пациент\n{json.dumps(patient, ensure_ascii=False, indent=2)}\n\n"
             f"## Диагноз\n{json.dumps(diagnosis, ensure_ascii=False, indent=2)}\n\n"
-            f"## Кандидаты (клинические рекомендации)\n"
-            f"{json.dumps(candidates, ensure_ascii=False, indent=2)}"
+            f"## Кандидаты (клинические рекомендации)\n{candidate_json}"
         )
 
         raw, tokens = await self._client.call(
@@ -65,5 +67,5 @@ class IcdPrefixPicker:
         chosen = raw.strip().strip('"').strip("'")
         if chosen.lower() == "none":
             return None, tokens
-        valid_ids = {row.get("ID", "") for row in candidates}
+        valid_ids = {c.file_id for c in candidates}
         return (chosen if chosen in valid_ids else None), tokens

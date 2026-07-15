@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from LLM.client import LLMClient
 from LLM.tools import get_icd_checker_tools
+from storage.models.guideline import Guideline
 from storage.models.result import IcdCodingIssue, IssueSource
 
 logger = logging.getLogger(__name__)
@@ -50,15 +51,15 @@ _PROMPT_PATH = Path(__file__).parent.parent.parent / "LLM" / "prompts" / "icd_ch
 _SYSTEM_PROMPT: str = _PROMPT_PATH.read_text(encoding="utf-8")
 
 
-def _render_manifest_table(rows: list[dict[str, str]]) -> str:
-    """Render age-filtered manifest rows as a plain text table for the agent."""
+def _render_manifest_table(rows: list["Guideline"]) -> str:
+    """Render age-filtered guideline rows as a plain text table for the agent."""
     header = "ID | Наименование | МКБ-10 | Возрастная категория"
     sep = "-" * len(header)
     lines = [header, sep]
-    for row in rows:
+    for g in rows:
         lines.append(
-            f"{row.get('ID', '')} | {row.get('Наименование', '')} | "
-            f"{row.get('МКБ-10', '')} | {row.get('Возрастная категория', '')}"
+            f"{g.file_id} | {g.name or ''} | "
+            f"{', '.join(g.mkb)} | {', '.join(g.age_category)}"
         )
     return "\n".join(lines)
 
@@ -95,7 +96,7 @@ def _format_inspection(inspection_data: list[dict[str, Any]]) -> str:
 async def check_icd_codes(
     patient: dict[str, Any],
     diagnoses: list[dict[str, Any]],
-    manifest_rows: list[dict[str, str]],
+    manifest_rows: list[Guideline],
     inspection_data: list[dict[str, Any]] | None = None,
 ) -> tuple[list[IcdCodingIssue], int]:
     """Check ICD-10 coding correctness for all diagnoses of a single visit.
@@ -106,7 +107,7 @@ async def check_icd_codes(
     Args:
         patient:         Patient info dict.
         diagnoses:       Full list of diagnosis dicts from visit["Диагнозы"].
-        manifest_rows:   Age-filtered rows from manifest.csv.
+        manifest_rows:   Age-filtered Guideline rows from GuidelinesStorage.
         inspection_data: Optional inspection data from visit["ДанныеОсмотра"].
 
     Returns:

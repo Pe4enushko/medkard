@@ -23,11 +23,12 @@ from pathlib import Path
 from typing import Any
 
 from parsers.excel import AuditExcelWriter
-from reporting.result_parser import load_manifest_meta as _load_manifest_meta
+from reporting.result_parser import build_manifest_meta as _build_manifest_meta
 from reporting.result_parser import parse_diagnosis as _parse_diagnosis
 from reporting.result_parser import parse_formal as _parse_formal
 from reporting.result_parser import parse_icd_check as _parse_icd_check
 from storage.base import BaseStorage
+from storage.guidelines_storage import GuidelinesStorage
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ class ExcelFormatter:
     async def export_all(self) -> int:
         """Write every done_cards row to Excel. Returns number of rows written."""
         rows = await self._reader.fetch_all()
-        return self._write_rows(rows)
+        return self._write_rows(rows, await self._load_meta())
 
     async def export_period(
         self, date_from: datetime, date_to: datetime, organization_id: str
@@ -160,16 +161,19 @@ class ExcelFormatter:
         organization so cards from different orgs can never land in the same file.
         """
         rows = await self._reader.fetch_by_period(date_from, date_to, organization_id)
-        return self._write_rows(rows)
+        return self._write_rows(rows, await self._load_meta())
 
     async def export_guids(self, guids: set[str]) -> int:
         """Write only the rows matching *guids*. Returns number of rows written."""
         rows = await self._reader.fetch_by_guids(guids)
-        return self._write_rows(rows)
+        return self._write_rows(rows, await self._load_meta())
 
-    def _write_rows(self, rows: list[dict[str, Any]]) -> int:
+    async def _load_meta(self) -> dict:
+        async with GuidelinesStorage() as store:
+            return _build_manifest_meta(await store.all())
+
+    def _write_rows(self, rows: list[dict[str, Any]], manifest_meta: dict) -> int:
         existing = _existing_guids_in_excel(self._excel)
-        manifest_meta = _load_manifest_meta()
         written = 0
         for row in rows:
             guid = (row["card_guid"] or "").lower()

@@ -25,7 +25,9 @@ from RAG.retrieval.vector_store import (
     search_fact,
 )
 from storage import DocsStorage
+from storage.guidelines_storage import GuidelinesStorage
 from storage.models import Doc
+from storage.models.guideline import Guideline
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,15 +40,18 @@ def _rand_vec() -> list[float]:
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+_TEST_FILE_IDS = ["test_file_1", "test_file_2", "test_file_3"]
+
+
 @pytest_asyncio.fixture
 async def seeded_docs():
-    """Insert 3 test Doc rows; yield their IDs; delete them on teardown."""
+    """Insert 3 test guideline rows + 3 test Doc rows (FK-linked); delete both on teardown."""
     # mock data
     docs = [
         Doc(
             file_id="test_file_1",
             chunk="Пациент жалуется на боли в грудной клетке и одышку.",
-            metadata={"ID": "test_file_1", "page": 0, "section": "Жалобы"},
+            metadata={"page": 0, "section": "Жалобы"},
             fact_q="Какие жалобы предъявляет пациент?",
             fact_q_embedding=_rand_vec(),
             procedure_q="Как проводилась диагностика?",
@@ -57,7 +62,7 @@ async def seeded_docs():
         Doc(
             file_id="test_file_2",
             chunk="Артериальное давление 140/90, пульс 88 уд/мин.",
-            metadata={"ID": "test_file_2", "page": 1, "section": "Осмотр"},
+            metadata={"page": 1, "section": "Осмотр"},
             fact_q="Каковы показатели давления пациента?",
             fact_q_embedding=_rand_vec(),
             procedure_q="Как измерялось давление?",
@@ -68,7 +73,7 @@ async def seeded_docs():
         Doc(
             file_id="test_file_3",
             chunk="Назначен эналаприл 10 мг утром, контроль через 2 недели.",
-            metadata={"ID": "test_file_3", "page": 2, "section": "Назначения"},
+            metadata={"page": 2, "section": "Назначения"},
             fact_q="Какой препарат назначен?",
             fact_q_embedding=_rand_vec(),
             procedure_q="Как принимать назначенный препарат?",
@@ -78,17 +83,29 @@ async def seeded_docs():
         ),
     ]
 
+    async with GuidelinesStorage() as guidelines_storage:
+        await guidelines_storage.upsert_many(
+            [Guideline(file_id=fid, name=f"Test guideline {fid}") for fid in _TEST_FILE_IDS]
+        )
+
     async with DocsStorage() as storage:
         ids = await storage.insert_many(docs)
 
     yield ids
 
-    # Teardown: delete the seeded rows
+    # Teardown: delete docs first (FK references guidelines), then the guideline rows.
     async with DocsStorage() as storage:
         async with storage._pool.connection() as conn:
             await conn.execute(
                 "DELETE FROM docs WHERE id = ANY(%(ids)s::uuid[])",
                 {"ids": ids},
+            )
+
+    async with GuidelinesStorage() as guidelines_storage:
+        async with guidelines_storage._pool.connection() as conn:
+            await conn.execute(
+                "DELETE FROM guidelines WHERE file_id = ANY(%(file_ids)s)",
+                {"file_ids": _TEST_FILE_IDS},
             )
 
     await close_pool()
