@@ -61,3 +61,15 @@ async def pull(
         media_type=_XLSX_MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/export")
+async def export(
+    since: str | None = Query(default=None),
+    limit: int = Query(default=0, ge=0),
+    cursor: int = Query(default=0, ge=0),
+    org_access: tuple[str, str] = Depends(require_org_access),
+) -> list[dict]:
+    org_id, _ = org_access
+    async with ApiFormatter() as formatter:
+        return await formatter.export(org_id, since, limit, cursor)

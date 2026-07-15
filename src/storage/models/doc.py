@@ -3,7 +3,7 @@ import json, re
 
 @dataclass
 class Doc:
-    """A single ingested PDF chunk with its hypothetical queries and embeddings."""
+    """A single ingested PDF chunk with its contextual embedding."""
 
     chunk: str
     file_id: str = ""                    # manifest ID (PDF filename stem)
@@ -17,15 +17,9 @@ class Doc:
     # Assigned by the database on insert; None before insertion.
     id: str | None = None
 
-    # Hypothetical queries (reverse HyDE)
-    fact_q: str | None = None
-    procedure_q: str | None = None
-    constraint_q: str | None = None
-
-    # Embedding vectors — populated for writes, not fetched on reads.
-    fact_q_embedding: list[float] | None = None
-    procedure_q_embedding: list[float] | None = None
-    constraint_q_embedding: list[float] | None = None
+    # Embedding of the chunk's contextual text (section + body).
+    # Populated for writes, not fetched on reads.
+    embedding: list[float] | None = None
 
     def _format_chunk(self) -> str:
         """Return a human-readable string combining metadata and chunk content.

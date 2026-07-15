@@ -5,14 +5,13 @@ ingest-pdfs.py — ingest PDF chunks from manifest.csv into the docs table.
 Run from the project root::
     python scripts/ingest-pdfs.py
 
-For each chunk: generates hypothetical queries via the LLM, embeds them,
+For each chunk: embeds its contextual text (section + body),
 then stores everything in the docs table.
 Already-ingested files (by file_id) are skipped automatically.
 Progress and errors are written to both stdout and a timestamped log file.
 """
 
 import asyncio
-import json
 import logging
 import signal
 import sys
@@ -22,11 +21,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from LLM.embed_queries import embed_queries
-from LLM.query_generator import generate_queries
 from RAG.ingestion.data_loader import load_documents
+from RAG.ingestion.pipeline import chunk_text, process_batch
 from storage import DocsStorage
-from storage.models import Doc
 
 # ── Configurable ──────────────────────────────────────────────────────────────
 # Number of chunks processed concurrently (query generation + embedding per batch).
@@ -48,48 +45,6 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _chunk_text(chunk: dict) -> str:
-    content = chunk["content"]
-    if isinstance(content, list):
-        return json.dumps(content, ensure_ascii=False)
-    return content
-
-
-async def _process_chunk(chunk: dict, file_id: str) -> Doc | None:
-    """Generate queries + embeddings for one chunk; return a ready-to-insert Doc."""
-    chunk_text = _chunk_text(chunk)
-    try:
-        _, queries = await generate_queries(chunk)
-        embeddings = await embed_queries(queries)
-    except Exception as exc:
-        log.error(
-            "Query/embedding generation failed for %s page %s: %s",
-            file_id,
-            chunk["metadata"].get("page"),
-            exc,
-        )
-        return None
-
-    return Doc(
-        file_id=file_id,
-        chunk=chunk_text,
-        metadata=chunk["metadata"],
-        fact_q=queries.fact_query,
-        procedure_q=queries.procedural_query,
-        constraint_q=queries.constraint_query,
-        fact_q_embedding=embeddings.fact_embedding,
-        procedure_q_embedding=embeddings.procedural_embedding,
-        constraint_q_embedding=embeddings.constraint_embedding,
-    )
-
-
-async def _process_batch(chunks: list[dict], file_id: str) -> list[Doc | None]:
-    """Process a batch of chunks concurrently."""
-    return list(await asyncio.gather(*[_process_chunk(c, file_id) for c in chunks]))
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -124,7 +79,7 @@ async def main() -> None:
                 log.info("  %s: %d chunk(s) to process", current_file_id, len(all_chunks))
                 for ci, chunk in enumerate(all_chunks):
                     meta = chunk["metadata"]
-                    content_preview = _chunk_text(chunk)[:120].replace("\n", " ")
+                    content_preview = chunk_text(chunk)[:120].replace("\n", " ")
                     log.debug(
                         "  [%s] chunk %d/%d — type=%s page=%s section=%r content=%r",
                         current_file_id,
@@ -138,7 +93,7 @@ async def main() -> None:
 
                 for batch_start in range(0, len(all_chunks), QUERY_GENERATION_BATCH_SIZE):
                     batch = all_chunks[batch_start: batch_start + QUERY_GENERATION_BATCH_SIZE]
-                    docs = await _process_batch(batch, current_file_id)
+                    docs = await process_batch(batch, current_file_id)
 
                     for chunk, doc in zip(batch, docs):
                         if doc is None:

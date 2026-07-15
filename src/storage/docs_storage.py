@@ -19,13 +19,27 @@ def _row_to_doc(row: dict) -> Doc:
         file_id=row["file_id"],
         chunk=row["chunk"],
         metadata=row["metadata"],
-        fact_q=row.get("fact_q"),
-        procedure_q=row.get("procedure_q"),
-        constraint_q=row.get("constraint_q"),
+        embedding=row.get("embedding"),
         name=row.get("g_name"),
         mkb=list(row.get("g_mkb") or []),
         age_category=list(row.get("g_age_category") or []),
     )
+
+
+_INSERT_DOC_SQL = """
+    INSERT INTO docs (file_id, chunk, metadata, embedding)
+    VALUES (%(file_id)s, %(chunk)s, %(metadata)s, %(embedding)s)
+    RETURNING id::text
+"""
+
+
+def _doc_params(doc: Doc) -> dict:
+    return {
+        "file_id": doc.file_id,
+        "chunk": doc.chunk,
+        "metadata": json.dumps(doc.metadata),
+        "embedding": doc.embedding,
+    }
 
 
 # ── Storage class ─────────────────────────────────────────────────────────────
@@ -63,67 +77,32 @@ class DocsStorage(BaseStorage):
     async def insert(self, doc: Doc) -> str:
         """Insert a single Doc and return its UUID. Also sets doc.id."""
         async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                """
-                INSERT INTO docs (
-                    file_id, chunk, metadata,
-                    fact_q, procedure_q, constraint_q,
-                    fact_q_embedding, procedure_q_embedding, constraint_q_embedding
-                ) VALUES (
-                    %(file_id)s, %(chunk)s, %(metadata)s,
-                    %(fact_q)s, %(procedure_q)s, %(constraint_q)s,
-                    %(fact_q_embedding)s, %(procedure_q_embedding)s, %(constraint_q_embedding)s
-                )
-                RETURNING id::text
-                """,
-                {
-                    "file_id": doc.file_id,
-                    "chunk": doc.chunk,
-                    "metadata": json.dumps(doc.metadata),
-                    "fact_q": doc.fact_q,
-                    "procedure_q": doc.procedure_q,
-                    "constraint_q": doc.constraint_q,
-                    "fact_q_embedding": doc.fact_q_embedding,
-                    "procedure_q_embedding": doc.procedure_q_embedding,
-                    "constraint_q_embedding": doc.constraint_q_embedding,
-                },
-            )
+            cur = await conn.execute(_INSERT_DOC_SQL, _doc_params(doc))
             row = await cur.fetchone()
         doc.id = row["id"]
         return row["id"]
 
     async def insert_many(self, docs: list[Doc]) -> list[str]:
-        """Bulk-insert multiple Docs; returns list of UUIDs in insertion order.
-        Also sets each Doc's id field.
-        """
+        """Bulk-insert multiple Docs in one transaction; returns UUIDs, sets each doc.id."""
         ids: list[str] = []
         async with self._pool.connection() as conn:
             for doc in docs:
-                cur = await conn.execute(
-                    """
-                    INSERT INTO docs (
-                        file_id, chunk, metadata,
-                        fact_q, procedure_q, constraint_q,
-                        fact_q_embedding, procedure_q_embedding, constraint_q_embedding
-                    ) VALUES (
-                        %(file_id)s, %(chunk)s, %(metadata)s,
-                        %(fact_q)s, %(procedure_q)s, %(constraint_q)s,
-                        %(fact_q_embedding)s, %(procedure_q_embedding)s, %(constraint_q_embedding)s
-                    )
-                    RETURNING id::text
-                    """,
-                    {
-                        "file_id": doc.file_id,
-                        "chunk": doc.chunk,
-                        "metadata": json.dumps(doc.metadata),
-                        "fact_q": doc.fact_q,
-                        "procedure_q": doc.procedure_q,
-                        "constraint_q": doc.constraint_q,
-                        "fact_q_embedding": doc.fact_q_embedding,
-                        "procedure_q_embedding": doc.procedure_q_embedding,
-                        "constraint_q_embedding": doc.constraint_q_embedding,
-                    },
-                )
+                cur = await conn.execute(_INSERT_DOC_SQL, _doc_params(doc))
+                result = await cur.fetchone()
+                doc.id = result["id"]
+                ids.append(result["id"])
+        return ids
+
+    async def replace_by_file_id(self, file_id: str, docs: list[Doc]) -> list[str]:
+        """Atomically delete all rows for file_id and bulk-insert `docs` (one transaction).
+
+        Returns new UUIDs and sets each doc.id. `docs` may be empty (pure delete).
+        """
+        ids: list[str] = []
+        async with self._pool.connection() as conn:
+            await conn.execute("DELETE FROM docs WHERE file_id = %(file_id)s", {"file_id": file_id})
+            for doc in docs:
+                cur = await conn.execute(_INSERT_DOC_SQL, _doc_params(doc))
                 result = await cur.fetchone()
                 doc.id = result["id"]
                 ids.append(result["id"])
@@ -138,7 +117,6 @@ class DocsStorage(BaseStorage):
                 """
                 SELECT
                     docs.id::text AS id, docs.file_id, docs.chunk, docs.metadata,
-                    docs.fact_q, docs.procedure_q, docs.constraint_q,
                     g.name AS g_name, g.mkb AS g_mkb, g.age_category AS g_age_category
                 FROM docs
                 LEFT JOIN guidelines g ON g.file_id = docs.file_id
@@ -156,7 +134,6 @@ class DocsStorage(BaseStorage):
                 """
                 SELECT
                     docs.id::text AS id, docs.file_id, docs.chunk, docs.metadata,
-                    docs.fact_q, docs.procedure_q, docs.constraint_q,
                     g.name AS g_name, g.mkb AS g_mkb, g.age_category AS g_age_category
                 FROM docs
                 LEFT JOIN guidelines g ON g.file_id = docs.file_id

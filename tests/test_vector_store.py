@@ -20,9 +20,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from RAG.retrieval.vector_store import (
     EMBEDDING_DIM,
+    _vector_search,
     close_pool,
     hybrid_search,
-    search_fact,
 )
 from storage import DocsStorage
 from storage.guidelines_storage import GuidelinesStorage
@@ -52,34 +52,19 @@ async def seeded_docs():
             file_id="test_file_1",
             chunk="Пациент жалуется на боли в грудной клетке и одышку.",
             metadata={"page": 0, "section": "Жалобы"},
-            fact_q="Какие жалобы предъявляет пациент?",
-            fact_q_embedding=_rand_vec(),
-            procedure_q="Как проводилась диагностика?",
-            procedure_q_embedding=_rand_vec(),
-            constraint_q="Какие противопоказания указаны?",
-            constraint_q_embedding=_rand_vec(),
+            embedding=_rand_vec(),
         ),
         Doc(
             file_id="test_file_2",
             chunk="Артериальное давление 140/90, пульс 88 уд/мин.",
             metadata={"page": 1, "section": "Осмотр"},
-            fact_q="Каковы показатели давления пациента?",
-            fact_q_embedding=_rand_vec(),
-            procedure_q="Как измерялось давление?",
-            procedure_q_embedding=_rand_vec(),
-            constraint_q="Есть ли противопоказания к препарату?",
-            constraint_q_embedding=_rand_vec(),
+            embedding=_rand_vec(),
         ),
         Doc(
             file_id="test_file_3",
             chunk="Назначен эналаприл 10 мг утром, контроль через 2 недели.",
             metadata={"page": 2, "section": "Назначения"},
-            fact_q="Какой препарат назначен?",
-            fact_q_embedding=_rand_vec(),
-            procedure_q="Как принимать назначенный препарат?",
-            procedure_q_embedding=_rand_vec(),
-            constraint_q="Каковы противопоказания к эналаприлу?",
-            constraint_q_embedding=_rand_vec(),
+            embedding=_rand_vec(),
         ),
     ]
 
@@ -131,7 +116,7 @@ async def test_db_connection_and_tables(seeded_docs):
 
 @pytest.mark.asyncio
 async def test_vector_search(seeded_docs):
-    """search_fact returns results ordered by cosine similarity with expected fields."""
+    """_vector_search returns results ordered by cosine similarity with expected fields."""
     # Use the embedding of the first seeded doc as the query vector — it should
     # rank highest (distance ≈ 0) among the three seeded rows.
     ids = seeded_docs
@@ -139,11 +124,9 @@ async def test_vector_search(seeded_docs):
     async with DocsStorage() as storage:
         doc = await storage.get(ids[0])
 
-    query_vec = doc.fact_q_embedding  # not stored on read; use a random vec instead
-    # Since embeddings aren't returned by get(), use a fresh random query vector.
     query_vec = _rand_vec()
 
-    results = await search_fact(query_vec, top_k=3)
+    results = await _vector_search(query_vec, 3)
 
     # Results may include rows from previous test runs; just validate shape.
     assert isinstance(results, list)
@@ -165,7 +148,6 @@ async def test_hybrid_search(seeded_docs):
     results = await hybrid_search(
         query_text=query_text,
         embedding=query_vec,
-        query_type="fact",
         top_k=3,
     )
 

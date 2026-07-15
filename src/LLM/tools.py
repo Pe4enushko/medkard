@@ -69,9 +69,6 @@ def _format_results(results: list[dict]) -> str:
             file_id=raw.get("file_id", ""),
             metadata=meta,
             id=raw.get("id"),
-            fact_q=raw.get("fact_q"),
-            procedure_q=raw.get("procedure_q"),
-            constraint_q=raw.get("constraint_q"),
         )
         parts.append(f"--- Источник {i} ---\n{doc._format_chunk()}")
 
@@ -317,9 +314,6 @@ class ReadGuidelineSectionTool(BaseTool):
                 file_id=raw.get("file_id", file_id),
                 metadata=meta,
                 id=raw.get("id"),
-                fact_q=raw.get("fact_q"),
-                procedure_q=raw.get("procedure_q"),
-                constraint_q=raw.get("constraint_q"),
             )
             parts.append(doc._format_chunk())
         return "\n\n".join(parts)

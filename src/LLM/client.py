@@ -2,7 +2,7 @@
 client.py — unified LLM client with retry logic.
 
 Provides LLMClient with two methods:
-- call(): raw chat completion, optional Pydantic response_model for guided_json
+- call(): raw chat completion, optional Pydantic response_model for json_schema
 - call_agent(): LangChain ReAct agent invocation
 
 Both methods retry up to max_retries times, bumping temperature and injecting
@@ -43,21 +43,40 @@ class LLMClient:
         *,
         temperature: float,
         response_model: type[BaseModel] | None = None,
+        reasoning_effort: str | None = None,
     ) -> tuple[str, int]:
-        """Chat completion with optional guided_json and retry.
+        """Chat completion with optional json_schema structured output and retry.
 
         Args:
             messages:       OpenAI messages list (mutated in-place on retry).
             temperature:    Initial sampling temperature.
-            response_model: Pydantic model whose JSON schema is used for
-                            guided_json. Pass None for free-form text output.
+            response_model: Pydantic model whose JSON schema constrains decoding
+                            via response_format (OpenAI-standard json_schema —
+                            vLLM enforces it). Pass None for free-form text.
 
         Returns:
             (content_str, total_tokens)
         """
-        extra_body: dict[str, Any] | None = None
+        # Use the OpenAI-standard response_format=json_schema, NOT the legacy
+        # extra_body={"guided_json": ...}: this vLLM build silently ignores the
+        # latter ("fields ignored: {'guided_json'}"), so the schema was never
+        # enforced and the model free-formed prose / hit the length cap.
+        response_format: dict[str, Any] | None = None
         if response_model is not None:
-            extra_body = {"guided_json": response_model.model_json_schema()}
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": response_model.__name__,
+                    "schema": response_model.model_json_schema(),
+                },
+            }
+
+        # gpt-oss reasons at 'medium' by default; for mechanical tasks the
+        # reasoning tokens eat the context budget and truncate the answer.
+        # 'low' is the floor (reasoning can't be fully disabled on gpt-oss).
+        extra_body: dict[str, Any] | None = None
+        if reasoning_effort is not None:
+            extra_body = {"reasoning_effort": reasoning_effort}
 
         total_tokens = 0
         temp = temperature
@@ -70,7 +89,9 @@ class LLMClient:
                     messages=messages,
                     temperature=temp,
                 )
-                if extra_body:
+                if response_format is not None:
+                    kwargs["response_format"] = response_format
+                if extra_body is not None:
                     kwargs["extra_body"] = extra_body
 
                 resp = await get_openai_client().chat.completions.create(**kwargs)
@@ -102,6 +123,12 @@ class LLMClient:
 
         if last_exc is not None:
             raise last_exc
+        # Exhausted retries with a non-'stop' finish (usually 'length' → truncated/empty).
+        # Surface it: the caller's JSON parse is about to fail and this is the real cause.
+        logger.error(
+            "[llm_client] exhausted %d attempt(s), finish_reason=%r — returning %d-char content: %r",
+            self._max_retries + 1, finish_reason, len(content), content[:200],
+        )
         return content, total_tokens  # last attempt's content even on bad finish_reason
 
     async def call_agent(

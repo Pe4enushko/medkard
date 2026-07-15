@@ -151,8 +151,7 @@ async def search_by_file_id(
         query:   Natural-language search query.
 
     Returns:
-        List of result dicts with keys: id, chunk, metadata, fact_q,
-        procedure_q, constraint_q, rrf_score.
+        List of result dicts with keys: id, chunk, metadata, rrf_score.
     """
     return await _hybrid_filtered(query, file_id)
 
@@ -229,7 +228,7 @@ async def get_section_chunks(file_id: str, section: str) -> list[dict]:
     pool = await _get_pool()
     rows = await pool.fetch(
         """
-        SELECT id::text, chunk, metadata, fact_q, procedure_q, constraint_q
+        SELECT id::text, chunk, metadata
         FROM docs
         WHERE file_id = $1
           AND metadata->>'section' = $2
