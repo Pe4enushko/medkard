@@ -16,6 +16,7 @@ Hybrid search result shape:
 import json
 import logging
 import os
+import re
 from urllib.parse import quote_plus
 
 import asyncpg
@@ -115,6 +116,39 @@ async def _vector_search(embedding: list[float], limit: int) -> list[dict]:
         limit,
     )
     return [dict(r) for r in rows]
+
+
+_SECTION_NUM_RE = re.compile(r"^\d+(?:\.\d+)*")
+
+
+def _extract_section_number(section: str | None) -> str | None:
+    """Leading dotted number of a section title, or None.
+
+    '3.1.2 Наружная терапия' -> '3.1.2'; '3 Лечение' -> '3'; 'Приложение А' -> None.
+    """
+    m = _SECTION_NUM_RE.match(section or "")
+    return m.group(0) if m else None
+
+
+def _section_like_patterns(anchor_sections: list[str]) -> list[str]:
+    """SQL-LIKE patterns covering each anchor section itself and its numbered descendants.
+
+    '3 Лечение'  -> ['3 %', '3.%']      '2.1 Жалобы' -> ['2.1 %', '2.1.%']
+
+    '<num> %' matches the section itself (number + space + title); '<num>.%' matches
+    numbered descendants. The dot is a LIKE literal, so '3.1 %'/'3.1.%' do NOT match
+    '3.10 …' (a '0', not a space/dot, follows '3.1'). Non-numbered anchors are skipped;
+    patterns are de-duplicated by number, order preserved.
+    """
+    patterns: list[str] = []
+    seen: set[str] = set()
+    for section in anchor_sections:
+        num = _extract_section_number(section)
+        if num and num not in seen:
+            seen.add(num)
+            patterns.append(f"{num} %")
+            patterns.append(f"{num}.%")
+    return patterns
 
 
 async def _vector_search_filtered(
