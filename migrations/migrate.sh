@@ -27,15 +27,43 @@ export PGPASSWORD="$POSTGRES_PASSWORD"
 
 echo "Running migrations against $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB ..."
 
-for sql_file in "$SCRIPT_DIR"/[0-9]*.sql; do
-    echo "  Applying $(basename "$sql_file") ..."
+run_psql() {
     psql \
         --host="$POSTGRES_HOST" \
         --port="$POSTGRES_PORT" \
         --dbname="$POSTGRES_DB" \
         --username="$POSTGRES_USER" \
-        --file="$sql_file" \
-        --set=ON_ERROR_STOP=1
+        --set=ON_ERROR_STOP=1 \
+        "$@"
+}
+
+# Ledger of applied migrations. Bootstrapped here because it cannot record itself.
+run_psql -c "CREATE TABLE IF NOT EXISTS schema_migrations (
+    filename   text PRIMARY KEY,
+    applied_at timestamptz NOT NULL DEFAULT now()
+);"
+
+is_applied() {  # $1 = basename
+    [[ "$(run_psql -tA -c "SELECT 1 FROM schema_migrations WHERE filename = '$1'")" == "1" ]]
+}
+
+record_only() {  # $1 = basename — mark applied without running the file
+    run_psql -c "INSERT INTO schema_migrations(filename) VALUES ('$1') ON CONFLICT (filename) DO NOTHING;"
+}
+
+apply_and_record() {  # $1 = path, $2 = basename — file + ledger row in ONE transaction
+    run_psql --single-transaction -f "$1" \
+        -c "INSERT INTO schema_migrations(filename) VALUES ('$2');"
+}
+
+for sql_file in "$SCRIPT_DIR"/[0-9]*.sql; do
+    name="$(basename "$sql_file")"
+    if is_applied "$name"; then
+        echo "  skip (already applied) $name"
+        continue
+    fi
+    echo "  Applying $name ..."
+    apply_and_record "$sql_file" "$name"
 done
 
 echo "All migrations applied."
