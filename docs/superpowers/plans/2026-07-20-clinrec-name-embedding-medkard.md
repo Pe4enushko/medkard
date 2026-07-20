@@ -12,12 +12,13 @@
 
 - Embedding dimension: **1024** (`VECTOR(1024)`), model Qwen3-Embedding-0.6B — copy verbatim.
 - HNSW params: **`m = 16, ef_construction = 64`, `vector_cosine_ops`** (match `024_docs_reconcile.sql`).
-- `name_embed_input` passage string is a **cross-project byte-for-byte contract** with engine (`integrations/clinrec/mapping.py`). Exact form (from spec):
+- `name_embed_input` passage string is a **cross-project byte-for-byte contract** with engine (`integrations/clinrec/mapping.py`). Exact form (labeled fields, from spec):
   ```
-  base = name.strip()
+  base = f"Название: {(name or '').strip()}"
   ages = [a.strip() for a in (age_category or []) if a and a.strip()]
-  return f"{base}\n[{', '.join(ages)}]" if ages else base
+  return f"{base}\nВозрастная группа: [{', '.join(ages)}]" if ages else base
   ```
+  Examples: `Название: Бронхит\nВозрастная группа: [Взрослые, Дети]`; no age → `Название: Бронхит`; empty name → `Название: `.
 - Embedding is **passage mode: bare `embed(text)`, no instruct prefix** (medkard has no query/passage modes; the engine query side adds the prefix).
 - Migrations are **forward-only, idempotent** (`ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`).
 - Next free migration number is **025** (last is `024_docs_reconcile.sql`).
@@ -117,28 +118,31 @@ from storage.models.guideline import name_embed_input
 
 
 def test_name_with_ages():
-    assert name_embed_input("Бронхит", ["Взрослые", "Дети"]) == "Бронхит\n[Взрослые, Дети]"
+    assert name_embed_input("Бронхит", ["Взрослые", "Дети"]) == \
+        "Название: Бронхит\nВозрастная группа: [Взрослые, Дети]"
 
 
 def test_name_without_ages():
-    assert name_embed_input("Бронхит", []) == "Бронхит"
+    assert name_embed_input("Бронхит", []) == "Название: Бронхит"
 
 
 def test_none_ages_treated_as_empty():
-    assert name_embed_input("Бронхит", None) == "Бронхит"
+    assert name_embed_input("Бронхит", None) == "Название: Бронхит"
 
 
 def test_strips_name_and_ages():
-    assert name_embed_input("  Бронхит  ", ["  Дети  "]) == "Бронхит\n[Дети]"
+    assert name_embed_input("  Бронхит  ", ["  Дети  "]) == \
+        "Название: Бронхит\nВозрастная группа: [Дети]"
 
 
 def test_drops_blank_age_entries():
-    assert name_embed_input("Бронхит", ["Дети", "", "  "]) == "Бронхит\n[Дети]"
+    assert name_embed_input("Бронхит", ["Дети", "", "  "]) == \
+        "Название: Бронхит\nВозрастная группа: [Дети]"
 
 
 def test_none_name_becomes_empty_base():
     # name is nullable in the DB; must not crash.
-    assert name_embed_input(None, []) == ""
+    assert name_embed_input(None, []) == "Название: "
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -152,15 +156,15 @@ In `src/storage/models/guideline.py`, add this module-level function (after `_sp
 
 ```python
 def name_embed_input(name: str | None, age_category: list[str] | None) -> str:
-    """Passage string embedded for the guideline registry: title + age category.
+    """Passage string embedded for the guideline registry: labeled title + age category.
 
     CROSS-PROJECT CONTRACT: engine (integrations/clinrec/mapping.py) rebuilds this
     byte-for-byte for its fallback re-embed. Do not change form without updating both.
     Passage mode — bare embed, no instruct prefix.
     """
-    base = (name or "").strip()
+    base = f"Название: {(name or '').strip()}"
     ages = [a.strip() for a in (age_category or []) if a and a.strip()]
-    return f"{base}\n[{', '.join(ages)}]" if ages else base
+    return f"{base}\nВозрастная группа: [{', '.join(ages)}]" if ages else base
 ```
 
 Then add the field to the `Guideline` dataclass (after `usage_status`):
@@ -360,7 +364,7 @@ async def test_upsert_computes_embedding_from_name_and_age(monkeypatch):
     n = await s.upsert_many([g])
 
     assert n == 1
-    assert seen_texts == [name_embed_input("Бронхит", ["Дети"])]  # == "Бронхит\n[Дети]"
+    assert seen_texts == [name_embed_input("Бронхит", ["Дети"])]  # "Название: Бронхит\nВозрастная группа: [Дети]"
     assert written[0]["name_embedding"] == [0.5] * 1024
 
 
