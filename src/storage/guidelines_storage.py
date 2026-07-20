@@ -84,6 +84,13 @@ class GuidelinesStorage(BaseStorage):
             rows = await cur.fetchall()
         return [_row_to_guideline(r) for r in rows]
 
+    async def delete(self, file_id: str) -> int:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "DELETE FROM guidelines WHERE file_id = %(file_id)s", {"file_id": file_id}
+            )
+        return cur.rowcount
+
     async def find_by_prefix(self, prefix: str) -> list[Guideline]:
         async with self._pool.connection() as conn:
             cur = await conn.execute(

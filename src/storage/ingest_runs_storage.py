@@ -41,6 +41,10 @@ class IngestRunsStorage(BaseStorage):
                 {"file_id": file_id, "h": content_hash},
             )
 
+    async def delete(self, file_id: str) -> None:
+        async with self._pool.connection() as conn:
+            await conn.execute("DELETE FROM ingest_runs WHERE file_id = %(file_id)s", {"file_id": file_id})
+
     async def mark_failed(self, file_id: str, error: str) -> None:
         async with self._pool.connection() as conn:
             await conn.execute(

@@ -6,10 +6,22 @@ docs/superpowers/specs/2026-07-09-reingest-with-resume-design.md (work-list).
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Literal
 
 from storage.models.guideline import Guideline
+
+# Mirrors RAG.ingestion.data_loader.base_id's pattern, duplicated here (rather than
+# imported) to keep this module free of data_loader's fitz/tabula dependency.
+_BASE_ID_PATTERN = re.compile(r'^\d+')
+
+
+def base_id(file_id: str) -> str | None:
+    """Stable numeric base of a manifest file_id (e.g. "1027" for "1027_1")."""
+    match = _BASE_ID_PATTERN.match(file_id)
+    return match.group() if match else None
+
 
 Decision = Literal["full", "metadata_only", "skip"]
 
@@ -69,3 +81,19 @@ def build_worklist(manifest_rows, runs, guidelines_by_id, hash_of):
         )
         out.append((file_id, decision))
     return out
+
+
+def stale_revision_ids(manifest_ids, known_ids) -> list[str]:
+    """file_ids in known_ids that share a base_id with a manifest file_id but
+    aren't themselves in the manifest — i.e. superseded revisions (e.g.
+    "318_2" lingering in the DB once the manifest has moved to "318_3").
+
+    manifest_ids: iterable of current manifest file_ids.
+    known_ids:    iterable of file_ids present in the DB (guidelines/docs/ingest_runs).
+    """
+    manifest_id_set = set(manifest_ids)
+    manifest_bases = {b for fid in manifest_id_set if (b := base_id(fid)) is not None}
+    return sorted(
+        fid for fid in known_ids
+        if fid not in manifest_id_set and base_id(fid) in manifest_bases
+    )

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from RAG.ingestion.reingest_planner import classify, sha256_file
+from RAG.ingestion.reingest_planner import base_id, classify, sha256_file, stale_revision_ids
 from storage.models.guideline import Guideline
 
 
@@ -92,3 +92,32 @@ def test_build_worklist_skips_missing_pdf():
     rows = {"A": {"ID": "A", "Наименование": "A"}}
     wl = build_worklist(rows, {}, {}, lambda fid: None)  # PDF missing on disk
     assert wl == []
+
+
+# --- base_id ---
+def test_base_id_strips_revision_suffix():
+    assert base_id("318_3") == "318"
+    assert base_id("1027_1") == "1027"
+
+
+def test_base_id_none_for_non_numeric():
+    assert base_id("A") is None
+    assert base_id("") is None
+
+
+# --- stale_revision_ids ---
+def test_stale_revision_ids_finds_superseded_revision():
+    # manifest moved from 318_2 to 318_3; 318_2 still known in the DB
+    assert stale_revision_ids(["318_3"], ["318_2", "318_3"]) == ["318_2"]
+
+
+def test_stale_revision_ids_ignores_unrelated_bases():
+    assert stale_revision_ids(["318_3"], ["999_1"]) == []
+
+
+def test_stale_revision_ids_ignores_non_numeric_ids():
+    assert stale_revision_ids(["A"], ["A_old"]) == []
+
+
+def test_stale_revision_ids_empty_when_no_stale_data():
+    assert stale_revision_ids(["318_3", "999_1"], ["318_3", "999_1"]) == []

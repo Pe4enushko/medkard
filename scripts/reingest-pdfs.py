@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from RAG.ingestion.data_loader import MANIFEST_PATH, PDFS_DIR, load_documents, resolve_pdf_path
 from RAG.ingestion.pipeline import process_batch
-from RAG.ingestion.reingest_planner import build_worklist, sha256_file
+from RAG.ingestion.reingest_planner import build_worklist, sha256_file, stale_revision_ids
 from storage import DocsStorage, IngestRunsStorage
 from storage.guidelines_storage import GuidelinesStorage
 from storage.models.guideline import Guideline
@@ -99,6 +99,19 @@ async def _full_reingest(file_id, row, pdfs_dir, manifest_path,
         log.error("FAILED %s after %.1fs: %s", file_id, time.perf_counter() - t0, exc)
 
 
+async def _purge_stale_revisions(manifest_rows, guidelines_by_id, docs_storage, guidelines_storage, runs_storage):
+    """Delete DB rows for superseded revisions of manifest guidelines (e.g. "318_2"
+    still in the DB once the manifest has moved on to "318_3"). docs is deleted
+    before guidelines (FK), ingest_runs independently."""
+    stale = stale_revision_ids(manifest_rows.keys(), guidelines_by_id.keys())
+    for file_id in stale:
+        deleted = await docs_storage.delete_by_file_id(file_id)
+        await guidelines_storage.delete(file_id)
+        await runs_storage.delete(file_id)
+        log.info("Purged stale revision %s (%d doc chunk(s) removed)", file_id, deleted)
+    return stale
+
+
 async def _metadata_only(file_id, row, guidelines_storage):
     await guidelines_storage.upsert_many([Guideline.from_manifest_row(row)])
     log.info("Metadata-only update for %s (PDF unchanged)", file_id)
@@ -142,6 +155,16 @@ async def main() -> None:
 
         runs = await runs_storage.get_all()
         guidelines_by_id = {g.file_id: g for g in await guidelines_storage.all()}
+
+        if args.dry_run:
+            stale = stale_revision_ids(manifest_rows.keys(), guidelines_by_id.keys())
+            if stale:
+                log.info("[dry-run] %d stale revision(s) would be purged: %s", len(stale), stale)
+        else:
+            stale = await _purge_stale_revisions(
+                manifest_rows, guidelines_by_id, docs_storage, guidelines_storage, runs_storage)
+            if stale:
+                guidelines_by_id = {fid: g for fid, g in guidelines_by_id.items() if fid not in stale}
 
         if args.file_id:
             worklist = [(args.file_id, "full")]

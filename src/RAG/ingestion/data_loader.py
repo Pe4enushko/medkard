@@ -284,6 +284,14 @@ class PDFContentReader:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def base_id(file_id: str) -> str | None:
+    """Return the stable numeric base of a manifest file_id (e.g. "1027" for
+    "1027_1"), or None if file_id doesn't start with digits. Two file_ids
+    sharing a base are different revisions of the same guideline."""
+    match = _BASE_ID_PATTERN.match(file_id)
+    return match.group() if match else None
+
+
 def resolve_pdf_path(file_id: str, pdfs_dir: Path = PDFS_DIR) -> Path | None:
     """Resolve a manifest file_id (e.g. "1027_1") to its PDF on disk.
 
@@ -295,9 +303,9 @@ def resolve_pdf_path(file_id: str, pdfs_dir: Path = PDFS_DIR) -> Path | None:
 
     Returns None if neither candidate exists.
     """
-    base_match = _BASE_ID_PATTERN.match(file_id)
-    if base_match:
-        primary = pdfs_dir / f"{PDF_PREFIX}{base_match.group()}{PDF_EXTENSION}"
+    base = base_id(file_id)
+    if base is not None:
+        primary = pdfs_dir / f"{PDF_PREFIX}{base}{PDF_EXTENSION}"
         if primary.exists():
             return primary
 
