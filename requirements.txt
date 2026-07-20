@@ -20,6 +20,8 @@ fastembed
 # PDF ingestion
 pymupdf
 tabula-py
+pytesseract
+Pillow
 langchain-text-splitters
 
 # Vector store (asyncpg path)
