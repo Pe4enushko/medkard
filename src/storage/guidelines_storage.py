@@ -1,7 +1,11 @@
 """GuidelinesStorage — async psycopg3 интерфейс к таблице guidelines."""
 from __future__ import annotations
 
-from .base import BaseStorage
+import psycopg.rows
+from pgvector.psycopg import register_vector_async
+from psycopg_pool import AsyncConnectionPool
+
+from .base import BaseStorage, _conninfo
 from .models.guideline import Guideline
 
 _COLS = "file_id, name, mkb, age_category, developer, nps_status, published_at, usage_status"
@@ -21,7 +25,25 @@ def _row_to_guideline(row: dict) -> Guideline:
 
 
 class GuidelinesStorage(BaseStorage):
-    """Async context-manager для таблицы guidelines (общий пул BaseStorage)."""
+    """Async context-manager для таблицы guidelines (собственный пул с pgvector кодеком)."""
+
+    async def __aenter__(self) -> "GuidelinesStorage":
+        self._pool = AsyncConnectionPool(
+            conninfo=_conninfo(),
+            min_size=1,
+            max_size=3,
+            open=False,
+            configure=self._configure_conn,
+            kwargs={"row_factory": psycopg.rows.dict_row},
+        )
+        await self._pool.open()
+        return self  # type: ignore[return-value]
+
+    async def __aexit__(self, *args: object) -> None:
+        await self._pool.close()
+
+    async def _configure_conn(self, conn: psycopg.AsyncConnection) -> None:
+        await register_vector_async(conn)
 
     async def upsert_many(self, rows: list[Guideline]) -> int:
         if not rows:
