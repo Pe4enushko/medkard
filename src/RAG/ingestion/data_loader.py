@@ -201,6 +201,11 @@ class PDFContentReader:
             for clip_rect in clips:
                 fragment = page.get_text("text", clip=clip_rect).strip()
                 if len(fragment) < _OCR_MIN_CHARS:
+                    # ocr_page() OCRs the whole page, not just clip_rect — safe today because
+                    # a scanned page has no vector tables, so _non_table_clips() always yields
+                    # exactly one (full-page) clip here. Revisit if a page can ever have both a
+                    # detected table AND a sparse-text clip (would OCR/duplicate the same page
+                    # once per clip).
                     try:
                         ocr_text = ocr.ocr_page(page)
                     except Exception as exc:
