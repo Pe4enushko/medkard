@@ -36,6 +36,8 @@ import fitz  # pymupdf
 import tabula
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from RAG.ingestion import ocr
+
 # ── Configurable ─────────────────────────────────────────────────────────────
 TABLE_ROW_CHUNK_SIZE: int = 8   # max rows per table chunk yielded to the pipeline
 TEXT_CHUNK_SIZE: int = 2000     # characters per text chunk
@@ -72,6 +74,7 @@ PDF_PREFIX: str = "КР"  # new-convention filename prefix, e.g. "КР1027.pdf"
 # Manifest IDs are "{base}_{revision}" (e.g. "1027_1"); the revision changes
 # across updates but the base is stable, so it's what filenames key on.
 _BASE_ID_PATTERN: re.Pattern = re.compile(r'^\d+')
+_OCR_MIN_CHARS: int = 50  # page fragments shorter than this trigger OCR fallback
 # ─────────────────────────────────────────────────────────────────────────────
 
 _text_splitter = RecursiveCharacterTextSplitter(
@@ -197,6 +200,17 @@ class PDFContentReader:
             clips = _non_table_clips(page.rect, bboxes)
             for clip_rect in clips:
                 fragment = page.get_text("text", clip=clip_rect).strip()
+                if len(fragment) < _OCR_MIN_CHARS:
+                    try:
+                        ocr_text = ocr.ocr_page(page)
+                    except Exception as exc:
+                        print(
+                            f"[data_loader] ocr error — {self.filepath.name} "
+                            f"page {page_idx + 1}: {exc}"
+                        )
+                        ocr_text = ""
+                    if ocr_text:
+                        fragment = ocr_text
                 if fragment:
                     full_parts.append(fragment)
 
@@ -341,6 +355,7 @@ def load_documents(
             for chunk in reader.iter_chunks():
                 ingest(chunk)
     """
+    ocr.ensure_tesseract_available()
     with open(manifest_path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             file_id = row["ID"]
