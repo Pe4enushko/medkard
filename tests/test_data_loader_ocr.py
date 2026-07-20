@@ -6,21 +6,20 @@ import fitz
 from RAG.ingestion.data_loader import PDFContentReader
 
 
-_CYRILLIC_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-
-
 def _make_scanned_pdf(tmp_path: Path, text: str) -> Path:
     """A single-page PDF with `text` rasterized into an image (no text layer) —
     mimics a scanned document: page.get_text() returns "" for it.
 
-    Uses a DejaVu Sans fontfile explicitly: pymupdf's base14 fonts (the
-    default for insert_text()) have no Cyrillic glyphs, which would
-    silently render Russian text as placeholder boxes/dots — invisible to
-    OCR and defeating the point of this fixture.
+    Uses PyMuPDF's built-in 'china-s' font (despite the CJK-sounding name,
+    it includes Cyrillic glyphs). PyMuPDF's base14 fonts have no Cyrillic
+    support and would silently render Russian text as placeholder boxes/dots,
+    invisible to OCR. The built-in font is portable — no external filesystem
+    path required.
     """
     doc = fitz.open()
     page = doc.new_page()
-    page.insert_text((72, 72), text, fontsize=24, fontname="DejaVuSans", fontfile=_CYRILLIC_FONT)
+    page.insert_font(fontname="china-s")
+    page.insert_text((72, 72), text, fontsize=24, fontname="china-s")
     pix = page.get_pixmap(dpi=150)
     img_doc = fitz.open()
     img_page = img_doc.new_page(width=page.rect.width, height=page.rect.height)
