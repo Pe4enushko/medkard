@@ -21,7 +21,8 @@ def _page_with_text(text: str) -> fitz.Page:
     """A single-page in-memory PDF with `text` drawn on it, for OCR round-trip testing."""
     doc = fitz.open()
     page = doc.new_page()
-    page.insert_text((72, 72), text, fontsize=24)
+    page.insert_font(fontname="china-s")
+    page.insert_text((72, 72), text, fontsize=24, fontname="china-s")
     return page
 
 
