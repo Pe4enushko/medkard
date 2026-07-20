@@ -21,6 +21,11 @@ Copy `.env.example` to `.env` and fill in:
 - `EMBEDDING_MODEL` + `EMBEDDING_DIM` — must match the chosen provider's output dimension
 - `ALENKA_ONE_C_*` / `MDS_ONE_C_*` — 1C integration credentials
 
+### System dependencies (not pip-installable)
+
+- **Java** (`java` on `PATH`) — required by `tabula-py` for table extraction from PDFs during ingestion (`scripts/ingest-pdfs.py`, `scripts/reingest-pdfs.py`). Debian/Ubuntu: `apt-get install -y default-jre-headless`. Missing Java doesn't crash ingestion — table chunks for affected pages are silently skipped and logged (`[data_loader] tabula error — ...`).
+- **Tesseract OCR** (`tesseract` on `PATH`, with Russian language data) — required for the OCR fallback on scanned guideline PDFs (no text layer). Debian/Ubuntu: `apt-get install -y tesseract-ocr tesseract-ocr-rus`. Missing Tesseract fails ingestion immediately and loudly at startup (unlike Java/tabula) — see `RAG.ingestion.ocr.ensure_tesseract_available()`.
+
 ## Commands
 
 ```bash
