@@ -4,7 +4,10 @@
   - есть ли PDF-файл на диске (resolve_pdf_path: новая конвенция "КР{base}.pdf",
     затем старая "{file_id}.pdf");
   - есть ли запись в таблице guidelines (file_id);
-  - есть ли хотя бы один чанк в таблице docs (RAG) для этого file_id.
+  - есть ли хотя бы один чанк в таблице docs (RAG) для этого file_id, и сколько
+    их всего;
+  - нет ли дублирующихся чанков (одинаковый текст chunk дважды при одном
+    file_id) — обычно след повторного инжеста без replace.
 
 Подсвечивает несовпадения (отсутствие в любом из трёх мест) и печатает сводку.
 
@@ -47,7 +50,9 @@ async def main() -> None:
 
     async with GuidelinesStorage() as guidelines_storage, DocsStorage() as docs_storage:
         guideline_ids = {g.file_id for g in await guidelines_storage.all()}
-        docs_ids = await docs_storage.get_ingested_file_ids()
+        chunk_counts = await docs_storage.get_chunk_counts()
+        duplicate_counts = await docs_storage.get_duplicate_chunk_counts()
+    docs_ids = set(chunk_counts)
 
     problems: list[tuple[str, list[str]]] = []
     for file_id in manifest_ids:
@@ -76,12 +81,22 @@ async def main() -> None:
         print("✅ Every manifest entry has a PDF, a guidelines row, and RAG chunks.")
 
     print()
+    print("Chunk counts (manifest file_ids with docs entries):")
+    for file_id in manifest_ids:
+        n = chunk_counts.get(file_id)
+        if n is None:
+            continue
+        dup = duplicate_counts.get(file_id, 0)
+        dup_note = f"  ⚠️ {dup} duplicate row(s)" if dup else ""
+        print(f"  {file_id:<14} {n} chunk(s){dup_note}")
+
+    print()
     if orphan_guidelines:
         print(f"⚠️  {len(orphan_guidelines)} guidelines row(s) not in manifest: {', '.join(orphan_guidelines)}")
     if orphan_docs:
         print(f"⚠️  {len(orphan_docs)} file_id(s) with docs chunks but not in manifest: {', '.join(orphan_docs)}")
 
-    if problems:
+    if problems or duplicate_counts:
         sys.exit(1)
 
 

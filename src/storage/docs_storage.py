@@ -152,6 +152,33 @@ class DocsStorage(BaseStorage):
             rows = await cur.fetchall()
         return {r["file_id"] for r in rows}
 
+    async def get_chunk_counts(self) -> dict[str, int]:
+        """Return {file_id: chunk count} for every file_id present in the docs table."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("SELECT file_id, COUNT(*) AS n FROM docs GROUP BY file_id")
+            rows = await cur.fetchall()
+        return {r["file_id"]: r["n"] for r in rows}
+
+    async def get_duplicate_chunk_counts(self) -> dict[str, int]:
+        """Return {file_id: number of duplicate chunk rows} where duplicate means
+        the same (file_id, chunk) text appears more than once. For a file_id with
+        one chunk repeated 3x, this counts 2 (the extra copies beyond the first)."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT file_id, SUM(n - 1) AS extra
+                FROM (
+                    SELECT file_id, chunk, COUNT(*) AS n
+                    FROM docs
+                    GROUP BY file_id, chunk
+                    HAVING COUNT(*) > 1
+                ) dup
+                GROUP BY file_id
+                """
+            )
+            rows = await cur.fetchall()
+        return {r["file_id"]: r["extra"] for r in rows}
+
     async def delete_by_file_id(self, file_id: str) -> int:
         """Delete all rows for the given file_id; returns number of deleted rows."""
         async with self._pool.connection() as conn:
