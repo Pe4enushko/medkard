@@ -188,20 +188,18 @@ git commit -m "feat(clinrec): name_embed_input + Guideline.name_embedding"
 
 ---
 
-### Task 3: Register pgvector codec + read `name_embedding` in `GuidelinesStorage`
+### Task 3: Register pgvector codec (own pool) in `GuidelinesStorage`
 
 **Files:**
 - Modify: `src/storage/guidelines_storage.py`
 
 **Interfaces:**
-- Consumes: `Guideline.name_embedding` (Task 2).
-- Produces:
-  - `GuidelinesStorage.__aenter__` now opens its **own** pool with a pgvector codec (so `VECTOR` reads/writes work), matching `DocsStorage`.
-  - `_COLS` includes `name_embedding`; `_row_to_guideline` populates `Guideline.name_embedding`.
+- Consumes: nothing (prep for Task 4's write).
+- Produces: `Guidelines​Storage.__aenter__` opens its **own** pool with a pgvector codec, so `upsert_many` can bind a `VECTOR` param — matching `DocsStorage`.
 
-This task is prep: it makes the storage vector-aware and round-trips the column on reads. Writing the embedding is Task 4.
+**Why NO read-back into the model:** the vector is only ever WRITTEN and then read by SQL (`<=>`), never loaded back into a `Guideline` object — exactly how `docs_storage.py` treats `Doc.embedding` (written at `docs_storage.py:41`, never read as an attribute anywhere in `src/`). So we do **not** touch `_row_to_guideline` or `_COLS`; the `list(emb) if emb is not None else None` read-back is unnecessary and is dropped. This task only makes the pool vector-aware for writes.
 
-- [ ] **Step 1: Write the failing test** (round-trip read; requires a DB with migration 025 applied — mark as DB test)
+- [ ] **Step 1: Write the failing test** (write + SQL read-back, not via the model; DB test)
 
 ```python
 # tests/test_guidelines_name_embedding_storage.py
@@ -218,30 +216,34 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.asyncio
-async def test_name_embedding_round_trips():
+async def test_name_embedding_is_written():
+    # Preset the vector so upsert writes it verbatim (Task 4 adds auto-embed).
     vec = [0.1] * 1024
     g = Guideline(file_id="TEST_NAME_EMB_1", name="Тестовая река",
                   age_category=["Взрослые"], name_embedding=vec)
     async with GuidelinesStorage() as s:
         await s.upsert_many([g])
-        got = await s.get("TEST_NAME_EMB_1")
+        async with s._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT name_embedding IS NOT NULL AS has_vec, "
+                "vector_dims(name_embedding) AS dims "
+                "FROM guidelines WHERE file_id = %(fid)s",
+                {"fid": "TEST_NAME_EMB_1"},
+            )
+            row = await cur.fetchone()
         await s.delete("TEST_NAME_EMB_1")
-    assert got is not None
-    assert got.name_embedding is not None
-    assert len(got.name_embedding) == 1024
-    assert abs(got.name_embedding[0] - 0.1) < 1e-6
+    assert row["has_vec"] is True
+    assert row["dims"] == 1024
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_guidelines_name_embedding_storage.py -v`
-Expected: FAIL — `_row_to_guideline` has no `name_embedding` / column not selected (or codec error writing the vector). (If `POSTGRES_HOST` unset, it SKIPS — set stand env to actually exercise.)
+Expected: FAIL — without the codec, binding the `VECTOR` param errors (or the column stays NULL because `upsert_many` doesn't write it yet — that write lands in Task 4). (If `POSTGRES_HOST` unset, SKIPS — exercise on stand.)
 
-- [ ] **Step 3: Add codec, own pool, and column read**
+- [ ] **Step 3: Add codec + own pool (no model read-back)**
 
-In `src/storage/guidelines_storage.py`:
-
-Replace the imports block at the top:
+In `src/storage/guidelines_storage.py`, replace the imports block at the top:
 
 ```python
 """GuidelinesStorage — async psycopg3 интерфейс к таблице guidelines."""
@@ -253,30 +255,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from .base import BaseStorage, _conninfo
 from .models.guideline import Guideline
-
-_COLS = ("file_id, name, mkb, age_category, developer, "
-         "nps_status, published_at, usage_status, name_embedding")
 ```
 
-Update `_row_to_guideline` to populate the vector (pgvector codec returns a numpy array → convert to list):
-
-```python
-def _row_to_guideline(row: dict) -> Guideline:
-    emb = row.get("name_embedding")
-    return Guideline(
-        file_id=row["file_id"],
-        name=row["name"],
-        mkb=list(row["mkb"] or []),
-        age_category=list(row["age_category"] or []),
-        developer=row["developer"],
-        nps_status=row["nps_status"],
-        published_at=row["published_at"],
-        usage_status=row["usage_status"],
-        name_embedding=(list(emb) if emb is not None else None),
-    )
-```
-
-Add `__aenter__`/`__aexit__`/`_configure_conn` to the class (own pool with codec, mirroring `DocsStorage:56-73`) — put these as the first methods inside `class GuidelinesStorage(BaseStorage):`:
+Leave `_COLS` and `_row_to_guideline` **unchanged** (no `name_embedding` — it isn't read back). Add `__aenter__`/`__aexit__`/`_configure_conn` as the first methods inside `class GuidelinesStorage(BaseStorage):` (own pool with codec, mirroring `DocsStorage:56-73`):
 
 ```python
     async def __aenter__(self) -> "GuidelinesStorage":
@@ -300,16 +281,16 @@ Add `__aenter__`/`__aexit__`/`_configure_conn` to the class (own pool with codec
 
 Note: `BaseStorage.__aenter__` used the shared pool; overriding it here gives `GuidelinesStorage` its own codec-configured pool (same trade-off `DocsStorage` already makes).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes** (after Task 4 the write exists; here the codec must at least not error)
 
 Run: `POSTGRES_HOST=<stand> ... python -m pytest tests/test_guidelines_name_embedding_storage.py -v`
-Expected: PASS (or SKIP if no stand DB — then verify on stand during rollout).
+Expected: with Task 3 alone the column may still be NULL (write is Task 4) → this test may stay red until Task 4. That's fine: it's the Task 4 target. If you want Task 3 green in isolation, assert only that `__aenter__`/`__aexit__` open+close the codec pool without error (drop the write assertion). Either way, do NOT add a model read-back.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/storage/guidelines_storage.py tests/test_guidelines_name_embedding_storage.py
-git commit -m "feat(clinrec): vector-codec + чтение name_embedding в GuidelinesStorage"
+git commit -m "feat(clinrec): pgvector-codec (свой пул) в GuidelinesStorage"
 ```
 
 ---
