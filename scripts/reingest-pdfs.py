@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from RAG.ingestion.data_loader import MANIFEST_PATH, PDFS_DIR, PDF_EXTENSION, load_documents
+from RAG.ingestion.data_loader import MANIFEST_PATH, PDFS_DIR, load_documents, resolve_pdf_path
 from RAG.ingestion.pipeline import process_batch
 from RAG.ingestion.reingest_planner import build_worklist, sha256_file
 from storage import DocsStorage, IngestRunsStorage
@@ -54,13 +54,9 @@ def _resolve_paths(data_dir: Path | None, manifest_path: Path | None) -> tuple[P
     return pdfs_dir, manifest
 
 
-def _pdf_path(file_id: str, pdfs_dir: Path) -> Path:
-    return pdfs_dir / (file_id + PDF_EXTENSION)
-
-
 def _current_hash(file_id: str, pdfs_dir: Path):
-    p = _pdf_path(file_id, pdfs_dir)
-    return sha256_file(p) if p.exists() else None
+    p = resolve_pdf_path(file_id, pdfs_dir)
+    return sha256_file(p) if p is not None else None
 
 
 def _read_manifest_rows(manifest_path: Path) -> dict:
@@ -94,7 +90,7 @@ async def _full_reingest(file_id, row, pdfs_dir, manifest_path,
 
         await docs_storage.replace_by_file_id(file_id, docs)
         await guidelines_storage.upsert_many([Guideline.from_manifest_row(row)])
-        await runs_storage.mark_done(file_id, sha256_file(_pdf_path(file_id, pdfs_dir)))
+        await runs_storage.mark_done(file_id, sha256_file(resolve_pdf_path(file_id, pdfs_dir)))
         dt = time.perf_counter() - t0
         log.info("Reingested %s — %d/%d chunk(s) kept in %.1fs (%.1f chunk/s)",
                  file_id, len(docs), total, dt, len(docs) / dt if dt else 0.0)

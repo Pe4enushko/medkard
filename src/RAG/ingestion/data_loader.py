@@ -68,6 +68,10 @@ _PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
 PDFS_DIR: Path = _PROJECT_ROOT / "pdfs"
 MANIFEST_PATH: Path = _PROJECT_ROOT / "resources" / "manifest.csv"
 PDF_EXTENSION: str = ".pdf"
+PDF_PREFIX: str = "КР"  # new-convention filename prefix, e.g. "КР1027.pdf"
+# Manifest IDs are "{base}_{revision}" (e.g. "1027_1"); the revision changes
+# across updates but the base is stable, so it's what filenames key on.
+_BASE_ID_PATTERN: re.Pattern = re.compile(r'^\d+')
 # ─────────────────────────────────────────────────────────────────────────────
 
 _text_splitter = RecursiveCharacterTextSplitter(
@@ -280,6 +284,30 @@ class PDFContentReader:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def resolve_pdf_path(file_id: str, pdfs_dir: Path = PDFS_DIR) -> Path | None:
+    """Resolve a manifest file_id (e.g. "1027_1") to its PDF on disk.
+
+    Tries the new naming convention first — "{PREFIX}{base}.pdf" where base is
+    the numeric part of file_id before the "_{revision}" suffix (revisions
+    change across manifest updates, the base doesn't) — then falls back to the
+    old convention of the raw file_id as the filename stem, for files not yet
+    migrated to the new convention.
+
+    Returns None if neither candidate exists.
+    """
+    base_match = _BASE_ID_PATTERN.match(file_id)
+    if base_match:
+        primary = pdfs_dir / f"{PDF_PREFIX}{base_match.group()}{PDF_EXTENSION}"
+        if primary.exists():
+            return primary
+
+    fallback = pdfs_dir / (file_id + PDF_EXTENSION)
+    if fallback.exists():
+        return fallback
+
+    return None
+
+
 def load_documents(
     manifest_path: Path = MANIFEST_PATH,
     pdfs_dir: Path = PDFS_DIR,
@@ -289,7 +317,8 @@ def load_documents(
     """Generator over all documents listed in manifest.csv.
 
     Yields a PDFContentReader for each row whose file exists in pdfs_dir.
-    The 'ID' column is used as the filename stem; PDF_EXTENSION is appended.
+    The file is located via resolve_pdf_path() (new "{PREFIX}{base}.pdf"
+    convention first, old "{ID}.pdf" convention as fallback).
 
     Args:
         manifest_path: Path to the CSV manifest.
@@ -311,9 +340,8 @@ def load_documents(
                 continue
             if exceptions is not None and file_id in exceptions:
                 continue
-            filename = file_id + PDF_EXTENSION
-            filepath = pdfs_dir / filename
-            if not filepath.exists():
-                print(f"[data_loader] missing file, skipping: {filepath}")
+            filepath = resolve_pdf_path(file_id, pdfs_dir)
+            if filepath is None:
+                print(f"[data_loader] missing file, skipping: {file_id}")
                 continue
             yield PDFContentReader(filepath, dict(row))
