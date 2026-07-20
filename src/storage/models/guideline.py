@@ -19,6 +19,18 @@ def _split_csv_cell(cell: str, *, upper: bool = False) -> list[str]:
     return [p.upper() for p in parts] if upper else parts
 
 
+def name_embed_input(name: str | None, age_category: list[str] | None) -> str:
+    """Passage string embedded for the guideline registry: labeled title + age category.
+
+    CROSS-PROJECT CONTRACT: engine (integrations/clinrec/mapping.py) rebuilds this
+    byte-for-byte for its fallback re-embed. Do not change form without updating both.
+    Passage mode — bare embed, no instruct prefix.
+    """
+    base = f"Название: {(name or '').strip()}"
+    ages = [a.strip() for a in (age_category or []) if a and a.strip()]
+    return f"{base}\nВозрастная группа: [{', '.join(ages)}]" if ages else base
+
+
 @dataclass
 class Guideline:
     """Строка справочника клинреков (зеркало строки manifest.csv)."""
@@ -31,6 +43,7 @@ class Guideline:
     nps_status: str | None = None
     published_at: str | None = None
     usage_status: str | None = None
+    name_embedding: list[float] | None = None
 
     @classmethod
     def from_manifest_row(cls, row: dict[str, str]) -> "Guideline":
