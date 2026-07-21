@@ -40,10 +40,30 @@ def test_summarize_counts():
     assert reingest._summarize(wl) == {"full": 2, "skip": 1, "metadata_only": 1}
 
 
-def test_forced_full_worklist_marks_all_full():
+def test_forced_full_worklist_marks_found_files_full(tmp_path: Path):
+    (tmp_path / "A.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "B.pdf").write_bytes(b"%PDF-1.4")
     manifest_rows = {"A": {"ID": "A"}, "B": {"ID": "B"}}
-    wl = reingest._forced_full_worklist(manifest_rows)
+    wl, absent = reingest._forced_full_worklist(manifest_rows, tmp_path)
     assert wl == [("A", "full"), ("B", "full")]
+    assert absent == []
+
+
+def test_forced_full_worklist_reports_missing_pdf_with_no_rag_data(tmp_path: Path):
+    (tmp_path / "A.pdf").write_bytes(b"%PDF-1.4")
+    manifest_rows = {"A": {"ID": "A"}, "B": {"ID": "B"}}
+    wl, absent = reingest._forced_full_worklist(manifest_rows, tmp_path)
+    assert wl == [("A", "full")]
+    assert absent == ["B"]  # no PDF, and no docs_file_ids given -> genuinely absent
+
+
+def test_forced_full_worklist_does_not_report_missing_pdf_already_in_rag(tmp_path: Path):
+    (tmp_path / "A.pdf").write_bytes(b"%PDF-1.4")
+    manifest_rows = {"A": {"ID": "A"}, "B": {"ID": "B"}}
+    # B has no PDF here but already has chunks in docs -> not "absent from RAG"
+    wl, absent = reingest._forced_full_worklist(manifest_rows, tmp_path, docs_file_ids={"B"})
+    assert wl == [("A", "full")]
+    assert absent == []
 
 
 def test_force_all_flag_parses():

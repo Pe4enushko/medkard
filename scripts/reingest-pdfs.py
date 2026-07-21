@@ -88,8 +88,8 @@ async def _full_reingest(file_id, row, pdfs_dir, manifest_path,
             log.info("    %s: %d/%d chunks (%.1f chunk/s, ~%.0fs left)",
                      file_id, done, total, rate, eta)
 
-        await docs_storage.replace_by_file_id(file_id, docs)
         await guidelines_storage.upsert_many([Guideline.from_manifest_row(row)])
+        await docs_storage.replace_by_file_id(file_id, docs)
         await runs_storage.mark_done(file_id, sha256_file(resolve_pdf_path(file_id, pdfs_dir)))
         dt = time.perf_counter() - t0
         log.info("Reingested %s — %d/%d chunk(s) kept in %.1fs (%.1f chunk/s)",
@@ -117,9 +117,24 @@ async def _metadata_only(file_id, row, guidelines_storage):
     log.info("Metadata-only update for %s (PDF unchanged)", file_id)
 
 
-def _forced_full_worklist(manifest_rows: dict) -> list[tuple[str, str]]:
-    """Every manifested file classified as 'full' — bypasses hash/status (re-embed rollout)."""
-    return [(file_id, "full") for file_id in manifest_rows]
+def _forced_full_worklist(
+    manifest_rows: dict, pdfs_dir: Path, docs_file_ids: set[str] = frozenset()
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Every manifested file whose PDF resolves on disk, classified as 'full'
+    (bypasses hash/status — e.g. after an embedding representation change).
+
+    Returns (worklist, absent_from_rag) — the second list is manifest file_ids
+    with no PDF on disk AND no existing docs chunks, i.e. genuinely missing
+    from RAG rather than just skipped this run because they're already ingested.
+    """
+    found: list[tuple[str, str]] = []
+    absent_from_rag: list[str] = []
+    for file_id in manifest_rows:
+        if resolve_pdf_path(file_id, pdfs_dir) is not None:
+            found.append((file_id, "full"))
+        elif file_id not in docs_file_ids:
+            absent_from_rag.append(file_id)
+    return found, absent_from_rag
 
 
 def _summarize(worklist) -> dict:
@@ -169,7 +184,17 @@ async def main() -> None:
         if args.file_id:
             worklist = [(args.file_id, "full")]
         elif args.force_all:
-            worklist = _forced_full_worklist(manifest_rows)
+            docs_file_ids = await docs_storage.get_ingested_file_ids()
+            worklist, absent_from_rag = _forced_full_worklist(manifest_rows, pdfs_dir, docs_file_ids)
+            skipped_but_ingested = len(manifest_rows) - len(worklist) - len(absent_from_rag)
+            log.info(
+                "--force-all: %d/%d manifested file(s) found in %s and will be reingested "
+                "(%d already in RAG with no PDF here, skipped quietly)",
+                len(worklist), len(manifest_rows), pdfs_dir, skipped_but_ingested,
+            )
+            if absent_from_rag:
+                log.warning("%d manifest file(s) NOT in RAG and no PDF found: %s",
+                            len(absent_from_rag), ", ".join(sorted(absent_from_rag)))
         else:
             worklist = build_worklist(manifest_rows, runs, guidelines_by_id,
                                       lambda fid: _current_hash(fid, pdfs_dir))
