@@ -92,7 +92,7 @@ async def push(
     card_guid = _extract_card_guid(card)
     if not card_guid:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Card is missing Прием.GUID",
         )
 
