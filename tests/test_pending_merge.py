@@ -34,3 +34,19 @@ def test_merge_with_no_pending_cards_returns_payload_visits_unchanged():
     payload = [{"Прием": {"GUID": "a"}}]
     merged = merge_pending_cards(payload, [])
     assert merged == payload
+
+
+def test_merge_dedups_card_guid_present_in_both_payload_and_pending_keeping_payload_copy():
+    payload = [{"Прием": {"GUID": "A"}, "source": "1c"}]
+    pending = [{"card_guid": "a", "card_data": {"Прием": {"GUID": "a"}, "source": "pending"}}]
+    merged = merge_pending_cards(payload, pending)
+    assert len(merged) == 1
+    assert merged[0]["source"] == "1c"
+
+
+def test_merge_does_not_dedup_visits_missing_guid_against_each_other():
+    payload = [{"Прием": {}, "source": "1c"}]
+    pending = [{"card_guid": None, "card_data": {"Прием": {}, "source": "pending"}}]
+    merged = merge_pending_cards(payload, pending)
+    assert len(merged) == 2
+    assert [v["source"] for v in merged] == ["1c", "pending"]
