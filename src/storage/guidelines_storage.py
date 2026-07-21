@@ -1,8 +1,14 @@
 """GuidelinesStorage — async psycopg3 интерфейс к таблице guidelines."""
 from __future__ import annotations
 
-from .base import BaseStorage
-from .models.guideline import Guideline
+import psycopg.rows
+from pgvector.psycopg import register_vector_async
+from psycopg_pool import AsyncConnectionPool
+
+from RAG.retrieval.embeddings import embed
+
+from .base import BaseStorage, _conninfo
+from .models.guideline import Guideline, name_embed_input
 
 _COLS = "file_id, name, mkb, age_category, developer, nps_status, published_at, usage_status"
 
@@ -21,7 +27,25 @@ def _row_to_guideline(row: dict) -> Guideline:
 
 
 class GuidelinesStorage(BaseStorage):
-    """Async context-manager для таблицы guidelines (общий пул BaseStorage)."""
+    """Async context-manager для таблицы guidelines (собственный пул с pgvector кодеком)."""
+
+    async def __aenter__(self) -> "GuidelinesStorage":
+        self._pool = AsyncConnectionPool(
+            conninfo=_conninfo(),
+            min_size=1,
+            max_size=3,
+            open=False,
+            configure=self._configure_conn,
+            kwargs={"row_factory": psycopg.rows.dict_row},
+        )
+        await self._pool.open()
+        return self  # type: ignore[return-value]
+
+    async def __aexit__(self, *args: object) -> None:
+        await self._pool.close()
+
+    async def _configure_conn(self, conn: psycopg.AsyncConnection) -> None:
+        await register_vector_async(conn)
 
     async def upsert_many(self, rows: list[Guideline]) -> int:
         if not rows:
@@ -29,22 +53,25 @@ class GuidelinesStorage(BaseStorage):
         written = 0
         async with self._pool.connection() as conn:
             for g in rows:
+                if g.name_embedding is None:
+                    g.name_embedding = await embed(name_embed_input(g.name, g.age_category))
                 await conn.execute(
                     """
                     INSERT INTO guidelines
                         (file_id, name, mkb, age_category, developer,
-                         nps_status, published_at, usage_status)
+                         nps_status, published_at, usage_status, name_embedding)
                     VALUES
                         (%(file_id)s, %(name)s, %(mkb)s, %(age_category)s, %(developer)s,
-                         %(nps_status)s, %(published_at)s, %(usage_status)s)
+                         %(nps_status)s, %(published_at)s, %(usage_status)s, %(name_embedding)s)
                     ON CONFLICT (file_id) DO UPDATE SET
-                        name         = EXCLUDED.name,
-                        mkb          = EXCLUDED.mkb,
-                        age_category = EXCLUDED.age_category,
-                        developer    = EXCLUDED.developer,
-                        nps_status   = EXCLUDED.nps_status,
-                        published_at = EXCLUDED.published_at,
-                        usage_status = EXCLUDED.usage_status
+                        name           = EXCLUDED.name,
+                        mkb            = EXCLUDED.mkb,
+                        age_category   = EXCLUDED.age_category,
+                        developer      = EXCLUDED.developer,
+                        nps_status     = EXCLUDED.nps_status,
+                        published_at   = EXCLUDED.published_at,
+                        usage_status   = EXCLUDED.usage_status,
+                        name_embedding = EXCLUDED.name_embedding
                     """,
                     {
                         "file_id": g.file_id,
@@ -55,6 +82,7 @@ class GuidelinesStorage(BaseStorage):
                         "nps_status": g.nps_status,
                         "published_at": g.published_at,
                         "usage_status": g.usage_status,
+                        "name_embedding": g.name_embedding,
                     },
                 )
                 written += 1
