@@ -83,6 +83,20 @@ def _extract_card_guid(card: dict) -> str | None:
     return str(guid).lower() if guid else None
 
 
+_MIN_VIABLE_VISIT_KEYS = ("Пациент", "Услуги", "Диагнозы")
+
+
+def _looks_like_a_visit(card: dict) -> bool:
+    """True if at least one of Пациент/Услуги/Диагнозы is present as a key.
+
+    Presence, not non-emptiness: real cards sometimes legitimately carry an
+    empty Пациент/Услуги/Диагнозы, so rejecting on empty values would risk
+    dropping genuine visits. This only screens out payloads missing all
+    three sections outright — an empty shell rather than a real visit.
+    """
+    return any(key in card for key in _MIN_VIABLE_VISIT_KEYS)
+
+
 @router.post("/push", response_model=PushResponse)
 async def push(
     card: dict,
@@ -94,6 +108,11 @@ async def push(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Card is missing Прием.GUID",
+        )
+    if not _looks_like_a_visit(card):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Card has none of Пациент/Услуги/Диагнозы — looks like an empty shell, not a real visit",
         )
 
     async with DoneCardsStorage() as storage:

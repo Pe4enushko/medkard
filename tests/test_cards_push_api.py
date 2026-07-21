@@ -76,8 +76,49 @@ def test_push_missing_key_is_rejected(client: TestClient):
 
 
 def test_push_without_guid_is_422(client: TestClient, test_key: str):
-    resp = client.post("/cards/push?org=Alenka", json={"Прием": {}}, headers=_auth(test_key))
+    resp = client.post(
+        "/cards/push?org=Alenka",
+        json={"Прием": {}, "Пациент": {"ФИО": "Тест Тестов"}},
+        headers=_auth(test_key),
+    )
     assert resp.status_code == 422
+
+
+def test_push_with_no_patient_services_or_diagnoses_is_422(client: TestClient, test_key: str):
+    guid = str(uuid.uuid4())
+    resp = client.post(
+        "/cards/push?org=Alenka",
+        json={"Прием": {"GUID": guid}},
+        headers=_auth(test_key),
+    )
+    assert resp.status_code == 422
+    assert "Пациент" in resp.json()["detail"]
+
+
+def test_push_with_empty_patient_is_accepted(client: TestClient, test_key: str):
+    guid = str(uuid.uuid4())
+    try:
+        resp = client.post(
+            "/cards/push?org=Alenka",
+            json={"Прием": {"GUID": guid}, "Пациент": {}},
+            headers=_auth(test_key),
+        )
+        assert resp.status_code == 200
+    finally:
+        _cleanup(guid)
+
+
+def test_push_with_only_diagnoses_is_accepted(client: TestClient, test_key: str):
+    guid = str(uuid.uuid4())
+    try:
+        resp = client.post(
+            "/cards/push?org=Alenka",
+            json={"Прием": {"GUID": guid}, "Диагнозы": []},
+            headers=_auth(test_key),
+        )
+        assert resp.status_code == 200
+    finally:
+        _cleanup(guid)
 
 
 def test_push_new_card_creates_pending_row(client: TestClient, test_key: str, alenka_org_id: str):
@@ -105,14 +146,14 @@ def test_push_updates_existing_card_and_resets_to_pending(client: TestClient, te
     try:
         first = client.post(
             "/cards/push?org=Alenka",
-            json={"Прием": {"GUID": guid}, "v": 1},
+            json={"Прием": {"GUID": guid}, "Пациент": {"ФИО": "Тест"}, "v": 1},
             headers=_auth(test_key),
         )
         assert first.status_code == 200
 
         second = client.post(
             "/cards/push?org=Alenka",
-            json={"Прием": {"GUID": guid}, "v": 2},
+            json={"Прием": {"GUID": guid}, "Пациент": {"ФИО": "Тест"}, "v": 2},
             headers=_auth(test_key),
         )
         assert second.status_code == 200
