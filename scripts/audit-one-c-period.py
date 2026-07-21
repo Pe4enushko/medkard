@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from audit.excel_formatter import ExcelFormatter
+from audit.pending_merge import merge_pending_cards
 from audit.pipeline import AuditPipeline
 from integrations.ftp import load_creds, upload
 from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient
@@ -40,6 +41,7 @@ from audit.filters import CardFilter
 from parsers.filter_config import load_card_filter
 from parsers.inspection_order import load_inspection_format
 from RAG.retrieval.vector_store import close_pool
+from storage.done_cards_storage import DoneCardsStorage
 from storage.organizations_storage import OrganizationsStorage
 
 # ── Args ──────────────────────────────────────────────────────────────────────
@@ -157,9 +159,16 @@ async def main() -> None:
         # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────
         payload = _load_or_fetch_one_c_payload(org=_args.org, datebegin=DATEBEGIN, dateend=DATEEND)
 
+        # ── 1b. Merge in any cards pushed to us since the last run ────────────
+        async with DoneCardsStorage() as done_cards:
+            pending_rows = await done_cards.get_pending(organization_id=org_id)
+        if pending_rows:
+            log.info("📥 Merging %d pending pushed card(s) into tonight's batch", len(pending_rows))
+        merged_payload = merge_pending_cards(payload, pending_rows)
+
         # ── 2. Run pipeline — each card is persisted to DB on completion ──────
         async with AuditPipeline(org_id=org_id, card_filter=card_filter) as pipeline:
-            pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches)
+            pairs = await pipeline.run_batched(merged_payload, num_batches=_args.num_batches)
         log.info("Pipeline done: %d result(s)", len(pairs))
         if not pairs:
             log.info("Nothing new processed this run; all visits already in DB")
