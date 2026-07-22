@@ -127,7 +127,10 @@ CREATE TABLE IF NOT EXISTS check_updates_last_seen (
 
 ### Роут (последующая итерация — не в этой задаче)
 
-`GET /cards/check_updates?org=<name>` в `src/api/routes/cards.py`:
+`GET /cards/check_updates?org=<name>` в `src/api/routes/cards.py`. `org` —
+**обязательный** query-параметр, как у `check`/`pull`/`export` (ключ может быть
+scoped на несколько организаций, поэтому каждый вызов должен явно называть, за
+какую из них он спрашивает):
 
 1. Резолвит `api_key_id` из `require_org_access` (уточнить: сейчас
    `require_org_access` возвращает `(org_id, org_name)` — потребуется убедиться, что
