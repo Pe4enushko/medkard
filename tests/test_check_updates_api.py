@@ -143,16 +143,20 @@ def test_check_updates_returns_every_status(client, test_key, seeded):
 
     assert set(guids.values()) <= set(by_guid)          # nothing filtered out
 
+    # One status per card: the ignored/broken booleans are folded into it, so a
+    # consumer reads the outcome from one field instead of re-deriving it.
     assert by_guid[guids["pending"]]["status"] == "pending"
-    assert by_guid[guids["ignored"]]["ignored"] is True
-    assert by_guid[guids["broken"]]["broken"] is True
+    assert by_guid[guids["done"]]["status"] == "done"
+    assert by_guid[guids["ignored"]]["status"] == "ignored"
+    assert by_guid[guids["broken"]]["status"] == "broken"
 
     sample = by_guid[guids["pending"]]
     assert isinstance(sample["card_data"], dict)        # native JSONB, raw data present
     assert set(sample.keys()) == {
-        "card_guid", "card_data", "status", "ignored", "broken",
+        "card_guid", "card_data", "status",
         "formal_result", "diag_result", "icd_check_result", "updated_at",
     }
+    assert "ignored" not in sample and "broken" not in sample
     assert "token_count" not in sample and "organization_id" not in sample
 
 

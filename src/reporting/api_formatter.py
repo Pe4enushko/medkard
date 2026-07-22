@@ -92,9 +92,19 @@ class _ApiCardsReader(BaseStorage):
         it: this one omits the ignored/broken filter (the raw card_data of an
         unaudited card is the whole point) and the boundary is inclusive, since
         the caller derives `since` from a clock rather than from returned rows.
+
+        status/ignored/broken are collapsed into a single status on the way out.
+        They already describe one thing between them — migration 014 forbids
+        ignored and broken overlapping, and 025's status treats 'done' as
+        "audited, ignored or broken" — so the wire format states the outcome
+        once instead of making every consumer re-derive it from three fields.
+        Storage keeps all three; this is a response shape, not a schema change.
         """
         query = (
-            "SELECT card_guid, card_data, status, ignored, broken, "
+            "SELECT card_guid, card_data, "
+            "       CASE WHEN broken THEN 'broken' "
+            "            WHEN ignored THEN 'ignored' "
+            "            ELSE status END AS status, "
             "       formal_result, diag_result, icd_check_result, updated_at "
             "FROM done_cards "
             "WHERE organization_id = %(org_id)s::uuid "
@@ -158,5 +168,7 @@ class ApiFormatter:
         since=None → the last week, not all history: a bare call shouldn't drain
         the table. Unlike export, includes pending/ignored/broken cards — the
         consumer needs a card's raw data whether or not it has been audited.
+        Each row's outcome arrives as a single `status`:
+        pending | done | ignored | broken.
         """
         return await self._reader.fetch_changed(organization_id, since)
