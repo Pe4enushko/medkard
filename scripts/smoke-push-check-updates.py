@@ -12,15 +12,15 @@ Scope is push + check_updates only. Other routes are left alone even where
 their behaviour contrasts (export being audited-only, say) — asserting on
 them here would be testing code this change never touched.
 
-Key issuing and revoking go through scripts/create-api-key.py and
-scripts/revoke-api-key.py as subprocesses rather than reimplementing them, so
-this exercises the real operator path (they own the key format and the
-org-scoping join). Creating the throwaway organization is the one thing done
-directly against the DB — no script or route creates organizations.
+Keys are minted and dropped here rather than via create-api-key.py /
+revoke-api-key.py: those are built for an operator, so the key id would have
+to be scraped from printed output, and revoke only sets revoked_at — right
+for a real key, but it would leave a dead row behind on every run.
 
 Everything it creates is namespaced with a random tag and removed on the way
-out, including after a failed assertion or Ctrl-C: a throwaway organization,
-an api key scoped to it, and the pushed card. Nothing pre-existing is touched.
+out, including after a failed assertion or Ctrl-C: the pushed card, the api
+key row (and its org scoping, which cascades), and the throwaway organization.
+Nothing pre-existing is touched.
 
 Run from project root against a running API (reads POSTGRES_* from .env for
 the verification/teardown side):
@@ -36,8 +36,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import re
-import subprocess
+import secrets
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -48,6 +47,7 @@ import httpx
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from storage.api_keys_storage import ApiKeysStorage  # noqa: E402
 from storage.base import BaseStorage  # noqa: E402
 
 _parser = argparse.ArgumentParser(description="Smoke-test push + check_updates against a running API")
@@ -88,6 +88,30 @@ class _Fixtures(BaseStorage):
         async with self._pool.connection() as conn:
             await conn.execute("DELETE FROM organizations WHERE id = %(o)s::uuid", {"o": org_id})
 
+    async def delete_key(self, key_id: str) -> int:
+        """Delete a key row outright.
+
+        revoke-api-key.py only sets revoked_at — right for a real key, whose
+        history is worth keeping, but it would leave a dead row behind on every
+        smoke run. This key was minted by this script, labelled smoke-<tag>,
+        and never handed to anyone, so there is no audit trail to preserve.
+        Deleting by the id we just created cannot touch anyone else's key; its
+        api_key_organizations rows go with it (ON DELETE CASCADE, migration 018).
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "DELETE FROM api_keys WHERE id = %(k)s::uuid", {"k": key_id}
+            )
+            return cur.rowcount
+
+    async def count_key_scopes(self, key_id: str) -> int:
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT count(*) AS n FROM api_key_organizations WHERE api_key_id = %(k)s::uuid",
+                {"k": key_id},
+            )
+            return (await cur.fetchone())["n"]
+
     async def delete_cards(self, org_id: str) -> int:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
@@ -106,29 +130,18 @@ class _Fixtures(BaseStorage):
             return await cur.fetchone()
 
 
-def _run_script(name: str, *args: str) -> str:
-    """Invoke a sibling script the way an operator would, and return its stdout."""
-    proc = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / name), *args],
-        capture_output=True, text=True, cwd=ROOT,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"scripts/{name} failed ({proc.returncode}):\n{proc.stderr.strip()}")
-    return proc.stdout
+async def issue_key(label: str, org_id: str) -> tuple[str, str]:
+    """Mint a key scoped to one org, returning (key_id, raw_key).
 
-
-def issue_key(label: str, org_name: str) -> tuple[str, str]:
-    """Issue a key via scripts/create-api-key.py, parsing back what it prints.
-
-    It prints the raw key exactly once and the id in the same breath, so both
-    are scraped here rather than re-deriving them from the DB.
+    Done through ApiKeysStorage rather than by shelling out to
+    create-api-key.py: that script prints the id and raw key for a human, so
+    reusing it would mean scraping its stdout, and the id is exactly what
+    teardown needs to delete the row afterwards.
     """
-    out = _run_script("create-api-key.py", label, "--orgs", org_name)
-    key_id = re.search(r"id=([0-9a-f-]{36})", out)
-    raw_key = re.search(r"^\s+(medkard_\S+)\s*$", out, re.MULTILINE)
-    if not key_id or not raw_key:
-        raise RuntimeError(f"could not parse create-api-key.py output:\n{out}")
-    return key_id.group(1), raw_key.group(1)
+    raw_key = f"medkard_smoke_{secrets.token_urlsafe(24)}"
+    async with ApiKeysStorage() as api_keys:
+        key_id = await api_keys.create_key(label, raw_key, [org_id])
+    return str(key_id), raw_key
 
 
 def _mock_card() -> dict:
@@ -245,14 +258,14 @@ async def main() -> int:
     async with _Fixtures() as fixtures:
         try:
             org_id = await fixtures.create_org(ORG_NAME)
-            key_id, raw_key = issue_key(f"smoke-{TAG}", ORG_NAME)
-            print(f"  created org id={org_id}, key id={key_id} (via create-api-key.py)")
+            key_id, raw_key = await issue_key(f"smoke-{TAG}", org_id)
+            print(f"  created org id={org_id}, key id={key_id}")
 
             async with httpx.AsyncClient(timeout=30) as client:
                 await run(client, org_id, raw_key, fixtures)
         finally:
             # Teardown runs even on assertion failure or Ctrl-C — the stand must
-            # not accumulate smoke-test orgs.
+            # not accumulate smoke-test rows.
             if _args.keep:
                 print(f"\n--keep: leaving org={ORG_NAME} (id={org_id}) key={raw_key}")
             else:
@@ -261,10 +274,15 @@ async def main() -> int:
                     deleted = await fixtures.delete_cards(org_id)
                     print(f"  deleted {deleted} card(s)")
                 if key_id is not None:
-                    _run_script("revoke-api-key.py", key_id)
-                    print("  revoked api key (via revoke-api-key.py)")
+                    # Before the org, so the scope rows are observably gone by this
+                    # key's own deletion rather than swept up by the org's cascade.
+                    scopes = await fixtures.count_key_scopes(key_id)
+                    dropped = await fixtures.delete_key(key_id)
+                    left = await fixtures.count_key_scopes(key_id)
+                    print(f"  deleted {dropped} api key row, {scopes} scope row(s) cascaded")
+                    if left:
+                        print(f"  \033[31mWARNING: {left} scope row(s) still present\033[0m")
                 if org_id is not None:
-                    # api_key_organizations rows cascade from the org (migration 018).
                     await fixtures.delete_org(org_id)
                     print("  deleted organization")
 
