@@ -100,11 +100,12 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, icd_check_result, token_count, time_ms, started_at, finished_at, ignored, organization_id)
+                            (card_guid, card_data, formal_result, diag_result, icd_check_result, token_count, time_ms, started_at, finished_at, ignored, organization_id, status)
                         VALUES
-                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s)
+                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s, 'done')
                         ON CONFLICT (card_guid) DO UPDATE SET
                             card_data         = EXCLUDED.card_data,
+                            status            = 'done',
                             formal_result     = EXCLUDED.formal_result,
                             diag_result       = EXCLUDED.diag_result,
                             icd_check_result  = EXCLUDED.icd_check_result,
@@ -134,9 +135,9 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, icd_check_result, token_count, time_ms, started_at, finished_at, ignored, organization_id)
+                            (card_guid, card_data, formal_result, diag_result, icd_check_result, token_count, time_ms, started_at, finished_at, ignored, organization_id, status)
                         VALUES
-                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s)
+                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s, 'done')
                         RETURNING id::text
                         """,
                         {
@@ -175,10 +176,11 @@ class DoneCardsStorage(BaseStorage):
             async with self._pool.connection() as conn:
                 cur = await conn.execute(
                     """
-                    INSERT INTO done_cards (card_guid, card_data, ignored, organization_id)
-                    VALUES (%(guid)s, %(data)s::jsonb, TRUE, %(org_id)s)
+                    INSERT INTO done_cards (card_guid, card_data, ignored, organization_id, status)
+                    VALUES (%(guid)s, %(data)s::jsonb, TRUE, %(org_id)s, 'done')
                     ON CONFLICT (card_guid) DO UPDATE SET
                         card_data       = EXCLUDED.card_data,
+                        status          = 'done',
                         ignored         = TRUE,
                         broken          = FALSE,
                         organization_id = EXCLUDED.organization_id
@@ -213,11 +215,12 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, ignored, broken, stacktrace, started_at, organization_id)
+                            (card_guid, card_data, ignored, broken, stacktrace, started_at, organization_id, status)
                         VALUES
-                            (%(guid)s, %(data)s::jsonb, FALSE, TRUE, %(stacktrace)s, %(started_at)s, %(org_id)s)
+                            (%(guid)s, %(data)s::jsonb, FALSE, TRUE, %(stacktrace)s, %(started_at)s, %(org_id)s, 'done')
                         ON CONFLICT (card_guid) DO UPDATE SET
                             card_data       = EXCLUDED.card_data,
+                            status          = 'done',
                             ignored         = FALSE,
                             broken          = TRUE,
                             stacktrace      = EXCLUDED.stacktrace,
@@ -237,9 +240,9 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, ignored, broken, stacktrace, started_at, organization_id)
+                            (card_guid, card_data, ignored, broken, stacktrace, started_at, organization_id, status)
                         VALUES
-                            (NULL, %(data)s::jsonb, FALSE, TRUE, %(stacktrace)s, %(started_at)s, %(org_id)s)
+                            (NULL, %(data)s::jsonb, FALSE, TRUE, %(stacktrace)s, %(started_at)s, %(org_id)s, 'done')
                         RETURNING id::text
                         """,
                         {
@@ -258,12 +261,74 @@ class DoneCardsStorage(BaseStorage):
             logger.exception("💾 done_cards UPSERT_BROKEN FAILED guid=%s", card_guid)
             raise
 
+    async def upsert_pending(
+        self,
+        *,
+        card_guid: str,
+        card_data: str,
+        organization_id: str | None = None,
+    ) -> str:
+        """Insert or update a done_cards row with fresh raw data awaiting audit.
+
+        Sets status='pending' and clears every audit-derived column (results,
+        ignored, broken, stacktrace) — a pushed update means the previous
+        audit outcome, if any, is stale and must be recomputed from scratch.
+        """
+        try:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    """
+                    INSERT INTO done_cards
+                        (card_guid, card_data, status, organization_id)
+                    VALUES
+                        (%(guid)s, %(data)s::jsonb, 'pending', %(org_id)s)
+                    ON CONFLICT (card_guid) DO UPDATE SET
+                        card_data         = EXCLUDED.card_data,
+                        status            = 'pending',
+                        formal_result     = NULL,
+                        diag_result       = NULL,
+                        icd_check_result  = NULL,
+                        ignored           = FALSE,
+                        broken            = FALSE,
+                        stacktrace        = NULL,
+                        organization_id   = EXCLUDED.organization_id
+                    RETURNING id::text
+                    """,
+                    {"guid": card_guid, "data": card_data, "org_id": organization_id},
+                )
+                row = await cur.fetchone()
+            row_id: str = row["id"]
+            logger.info("💾 done_cards UPSERT_PENDING OK id=%s guid=%s", row_id, card_guid)
+            return row_id
+        except Exception:
+            logger.exception("💾 done_cards UPSERT_PENDING FAILED guid=%s", card_guid)
+            raise
+
+    async def get_pending(self, organization_id: str | None = None) -> list[dict]:
+        """Return card_guid + card_data for pending rows in an organization."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT card_guid, card_data FROM done_cards "
+                "WHERE status = 'pending' "
+                "AND organization_id IS NOT DISTINCT FROM %(org_id)s",
+                {"org_id": organization_id},
+            )
+            rows = await cur.fetchall()
+        logger.info("💾 done_cards loaded %d pending card(s) for org_id=%s", len(rows), organization_id)
+        return rows
+
     async def get_done_guids(self, organization_id: str | None = None) -> set[str]:
-        """Return non-null card GUIDs for an organization, including ignored cards."""
+        """Return non-null card GUIDs with a terminal (done) status for an organization.
+
+        Pending rows (freshly pushed, not yet audited) are excluded: their
+        guid must not count as "already handled", or the nightly pipeline's
+        always-on dedup would skip them forever.
+        """
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT card_guid FROM done_cards "
                 "WHERE card_guid IS NOT NULL "
+                "AND status = 'done' "
                 "AND organization_id IS NOT DISTINCT FROM %(org_id)s",
                 {"org_id": organization_id},
             )

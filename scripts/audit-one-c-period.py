@@ -4,7 +4,7 @@ Fetch appointments from 1C for a configured period, save the raw JSON
 snapshot, run the full audit pipeline, then export results to Excel.
 
 Run from project root:
-    python scripts/audit-one-c-period.py ORG [--days N | --date DD.MM.YYYY] [--ignore-icd CODE ...] [--excel PATH] [--num-batches N] [--ftpcreds FILE]
+    python scripts/audit-one-c-period.py ORG [--days N | --date DD.MM.YYYY] [--ignore-icd CODE ...] [--excel PATH] [--num-batches N] [--ftpcreds FILE] [--pending-only]
 
 Options:
     ORG            1C organization: Alenka or MDS
@@ -16,6 +16,9 @@ Options:
     --excel        Output xlsx file (default: audit_results.xlsx)
     --num-batches  Max concurrent visits processed at a time (default: 5)
     --ftpcreds     Credentials file for FTP upload (ip=, port=, username=, password=)
+    --pending-only Skip the 1C fetch entirely and audit only cards pushed via
+                   POST /cards/push (done_cards rows with status='pending').
+                   No Excel export or FTP upload runs in this mode.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from audit.excel_formatter import ExcelFormatter
+from audit.pending_merge import merge_pending_cards
 from audit.pipeline import AuditPipeline
 from integrations.ftp import load_creds, upload
 from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient
@@ -40,6 +44,7 @@ from audit.filters import CardFilter
 from parsers.filter_config import load_card_filter
 from parsers.inspection_order import load_inspection_format
 from RAG.retrieval.vector_store import close_pool
+from storage.done_cards_storage import DoneCardsStorage
 from storage.organizations_storage import OrganizationsStorage
 
 # ── Args ──────────────────────────────────────────────────────────────────────
@@ -51,6 +56,12 @@ _parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
 _parser.add_argument("--excel", default=None, metavar="PATH", help="Output xlsx file (default: report_<datebegin>_to_<dateend>.xlsx)")
 _parser.add_argument("--num-batches", type=int, default=5, metavar="N", help="Max concurrent visits processed at a time (default: 5)")
 _parser.add_argument("--ftpcreds", default=None, metavar="FILE", help="Credentials file for FTP upload (ip=, port=, username=, password=)")
+_parser.add_argument(
+    "--pending-only",
+    action="store_true",
+    help="Skip the 1C fetch and audit only cards pushed via POST /cards/push "
+         "(status='pending' in done_cards). No Excel export or FTP upload.",
+)
 _parser.add_argument("--legacy-report", action="store_true", help="Use legacy 3-column Excel layout (visits, formal, diagnosis)")
 _parser.add_argument(
     "--format",
@@ -135,7 +146,10 @@ def _load_or_fetch_one_c_payload(org: str, datebegin: str, dateend: str) -> Any:
 
 def _confirm_period(org: str, datebegin: str, dateend: str, card_filter: CardFilter) -> None:
     print(f"Organization: {org}")
-    print(f"Period: {datebegin} — {dateend}")
+    if _args.pending_only:
+        print("Mode: pending-only (no 1C fetch, no Excel export)")
+    else:
+        print(f"Period: {datebegin} — {dateend}")
     print(f"Filters:\n{card_filter}")
     if _args.y:
         return
@@ -155,14 +169,30 @@ async def main() -> None:
             org_id = await organizations.get_id_by_name(_args.org)
 
         # ── 1. Load raw JSON from cache or fetch it from 1C ───────────────────
-        payload = _load_or_fetch_one_c_payload(org=_args.org, datebegin=DATEBEGIN, dateend=DATEEND)
+        #     Skipped entirely in --pending-only mode: payload is just an empty
+        #     batch, so only pushed (pending) cards get merged in below.
+        if _args.pending_only:
+            payload: Any = []
+        else:
+            payload = _load_or_fetch_one_c_payload(org=_args.org, datebegin=DATEBEGIN, dateend=DATEEND)
+
+        # ── 1b. Merge in any cards pushed to us since the last run ────────────
+        async with DoneCardsStorage() as done_cards:
+            pending_rows = await done_cards.get_pending(organization_id=org_id)
+        if pending_rows:
+            log.info("📥 Merging %d pending pushed card(s) into tonight's batch", len(pending_rows))
+        merged_payload = merge_pending_cards(payload, pending_rows)
 
         # ── 2. Run pipeline — each card is persisted to DB on completion ──────
         async with AuditPipeline(org_id=org_id, card_filter=card_filter) as pipeline:
-            pairs = await pipeline.run_batched(payload, num_batches=_args.num_batches)
+            pairs = await pipeline.run_batched(merged_payload, num_batches=_args.num_batches)
         log.info("Pipeline done: %d result(s)", len(pairs))
         if not pairs:
             log.info("Nothing new processed this run; all visits already in DB")
+
+        if _args.pending_only:
+            log.info("Audit complete (pending-only mode — no Excel export, no FTP upload). Log: %s", LOG_FILE)
+            return
 
         # ── 3. Export the full period for this org from DB to Excel ───────────
         #     Independent of stage 2: runs whether or not new cards were processed,

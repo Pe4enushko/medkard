@@ -16,3 +16,8 @@ from pydantic import BaseModel
 class CheckResponse(BaseModel):
     date: str
     count: int
+
+
+class PushResponse(BaseModel):
+    card_guid: str
+    status: str

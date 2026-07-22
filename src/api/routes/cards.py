@@ -16,13 +16,15 @@ format has to be the actual workbook, not a JSON description of one.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from api.auth import require_org_access
-from api.models import CheckResponse
+from api.models import CheckResponse, PushResponse
 from reporting.api_formatter import ApiFormatter
+from storage.done_cards_storage import DoneCardsStorage
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
@@ -73,3 +75,32 @@ async def export(
     org_id, _ = org_access
     async with ApiFormatter() as formatter:
         return await formatter.export(org_id, since, limit, cursor)
+
+
+def _extract_card_guid(card: dict) -> str | None:
+    priem = card.get("Прием") or {}
+    guid = priem.get("GUID")
+    return str(guid).lower() if guid else None
+
+
+@router.post("/push", response_model=PushResponse)
+async def push(
+    card: dict,
+    org_access: tuple[str, str] = Depends(require_org_access),
+) -> PushResponse:
+    org_id, _ = org_access
+    card_guid = _extract_card_guid(card)
+    if not card_guid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Card is missing Прием.GUID",
+        )
+
+    async with DoneCardsStorage() as storage:
+        await storage.upsert_pending(
+            card_guid=card_guid,
+            card_data=json.dumps(card, ensure_ascii=False),
+            organization_id=org_id,
+        )
+
+    return PushResponse(card_guid=card_guid, status="pending")

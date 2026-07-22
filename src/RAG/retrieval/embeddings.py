@@ -24,8 +24,6 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 
 from dotenv import load_dotenv
-from fastembed import TextEmbedding
-from fastembed.common.model_description import ModelSource, PoolingType
 
 load_dotenv()
 
@@ -92,6 +90,9 @@ class FastEmbedAdapter(EmbeddingAdapter):
     _model = None  # lazy-initialised TextEmbedding
     def __init__(self):
         super().__init__()
+        from fastembed import TextEmbedding  # imported lazily so non-fastembed users don't need it
+        from fastembed.common.model_description import ModelSource, PoolingType
+
         try:
             TextEmbedding.add_custom_model(
                     model="onnx-community/Qwen3-Embedding-0.6B-ONNX",
