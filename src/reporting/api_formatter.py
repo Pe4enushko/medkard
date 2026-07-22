@@ -85,6 +85,26 @@ class _ApiCardsReader(BaseStorage):
             cur = await conn.execute(query, params)
             return await cur.fetchall()
 
+    async def fetch_changed(self, organization_id: str, since: str | None) -> list[dict[str, Any]]:
+        """Rows changed since a client-supplied timestamp, in every status.
+
+        Deliberately kept separate from fetch_export rather than adding a flag to
+        it: this one omits the ignored/broken filter (the raw card_data of an
+        unaudited card is the whole point) and the boundary is inclusive, since
+        the caller derives `since` from a clock rather than from returned rows.
+        """
+        query = (
+            "SELECT card_guid, card_data, status, ignored, broken, "
+            "       formal_result, diag_result, icd_check_result, updated_at "
+            "FROM done_cards "
+            "WHERE organization_id = %(org_id)s::uuid "
+            "  AND updated_at >= COALESCE(%(since)s::timestamptz, now() - interval '7 days') "
+            "ORDER BY updated_at, card_guid"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(query, {"org_id": organization_id, "since": since})
+            return await cur.fetchall()
+
 
 class ApiFormatter:
     """Async context-manager producing pull-API responses for one organization."""
@@ -131,3 +151,12 @@ class ApiFormatter:
         limit>0 uses cursor as an OFFSET for the backfill loop.
         """
         return await self._reader.fetch_export(organization_id, since, limit, cursor)
+
+    async def check_updates(self, organization_id: str, since: str | None) -> list[dict[str, Any]]:
+        """Return cards changed at or after `since`, in every status.
+
+        since=None → the last week, not all history: a bare call shouldn't drain
+        the table. Unlike export, includes pending/ignored/broken cards — the
+        consumer needs a card's raw data whether or not it has been audited.
+        """
+        return await self._reader.fetch_changed(organization_id, since)

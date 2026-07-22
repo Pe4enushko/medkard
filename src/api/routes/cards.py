@@ -77,6 +77,16 @@ async def export(
         return await formatter.export(org_id, since, limit, cursor)
 
 
+@router.get("/check_updates")
+async def check_updates(
+    since: str | None = Query(default=None),
+    org_access: tuple[str, str] = Depends(require_org_access),
+) -> list[dict]:
+    org_id, _ = org_access
+    async with ApiFormatter() as formatter:
+        return await formatter.check_updates(org_id, since)
+
+
 def _extract_card_guid(card: dict) -> str | None:
     priem = card.get("Прием") or {}
     guid = priem.get("GUID")
