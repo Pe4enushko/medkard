@@ -58,6 +58,7 @@ _args = _parser.parse_args()
 BASE = _args.url.rstrip("/")
 TAG = uuid.uuid4().hex[:8]
 ORG_NAME = f"smoke-check-updates-{TAG}"
+KEY_LABEL = f"smoke-{TAG}"
 CARD_GUID = f"smoke-{TAG}-{uuid.uuid4()}"
 
 _PASS, _FAIL = "  \033[32mok\033[0m", "  \033[31mFAILED\033[0m"
@@ -88,19 +89,26 @@ class _Fixtures(BaseStorage):
         async with self._pool.connection() as conn:
             await conn.execute("DELETE FROM organizations WHERE id = %(o)s::uuid", {"o": org_id})
 
-    async def delete_key(self, key_id: str) -> int:
-        """Delete a key row outright.
+    async def delete_keys_by_label(self, label: str) -> int:
+        """Delete this run's key row(s) outright.
 
         revoke-api-key.py only sets revoked_at — right for a real key, whose
         history is worth keeping, but it would leave a dead row behind on every
-        smoke run. This key was minted by this script, labelled smoke-<tag>,
-        and never handed to anyone, so there is no audit trail to preserve.
-        Deleting by the id we just created cannot touch anyone else's key; its
-        api_key_organizations rows go with it (ON DELETE CASCADE, migration 018).
+        smoke run. This key is minted here, never handed to anyone, and lives
+        for seconds, so there is no audit trail to preserve.
+
+        By label rather than by id: create_key inserts the key and its org
+        scoping as two statements without an explicit transaction, so a failure
+        between them leaves an inserted key whose id the caller never received.
+        Nothing ties a key to an organization directly, so dropping the org does
+        NOT cascade to it — verified on a real Postgres: the org and scope rows
+        go, the key survives. The label is smoke-<uuid4>, unique to this run, so
+        this cannot match anyone else's key; the scope rows go with it
+        (ON DELETE CASCADE, migration 018).
         """
         async with self._pool.connection() as conn:
             cur = await conn.execute(
-                "DELETE FROM api_keys WHERE id = %(k)s::uuid", {"k": key_id}
+                "DELETE FROM api_keys WHERE label = %(l)s", {"l": label}
             )
             return cur.rowcount
 
@@ -258,7 +266,7 @@ async def main() -> int:
     async with _Fixtures() as fixtures:
         try:
             org_id = await fixtures.create_org(ORG_NAME)
-            key_id, raw_key = await issue_key(f"smoke-{TAG}", org_id)
+            key_id, raw_key = await issue_key(KEY_LABEL, org_id)
             print(f"  created org id={org_id}, key id={key_id}")
 
             async with httpx.AsyncClient(timeout=30) as client:
@@ -273,13 +281,14 @@ async def main() -> int:
                 if org_id is not None:
                     deleted = await fixtures.delete_cards(org_id)
                     print(f"  deleted {deleted} card(s)")
+                # Before the org: nothing links a key to an organization, so the
+                # org's cascade would not take the key with it. By label rather
+                # than by id, so a key inserted by a create_key that then failed
+                # mid-way — leaving the caller without an id — is still removed.
+                dropped = await fixtures.delete_keys_by_label(KEY_LABEL)
+                print(f"  deleted {dropped} api key row(s) (scopes cascaded)")
                 if key_id is not None:
-                    # Before the org, so the scope rows are observably gone by this
-                    # key's own deletion rather than swept up by the org's cascade.
-                    scopes = await fixtures.count_key_scopes(key_id)
-                    dropped = await fixtures.delete_key(key_id)
                     left = await fixtures.count_key_scopes(key_id)
-                    print(f"  deleted {dropped} api key row, {scopes} scope row(s) cascaded")
                     if left:
                         print(f"  \033[31mWARNING: {left} scope row(s) still present\033[0m")
                 if org_id is not None:
