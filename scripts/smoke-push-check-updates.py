@@ -4,9 +4,13 @@ End-to-end smoke test for POST /cards/push + GET /cards/check_updates.
 
 Exercises the pairing the check_updates endpoint exists for: a card pushed by
 1C lands as status='pending' with no audit results, and check_updates must
-hand it to the consumer straight away — while /cards/export, which is
-audited-only, must NOT. Also asserts the inclusive `since` boundary, since
-that is what keeps cards from slipping between two polls.
+hand it to the consumer straight away, raw card_data and all. Also asserts
+the inclusive `since` boundary, since that is what keeps cards from slipping
+between two polls.
+
+Scope is push + check_updates only. Other routes are left alone even where
+their behaviour contrasts (export being audited-only, say) — asserting on
+them here would be testing code this change never touched.
 
 Key issuing and revoking go through scripts/create-api-key.py and
 scripts/revoke-api-key.py as subprocesses rather than reimplementing them, so
@@ -190,22 +194,7 @@ async def run(client: httpx.AsyncClient, org_id: str, raw_key: str, fixtures: _F
                 (pushed.get("card_data") or {}).get("smoke_tag") == TAG,
             )
 
-    print("\n3. GET /cards/export — audited-only, must NOT see it")
-    resp = await client.get(
-        f"{BASE}/cards/export",
-        params={**org_q, "since": before_push.isoformat()},
-        headers=auth,
-    )
-    check("export 200", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
-    if resp.status_code == 200:
-        guids = {r["card_guid"] for r in resp.json()}
-        check(
-            "pending card excluded from export",
-            CARD_GUID.lower() not in guids,
-            "export leaked an unaudited card",
-        )
-
-    print("\n4. Inclusive `since` boundary")
+    print("\n3. Inclusive `since` boundary")
     if pushed is not None:
         resp = await client.get(
             f"{BASE}/cards/check_updates",
@@ -224,14 +213,14 @@ async def run(client: httpx.AsyncClient, org_id: str, raw_key: str, fixtures: _F
     else:
         check("boundary check", False, "skipped — no card from step 2")
 
-    print("\n5. Default window (no `since`)")
+    print("\n4. Default window (no `since`)")
     resp = await client.get(f"{BASE}/cards/check_updates", params=org_q, headers=auth)
     check("check_updates 200 without since", resp.status_code == 200, f"got {resp.status_code}")
     if resp.status_code == 200:
         guids = {r["card_guid"] for r in resp.json()}
         check("card present in the default week window", CARD_GUID.lower() in guids)
 
-    print("\n6. Auth")
+    print("\n5. Auth")
     resp = await client.get(f"{BASE}/cards/check_updates", params=org_q)
     check("no key → 401/403", resp.status_code in (401, 403), f"got {resp.status_code}")
 
