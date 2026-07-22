@@ -36,12 +36,36 @@ def test_merge_with_no_pending_cards_returns_payload_visits_unchanged():
     assert merged == payload
 
 
-def test_merge_dedups_card_guid_present_in_both_payload_and_pending_keeping_payload_copy():
+def test_merge_dedups_card_guid_present_in_both_payload_and_pending_keeping_pushed_copy():
+    """The pushed copy wins: the org pushed an update because 1C's data is stale."""
     payload = [{"Прием": {"GUID": "A"}, "source": "1c"}]
     pending = [{"card_guid": "a", "card_data": {"Прием": {"GUID": "a"}, "source": "pending"}}]
     merged = merge_pending_cards(payload, pending)
     assert len(merged) == 1
-    assert merged[0]["source"] == "1c"
+    assert merged[0]["source"] == "pending"
+
+
+def test_merge_keeps_payload_ordering_when_a_pushed_card_replaces_a_1c_one():
+    payload = [
+        {"Прием": {"GUID": "A"}, "source": "1c"},
+        {"Прием": {"GUID": "B"}, "source": "1c"},
+        {"Прием": {"GUID": "C"}, "source": "1c"},
+    ]
+    pending = [{"card_guid": "b", "card_data": {"Прием": {"GUID": "b"}, "source": "pending"}}]
+    merged = merge_pending_cards(payload, pending)
+    assert [v["Прием"]["GUID"] for v in merged] == ["A", "b", "C"]
+    assert [v["source"] for v in merged] == ["1c", "pending", "1c"]
+
+
+def test_merge_dedups_repeated_guid_within_pending_rows_keeping_the_last():
+    payload = []
+    pending = [
+        {"card_guid": "a", "card_data": {"Прием": {"GUID": "a"}, "v": 1}},
+        {"card_guid": "a", "card_data": {"Прием": {"GUID": "a"}, "v": 2}},
+    ]
+    merged = merge_pending_cards(payload, pending)
+    assert len(merged) == 1
+    assert merged[0]["v"] == 2
 
 
 def test_merge_does_not_dedup_visits_missing_guid_against_each_other():
