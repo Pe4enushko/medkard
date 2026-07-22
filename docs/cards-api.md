@@ -1,66 +1,67 @@
 # Cards API (`/cards`)
 
-Pull API for organizations integrating with medkard: service-to-service
-traffic over a private WireGuard tunnel, authenticated by a single bearer
-API key scoped to specific organizations (`api/auth.py`). Every route takes
-`?org=<name>` (case-insensitive) to name the target organization.
+Pull-API для организаций, интегрирующихся с medkard: трафик сервис-сервис
+через приватный WireGuard-туннель, аутентификация — единый bearer API-ключ,
+привязанный к конкретным организациям (`api/auth.py`). Каждый роут
+принимает `?org=<название>` (регистр не важен) — так указывается нужная
+организация.
 
-Routes live in `src/api/routes/cards.py`; smoke-test any of them with
-`scripts/test-cards-route.sh` (mock data, no client needed).
+Роуты реализованы в `src/api/routes/cards.py`; проверить любой из них
+можно скриптом `scripts/test-cards-route.sh` — с мок-данными, без
+написания клиента.
 
 ## GET /cards/check
 
-Cheap row-count check for a given date. Query params: `date` (`YYYY-MM-DD`),
-`org`.
+Дешёвая проверка количества карт за дату. Параметры запроса: `date`
+(`YYYY-MM-DD`), `org`.
 
-Returns JSON:
+Возвращает JSON:
 
 ```json
 {"date": "2026-07-01", "count": 42}
 ```
 
-Integrating service typically compares `count` against how many rows it
-last ingested, and calls `pull` again on a mismatch.
+Интегрирующийся сервис обычно сравнивает `count` с тем, сколько строк он
+загрузил в прошлый раз, и при расхождении повторно вызывает `pull`.
 
 ## GET /cards/pull
 
-Returns the audited cards for a date as an xlsx workbook (not JSON) — the
-integrating service stores the file and runs it through its own RAG
-ingestion pipeline. Query params: `date`, `org`.
+Возвращает проаудированные карты за дату как xlsx-файл (не JSON) —
+интегрирующийся сервис сохраняет файл и пропускает его через свой
+собственный RAG-пайплайн загрузки. Параметры запроса: `date`, `org`.
 
 - `200` — `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`,
   `Content-Disposition: attachment; filename="report_<org>_<date>.xlsx"`
-- `404` — no cards for that org/date
+- `404` — нет карт для этой организации/даты
 
 ## GET /cards/export
 
-Paginated JSON export of raw (not necessarily audited) card data. Query
-params:
+Постраничный JSON-экспорт «сырых» (не обязательно проаудированных) данных
+карт. Параметры запроса:
 
-- `org` — required
-- `since` — optional, only cards updated at/after this timestamp
-- `limit` — max rows to return (`0` = no limit)
-- `cursor` — pagination offset
+- `org` — обязателен
+- `since` — опционально, только карты, обновлённые в это время или позже
+- `limit` — макс. число строк (`0` = без ограничения)
+- `cursor` — смещение для пагинации
 
-Returns a JSON array of row dicts.
+Возвращает JSON-массив словарей (строк).
 
 ## POST /cards/push
 
-*Not yet on `release`/`main` — implemented on `cards-push-endpoint` /
-`dev`. Documented here for when it lands.*
+Принимает от 1C-организации одну обновлённую карту, чтобы она попала в
+ближайший ночной аудиторский батч, не дожидаясь планового pull-а.
+Параметр запроса: `org`. Тело: сырой JSON карты (тот же формат, что 1C
+шлёт в остальных местах).
 
-Accepts a single updated card from a 1C org, to be merged into the next
-nightly audit batch rather than waiting for the scheduled pull. Query
-param: `org`. Body: the raw card JSON (same shape 1C sends elsewhere).
+Валидация:
+- отклоняется (`422`), если отсутствует `Прием.GUID`
+- отклоняется (`422`), если в карте нет ни одного из ключей
+  `Пациент`/`Услуги`/`Диагнозы` — это расценивается как пустая оболочка, а
+  не реальный визит (пустые значения в этих ключах допустимы, отклоняется
+  только полное отсутствие ключей)
 
-Validation:
-- rejects (`422`) if `Прием.GUID` is missing
-- rejects (`422`) if the card has none of `Пациент`/`Услуги`/`Диагнозы` —
-  an empty shell rather than a real visit (empty values in those keys are
-  still accepted; only total absence is rejected)
-
-On success, upserts the card as pending (`storage/done_cards_storage.py`)
-and returns:
+При успехе карта сохраняется со статусом «в очереди»
+(`storage/done_cards_storage.py`) и возвращается:
 
 ```json
 {"card_guid": "<guid>", "status": "pending"}
