@@ -2,9 +2,9 @@
 Integration tests for GET /cards/check_updates — real Postgres via TestClient with
 an api key scoped to Alenka + MDS. Requests carry a `since` bounded to this test's
 own rows, so they never scan the whole table. Covers what distinguishes this
-endpoint from /cards/export: every status is returned (pending/ignored/broken
-included), the `since` boundary is inclusive, and a bare call falls back to a
-one-week window rather than all history.
+endpoint from /cards/export: pending cards are returned too (ignored/broken are
+NOT — excluded by decision of 2026-07-23), the `since` boundary is inclusive,
+and a bare call falls back to a one-week window rather than all history.
 """
 from __future__ import annotations
 
@@ -127,9 +127,10 @@ def test_check_updates_unknown_org_404(client: TestClient, test_key: str):
     assert resp.status_code == 404
 
 
-def test_check_updates_returns_every_status(client, test_key, seeded):
-    """The point of the endpoint: unlike export, pending/ignored/broken cards are
-    all returned, with their raw card_data."""
+def test_check_updates_returns_pending_but_filters_ignored_broken(client, test_key, seeded):
+    """The point of the endpoint: unlike export, pending cards are returned with
+    their raw card_data. ignored/broken are excluded (decision 2026-07-23 —
+    feedback will show whether anyone needs them)."""
     guids, cutoff = seeded
     resp = client.get(
         "/cards/check_updates",
@@ -141,14 +142,13 @@ def test_check_updates_returns_every_status(client, test_key, seeded):
     assert isinstance(body, list)
     by_guid = {r["card_guid"]: r for r in body}
 
-    assert set(guids.values()) <= set(by_guid)          # nothing filtered out
+    assert guids["pending"] in by_guid
+    assert guids["done"] in by_guid
+    assert guids["ignored"] not in by_guid
+    assert guids["broken"] not in by_guid
 
-    # One status per card: the ignored/broken booleans are folded into it, so a
-    # consumer reads the outcome from one field instead of re-deriving it.
     assert by_guid[guids["pending"]]["status"] == "pending"
     assert by_guid[guids["done"]]["status"] == "done"
-    assert by_guid[guids["ignored"]]["status"] == "ignored"
-    assert by_guid[guids["broken"]]["status"] == "broken"
 
     sample = by_guid[guids["pending"]]
     assert isinstance(sample["card_data"], dict)        # native JSONB, raw data present
@@ -201,7 +201,7 @@ async def test_check_updates_is_org_scoped(client, test_key, mds_org_id, seeded)
         )
         assert resp.status_code == 200
         got = {r["card_guid"] for r in resp.json()}
-        assert set(guids.values()) <= got
+        assert {guids["pending"], guids["done"]} <= got
         assert mds_guid not in got
     finally:
         async with await psycopg.AsyncConnection.connect(_conninfo(), autocommit=True) as conn:
@@ -239,7 +239,7 @@ async def test_check_updates_without_since_defaults_to_a_week(client, test_key, 
         )
         assert resp.status_code == 200
         got = {r["card_guid"] for r in resp.json()}
-        assert set(guids.values()) <= got      # this week's rows present
+        assert {guids["pending"], guids["done"]} <= got   # this week's rows present
         assert old_guid not in got             # 30-day-old row outside the window
     finally:
         async with await psycopg.AsyncConnection.connect(_conninfo(), autocommit=True) as conn:

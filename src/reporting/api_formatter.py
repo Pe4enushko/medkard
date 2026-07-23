@@ -86,19 +86,24 @@ class _ApiCardsReader(BaseStorage):
             return await cur.fetchall()
 
     async def fetch_changed(self, organization_id: str, since: str | None) -> list[dict[str, Any]]:
-        """Rows changed since a client-supplied timestamp, in every status.
+        """Rows changed since a client-supplied timestamp: done and pending.
 
         Deliberately kept separate from fetch_export rather than adding a flag to
-        it: this one omits the ignored/broken filter (the raw card_data of an
-        unaudited card is the whole point) and the boundary is inclusive, since
+        it: this one returns pending cards too (the raw card_data of a not-yet-
+        audited card is the whole point) and the boundary is inclusive, since
         the caller derives `since` from a clock rather than from returned rows.
 
-        status/ignored/broken are collapsed into a single status on the way out.
-        They already describe one thing between them — migration 014 forbids
-        ignored and broken overlapping, and 025's status treats 'done' as
-        "audited, ignored or broken" — so the wire format states the outcome
-        once instead of making every consumer re-derive it from three fields.
-        Storage keeps all three; this is a response shape, not a schema change.
+        ignored/broken cards are excluded (product decision 2026-07-23): nobody
+        has asked for them yet, and feedback will show whether anyone does.
+        Consequence for consumers: a card delivered as pending that later turns
+        ignored/broken never gets an update — it stays pending on their side.
+
+        status/ignored/broken are collapsed into a single status on the way out
+        (migration 014 forbids ignored and broken overlapping; 025's status
+        treats 'done' as "audited, ignored or broken"). With the filter the
+        CASE branches can't fire — kept so that loosening the filter can never
+        leak an ignored card labeled 'done'. Storage keeps all three columns;
+        this is a response shape, not a schema change.
         """
         query = (
             "SELECT card_guid, card_data, "
@@ -108,6 +113,7 @@ class _ApiCardsReader(BaseStorage):
             "       formal_result, diag_result, icd_check_result, updated_at "
             "FROM done_cards "
             "WHERE organization_id = %(org_id)s::uuid "
+            "  AND ignored = FALSE AND broken = FALSE "
             "  AND updated_at >= COALESCE(%(since)s::timestamptz, now() - interval '7 days') "
             "ORDER BY updated_at, card_guid"
         )
