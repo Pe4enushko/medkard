@@ -86,18 +86,34 @@ class _ApiCardsReader(BaseStorage):
             return await cur.fetchall()
 
     async def fetch_changed(self, organization_id: str, since: str | None) -> list[dict[str, Any]]:
-        """Rows changed since a client-supplied timestamp, in every status.
+        """Rows changed since a client-supplied timestamp: done and pending.
 
         Deliberately kept separate from fetch_export rather than adding a flag to
-        it: this one omits the ignored/broken filter (the raw card_data of an
-        unaudited card is the whole point) and the boundary is inclusive, since
+        it: this one returns pending cards too (the raw card_data of a not-yet-
+        audited card is the whole point) and the boundary is inclusive, since
         the caller derives `since` from a clock rather than from returned rows.
+
+        ignored/broken cards are excluded (product decision 2026-07-23): nobody
+        has asked for them yet, and feedback will show whether anyone does.
+        Consequence for consumers: a card delivered as pending that later turns
+        ignored/broken never gets an update — it stays pending on their side.
+
+        status/ignored/broken are collapsed into a single status on the way out
+        (migration 014 forbids ignored and broken overlapping; 025's status
+        treats 'done' as "audited, ignored or broken"). With the filter the
+        CASE branches can't fire — kept so that loosening the filter can never
+        leak an ignored card labeled 'done'. Storage keeps all three columns;
+        this is a response shape, not a schema change.
         """
         query = (
-            "SELECT card_guid, card_data, status, ignored, broken, "
+            "SELECT card_guid, card_data, "
+            "       CASE WHEN broken THEN 'broken' "
+            "            WHEN ignored THEN 'ignored' "
+            "            ELSE status END AS status, "
             "       formal_result, diag_result, icd_check_result, updated_at "
             "FROM done_cards "
             "WHERE organization_id = %(org_id)s::uuid "
+            "  AND ignored = FALSE AND broken = FALSE "
             "  AND updated_at >= COALESCE(%(since)s::timestamptz, now() - interval '7 days') "
             "ORDER BY updated_at, card_guid"
         )
@@ -158,5 +174,7 @@ class ApiFormatter:
         since=None → the last week, not all history: a bare call shouldn't drain
         the table. Unlike export, includes pending/ignored/broken cards — the
         consumer needs a card's raw data whether or not it has been audited.
+        Each row's outcome arrives as a single `status`:
+        pending | done | ignored | broken.
         """
         return await self._reader.fetch_changed(organization_id, since)
