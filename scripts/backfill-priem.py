@@ -111,7 +111,11 @@ async def _process_day(
 
     log.info("📅 %s: requesting 1C…", day)
     t_start = time.monotonic()
-    payload = client.fetch_json_for_period(datebegin=one_c_day, dateend=one_c_day)
+    # In a thread: the sync urllib call would otherwise block the event loop,
+    # starving the psycopg pool's background connect/health tasks.
+    payload = await asyncio.to_thread(
+        client.fetch_json_for_period, datebegin=one_c_day, dateend=one_c_day
+    )
     visits = AppointmentParser.split(payload)
     log.info("📅 %s: 1C returned %d visit(s) in %.1f s", day, len(visits), time.monotonic() - t_start)
 
