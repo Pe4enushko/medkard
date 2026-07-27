@@ -7,6 +7,7 @@ This script walks the period day by day — one sequential 1C request per
 date — matches every fetched visit to its done_cards row by Прием.GUID
 and merges the fresh "Прием" values into the stored card_data (fresh
 keys overwrite stored ones, keys missing from the fresh block are kept).
+Cards whose stored block already matches the fresh one are not written.
 
 Run from project root:
     python scripts/backfill-priem.py ORG --since YYYY-MM-DD [--until YYYY-MM-DD] [--dry-run] [-y]
@@ -26,6 +27,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
@@ -106,9 +108,15 @@ async def _process_day(
 ) -> None:
     day = day_dt.date().isoformat()
     one_c_day = day_dt.strftime(ONE_C_DATE_FMT)
+
+    log.info("📅 %s: requesting 1C…", day)
+    t_start = time.monotonic()
     payload = client.fetch_json_for_period(datebegin=one_c_day, dateend=one_c_day)
     visits = AppointmentParser.split(payload)
-    day_updated = day_missing = 0
+    log.info("📅 %s: 1C returned %d visit(s) in %.1f s", day, len(visits), time.monotonic() - t_start)
+
+    verb = "would change" if dry_run else "changed"
+    day_changed = day_unchanged = day_missing = 0
 
     for visit in visits:
         guid, priem = _visit_priem(visit)
@@ -118,25 +126,33 @@ async def _process_day(
             log.warning("📅 %s: visit without Прием.GUID skipped", day)
             continue
 
-        if dry_run:
-            stored = await storage.get_priem(guid)
-            if stored is None:
-                day_missing += 1
-            else:
-                day_updated += 1
-                changed = _changed_keys(stored, priem)
-                if changed:
-                    log.info("📅 %s: would update guid=%s keys=%s", day, guid, ", ".join(changed))
-        elif await storage.merge_priem(card_guid=guid, priem=json.dumps(priem, ensure_ascii=False)):
-            day_updated += 1
-        else:
+        stored = await storage.get_priem(guid)
+        if stored is None:
             day_missing += 1
+            log.info("📅 %s: no done_cards row for guid=%s", day, guid)
+            continue
 
-    totals["updated"] += day_updated
+        changed = _changed_keys(stored, priem)
+        if not changed:
+            day_unchanged += 1
+            log.debug("📅 %s: guid=%s already up to date", day, guid)
+            continue
+
+        if not dry_run:
+            await storage.merge_priem(card_guid=guid, priem=json.dumps(priem, ensure_ascii=False))
+        day_changed += 1
+        log.info("📅 %s: guid=%s %s keys: %s", day, guid, verb, ", ".join(changed))
+
+    totals["updated"] += day_changed
+    totals["unchanged"] += day_unchanged
     totals["not_found"] += day_missing
     log.info(
-        "📅 %s: %d visit(s), %d %s, %d without a done_cards row",
-        day, len(visits), day_updated, "would update" if dry_run else "updated", day_missing,
+        "📅 %s: %d visit(s) — %d %s, %d already up to date, %d without a done_cards row",
+        day, len(visits), day_changed, verb, day_unchanged, day_missing,
+    )
+    log.info(
+        "📊 total so far: %d visit(s) — %d %s, %d already up to date, %d without a done_cards row, %d without GUID",
+        totals["visits"], totals["updated"], verb, totals["unchanged"], totals["not_found"], totals["no_guid"],
     )
 
 
@@ -161,7 +177,7 @@ async def main() -> None:
             sys.exit(0)
 
     client = ONE_C_CLIENTS[args.org].from_env()
-    totals = {"visits": 0, "updated": 0, "not_found": 0, "no_guid": 0}
+    totals = {"visits": 0, "updated": 0, "unchanged": 0, "not_found": 0, "no_guid": 0}
     failed_days: list[str] = []
 
     async with DoneCardsStorage() as storage:
@@ -173,11 +189,11 @@ async def main() -> None:
                 log.error("📅 %s: 1C fetch failed, skipping day: %s", day.date().isoformat(), exc)
 
     log.info(
-        "Backfill %s: %d visit(s) over %d day(s) — %d %s, %d without a done_cards row, %d without GUID",
+        "Backfill %s: %d visit(s) over %d day(s) — %d %s, %d already up to date, %d without a done_cards row, %d without GUID",
         "dry-run complete" if args.dry_run else "complete",
         totals["visits"], len(days),
-        totals["updated"], "would update" if args.dry_run else "updated",
-        totals["not_found"], totals["no_guid"],
+        totals["updated"], "would change" if args.dry_run else "changed",
+        totals["unchanged"], totals["not_found"], totals["no_guid"],
     )
     if failed_days:
         log.error("1C fetch failed for %d day(s): %s", len(failed_days), ", ".join(failed_days))
