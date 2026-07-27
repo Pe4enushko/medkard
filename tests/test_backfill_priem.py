@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -44,10 +45,10 @@ def test_visit_priem_missing_block():
     assert backfill._visit_priem({"Прием": {"DATE": "01.07.2026"}}) == (None, {"DATE": "01.07.2026"})
 
 
-def test_changed_keys_reports_new_and_differing_only():
+def test_diff_keys_reports_set_and_dropped():
     stored = {"GUID": "ab-1", "DATE": "01.07.2026", "Кабинет": "5"}
     fresh = {"GUID": "ab-1", "DATE": "02.07.2026", "Филиал": "Центр"}
-    assert backfill._changed_keys(stored, fresh) == ["DATE", "Филиал"]
+    assert backfill._diff_keys(stored, fresh) == "set: DATE, Филиал; dropped: Кабинет"
 
 
 class _FakeClient:
@@ -63,13 +64,13 @@ class _FakeClient:
 class _FakeStorage:
     def __init__(self, stored):
         self._stored = stored
-        self.merged = []
+        self.replaced = {}
 
     async def get_priem(self, card_guid):
         return self._stored.get(card_guid)
 
-    async def merge_priem(self, *, card_guid, priem):
-        self.merged.append(card_guid)
+    async def replace_priem(self, *, card_guid, priem):
+        self.replaced[card_guid] = json.loads(priem)
         return True
 
 
@@ -81,7 +82,7 @@ def _totals():
     return {"visits": 0, "updated": 0, "unchanged": 0, "not_found": 0, "no_guid": 0}
 
 
-async def test_process_day_merges_only_changed_cards():
+async def test_process_day_replaces_only_differing_cards():
     client = _FakeClient([
         _visit("changed", DATE="02.07.2026"),
         _visit("same", DATE="01.07.2026"),
@@ -97,8 +98,21 @@ async def test_process_day_merges_only_changed_cards():
     await backfill._process_day(_d("2026-07-01"), client, storage, False, totals)
 
     assert client.requests == [("01.07.2026", "01.07.2026")]
-    assert storage.merged == ["changed"]
+    assert list(storage.replaced) == ["changed"]
     assert totals == {"visits": 4, "updated": 1, "unchanged": 1, "not_found": 1, "no_guid": 1}
+
+
+async def test_process_day_replaces_block_wholesale_dropping_stale_keys():
+    client = _FakeClient([_visit("g1", DATE="01.07.2026")])
+    storage = _FakeStorage({
+        "g1": {"GUID": "g1", "DATE": "01.07.2026", "Устаревший": "мусор"},
+    })
+    totals = _totals()
+
+    await backfill._process_day(_d("2026-07-01"), client, storage, False, totals)
+
+    assert storage.replaced["g1"] == {"GUID": "g1", "DATE": "01.07.2026"}
+    assert totals["updated"] == 1
 
 
 async def test_process_day_dry_run_writes_nothing():
@@ -108,5 +122,5 @@ async def test_process_day_dry_run_writes_nothing():
 
     await backfill._process_day(_d("2026-07-01"), client, storage, True, totals)
 
-    assert storage.merged == []
+    assert storage.replaced == {}
     assert totals["updated"] == 1

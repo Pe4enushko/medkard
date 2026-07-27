@@ -319,11 +319,12 @@ class DoneCardsStorage(BaseStorage):
             row = await cur.fetchone()
         return row["priem"] if row else None
 
-    async def merge_priem(self, *, card_guid: str, priem: str) -> bool:
-        """Merge a fresh 1C "Прием" block into card_data of the matching row.
+    async def replace_priem(self, *, card_guid: str, priem: str) -> bool:
+        """Replace the "Прием" block of card_data with the fresh 1C one.
 
-        Keys present in *priem* overwrite the stored ones; keys absent from
-        it are kept. Matching is case-insensitive (see :meth:`get_priem`).
+        The block is overwritten as a whole — stale keys inside it do not
+        survive; the rest of card_data is untouched. Matching is
+        case-insensitive (see :meth:`get_priem`).
 
         Returns True if a row was updated.
         """
@@ -332,11 +333,7 @@ class DoneCardsStorage(BaseStorage):
                 cur = await conn.execute(
                     """
                     UPDATE done_cards
-                    SET card_data = jsonb_set(
-                        card_data,
-                        '{Прием}',
-                        COALESCE(card_data -> 'Прием', '{}'::jsonb) || %(priem)s::jsonb
-                    )
+                    SET card_data = jsonb_set(card_data, '{Прием}', %(priem)s::jsonb)
                     WHERE lower(card_guid) = lower(%(guid)s)
                       AND card_data IS NOT NULL
                     RETURNING id::text
@@ -345,10 +342,10 @@ class DoneCardsStorage(BaseStorage):
                 )
                 row = await cur.fetchone()
             if row:
-                logger.info("💾 done_cards MERGE_PRIEM OK id=%s guid=%s", row["id"], card_guid)
+                logger.info("💾 done_cards REPLACE_PRIEM OK id=%s guid=%s", row["id"], card_guid)
             return row is not None
         except Exception:
-            logger.exception("💾 done_cards MERGE_PRIEM FAILED guid=%s", card_guid)
+            logger.exception("💾 done_cards REPLACE_PRIEM FAILED guid=%s", card_guid)
             raise
 
     async def get_pending(self, organization_id: str | None = None) -> list[dict]:

@@ -5,9 +5,9 @@ Backfill the "Прием" block in done_cards.card_data from 1C.
 1C now returns more fields inside "Прием" than older stored cards carry.
 This script walks the period day by day — one sequential 1C request per
 date — matches every fetched visit to its done_cards row by Прием.GUID
-and merges the fresh "Прием" values into the stored card_data (fresh
-keys overwrite stored ones, keys missing from the fresh block are kept).
-Cards whose stored block already matches the fresh one are not written.
+and replaces the stored "Прием" block with the fresh one as a whole;
+the rest of card_data is untouched. Cards whose stored block already
+equals the fresh one are not written.
 
 Run from project root:
     python scripts/backfill-priem.py ORG --since YYYY-MM-DD [--until YYYY-MM-DD] [--dry-run] [-y]
@@ -104,8 +104,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _changed_keys(stored: dict[str, Any], fresh: dict[str, Any]) -> list[str]:
-    return sorted(k for k, v in fresh.items() if stored.get(k) != v)
+def _diff_keys(stored: dict[str, Any], fresh: dict[str, Any]) -> str:
+    """Human-readable summary of what replacing *stored* with *fresh* changes."""
+    changed = sorted(k for k, v in fresh.items() if stored.get(k) != v)
+    dropped = sorted(k for k in stored if k not in fresh)
+    parts = []
+    if changed:
+        parts.append("set: " + ", ".join(changed))
+    if dropped:
+        parts.append("dropped: " + ", ".join(dropped))
+    return "; ".join(parts)
 
 
 async def _process_day(
@@ -146,16 +154,15 @@ async def _process_day(
             log.info("📅 %s: [%d/%d] no done_cards row for guid=%s", day, idx, total, guid)
             continue
 
-        changed = _changed_keys(stored, priem)
-        if not changed:
+        if stored == priem:
             day_unchanged += 1
             log.info("📅 %s: [%d/%d] guid=%s already up to date", day, idx, total, guid)
             continue
 
         if not dry_run:
-            await storage.merge_priem(card_guid=guid, priem=json.dumps(priem, ensure_ascii=False))
+            await storage.replace_priem(card_guid=guid, priem=json.dumps(priem, ensure_ascii=False))
         day_changed += 1
-        log.info("📅 %s: [%d/%d] guid=%s %s keys: %s", day, idx, total, guid, verb, ", ".join(changed))
+        log.info("📅 %s: [%d/%d] guid=%s %s — %s", day, idx, total, guid, verb, _diff_keys(stored, priem))
 
     totals["updated"] += day_changed
     totals["unchanged"] += day_unchanged
