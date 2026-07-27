@@ -9,12 +9,12 @@ and merges the fresh "Прием" values into the stored card_data (fresh
 keys overwrite stored ones, keys missing from the fresh block are kept).
 
 Run from project root:
-    python scripts/backfill-priem.py ORG --since DD.MM.YYYY [--until DD.MM.YYYY] [--dry-run] [-y]
+    python scripts/backfill-priem.py ORG --since YYYY-MM-DD [--until YYYY-MM-DD] [--dry-run] [-y]
 
 Options:
     ORG        1C organization: Alenka or MDS
-    --since    First date of the period (DD.MM.YYYY), inclusive
-    --until    Last date of the period (DD.MM.YYYY), inclusive (default: today)
+    --since    First date of the period (YYYY-MM-DD), inclusive
+    --until    Last date of the period (YYYY-MM-DD), inclusive (default: today)
     --dry-run  Fetch and match only — report what would change, write nothing
     -y         Skip confirmation prompt
 """
@@ -42,7 +42,7 @@ ONE_C_CLIENTS: dict[str, type[OneCClient]] = {
     "MDS": MdsOneCClient,
 }
 
-DATE_FMT = "%d.%m.%Y"
+ONE_C_DATE_FMT = "%d.%m.%Y"  # the only format the 1C endpoint accepts
 LOGS_DIR = ROOT / "logs"
 
 log = logging.getLogger(__name__)
@@ -50,16 +50,16 @@ log = logging.getLogger(__name__)
 
 def _parse_date(value: str, option: str) -> datetime:
     try:
-        return datetime.strptime(value, DATE_FMT)
+        return datetime.strptime(value, "%Y-%m-%d")
     except ValueError:
-        raise SystemExit(f"{option} must be DD.MM.YYYY, got {value!r}")
+        raise SystemExit(f"{option} must be YYYY-MM-DD, got {value!r}")
 
 
-def _date_range(since: datetime, until: datetime) -> Iterator[str]:
-    """Yield every date from *since* to *until* inclusive as DD.MM.YYYY."""
+def _date_range(since: datetime, until: datetime) -> Iterator[datetime]:
+    """Yield every date from *since* to *until* inclusive."""
     day = since
     while day <= until:
-        yield day.strftime(DATE_FMT)
+        yield day
         day += timedelta(days=1)
 
 
@@ -86,8 +86,8 @@ def _setup_logging() -> Path:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("org", choices=tuple(ONE_C_CLIENTS), help="1C organization")
-    parser.add_argument("--since", required=True, metavar="DD.MM.YYYY", help="First date of the period, inclusive")
-    parser.add_argument("--until", default=None, metavar="DD.MM.YYYY", help="Last date of the period, inclusive (default: today)")
+    parser.add_argument("--since", required=True, metavar="YYYY-MM-DD", help="First date of the period, inclusive")
+    parser.add_argument("--until", default=None, metavar="YYYY-MM-DD", help="Last date of the period, inclusive (default: today)")
     parser.add_argument("--dry-run", action="store_true", help="Fetch and match only — write nothing")
     parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
     return parser.parse_args(argv)
@@ -98,13 +98,15 @@ def _changed_keys(stored: dict[str, Any], fresh: dict[str, Any]) -> list[str]:
 
 
 async def _process_day(
-    day: str,
+    day_dt: datetime,
     client: OneCClient,
     storage: DoneCardsStorage,
     dry_run: bool,
     totals: dict[str, int],
 ) -> None:
-    payload = client.fetch_json_for_period(datebegin=day, dateend=day)
+    day = day_dt.date().isoformat()
+    one_c_day = day_dt.strftime(ONE_C_DATE_FMT)
+    payload = client.fetch_json_for_period(datebegin=one_c_day, dateend=one_c_day)
     visits = AppointmentParser.split(payload)
     day_updated = day_missing = 0
 
@@ -143,13 +145,13 @@ async def main() -> None:
     since = _parse_date(args.since, "--since")
     until = _parse_date(args.until, "--until") if args.until else datetime.now()
     if since > until:
-        raise SystemExit(f"--since {args.since} is after --until {until.strftime(DATE_FMT)}")
+        raise SystemExit(f"--since {args.since} is after --until {until.date().isoformat()}")
 
     log_file = _setup_logging()
     days = list(_date_range(since, until))
 
     print(f"Organization: {args.org}")
-    print(f"Period: {days[0]} — {days[-1]} ({len(days)} day(s), one 1C request per day)")
+    print(f"Period: {days[0].date().isoformat()} — {days[-1].date().isoformat()} ({len(days)} day(s), one 1C request per day)")
     if args.dry_run:
         print("Mode: dry-run (no DB writes)")
     if not args.y:
@@ -167,8 +169,8 @@ async def main() -> None:
             try:
                 await _process_day(day, client, storage, args.dry_run, totals)
             except RuntimeError as exc:
-                failed_days.append(day)
-                log.error("📅 %s: 1C fetch failed, skipping day: %s", day, exc)
+                failed_days.append(day.date().isoformat())
+                log.error("📅 %s: 1C fetch failed, skipping day: %s", day.date().isoformat(), exc)
 
     log.info(
         "Backfill %s: %d visit(s) over %d day(s) — %d %s, %d without a done_cards row, %d without GUID",

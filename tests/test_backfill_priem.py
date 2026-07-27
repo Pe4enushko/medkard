@@ -10,17 +10,27 @@ _spec.loader.exec_module(backfill)
 
 
 def _d(value: str) -> datetime:
-    return datetime.strptime(value, "%d.%m.%Y")
+    return datetime.strptime(value, "%Y-%m-%d")
 
 
 def test_date_range_single_day():
-    assert list(backfill._date_range(_d("01.07.2026"), _d("01.07.2026"))) == ["01.07.2026"]
+    assert list(backfill._date_range(_d("2026-07-01"), _d("2026-07-01"))) == [_d("2026-07-01")]
 
 
 def test_date_range_spans_month_boundary():
-    assert list(backfill._date_range(_d("30.06.2026"), _d("02.07.2026"))) == [
-        "30.06.2026", "01.07.2026", "02.07.2026",
+    assert list(backfill._date_range(_d("2026-06-30"), _d("2026-07-02"))) == [
+        _d("2026-06-30"), _d("2026-07-01"), _d("2026-07-02"),
     ]
+
+
+def test_parse_date_accepts_iso_only():
+    assert backfill._parse_date("2026-07-01", "--since") == _d("2026-07-01")
+    try:
+        backfill._parse_date("01.07.2026", "--since")
+    except SystemExit as exc:
+        assert "YYYY-MM-DD" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit for non-ISO date")
 
 
 def test_visit_priem_extracts_guid():
