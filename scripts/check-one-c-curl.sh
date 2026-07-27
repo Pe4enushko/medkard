@@ -2,9 +2,10 @@
 # Reproduce, with curl, the exact request scripts/audit-one-c-period.py sends to 1C.
 #
 # Mirrors integrations/one_c.py:
-#   - GET
+#   - Alenka: GET, query params datebegin=DD.MM.YYYY & dateend=DD.MM.YYYY
+#     (same separator logic)
+#   - MDS: POST {"date": "YYYY-MM-DD"}, one request per day of the period
 #   - Basic auth from <ORG>_ONE_C_LOGIN / <ORG>_ONE_C_PASSWORD
-#   - query params datebegin=DD.MM.YYYY & dateend=DD.MM.YYYY (same separator logic)
 #   - Accept: application/json
 #
 # Usage:
@@ -38,17 +39,45 @@ if [ "$REQUIRES_PASSWORD" = "1" ] && [ -z "$PASSWORD" ]; then
   echo "${PREFIX}_ONE_C_PASSWORD is not set" >&2; exit 1
 fi
 
+# DD.MM.YYYY -> YYYY-MM-DD
+to_iso() {
+  local d="$1"
+  IFS=. read -r dd mm yyyy <<< "$d"
+  echo "${yyyy}-${mm}-${dd}"
+}
+
+echo "ORG:        $ORG"
+echo "URL (base): $URL"
+echo "Login:      $LOGIN"
+
+if [ "$ORG" = "MDS" ]; then
+  # One POST per day of the period, same as MdsOneCClient.fetch_json_for_period.
+  ISO_BEGIN="$(to_iso "$DATEBEGIN")"
+  ISO_END="$(to_iso "$DATEEND")"
+  day="$ISO_BEGIN"
+  while [ "$(date -d "$day" +%s)" -le "$(date -d "$ISO_END" +%s)" ]; do
+    echo "---"
+    echo "Request:    POST $URL  body: {\"date\": \"$day\"}"
+    curl -sS -i \
+      --max-time "$TIMEOUT" \
+      -u "${LOGIN}:${PASSWORD}" \
+      -H "Accept: application/json" \
+      -H "Content-Type: application/json" \
+      -X POST "$URL" \
+      -d "{\"date\": \"$day\"}"
+    echo
+    day="$(date -d "$day + 1 day" +%Y-%m-%d)"
+  done
+  exit 0
+fi
+
 # Same separator logic as one_c.py: '&' if the URL already has a '?', else '?'.
 case "$URL" in
   *\?*) SEP="&" ;;
   *)    SEP="?" ;;
 esac
-REQUEST_URL="${URL}${SEP}datebegin=${DATEBEGIN}&dateend=${DATEEND}"
 
-echo "ORG:        $ORG"
-echo "URL (base): $URL"
 echo "Request:    ${URL}${SEP}datebegin=${DATEBEGIN}&dateend=${DATEEND}"
-echo "Login:      $LOGIN"
 echo "---"
 
 # -u sends Basic auth exactly like base64(login:password) in one_c.py.

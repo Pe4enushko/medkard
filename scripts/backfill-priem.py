@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""
+Backfill the "Прием" block in done_cards.card_data from 1C.
+
+1C now returns more fields inside "Прием" than older stored cards carry.
+This script walks the period day by day — one sequential 1C request per
+date — matches every fetched visit to its done_cards row by Прием.GUID
+and replaces the stored "Прием" block with the fresh one as a whole;
+the rest of card_data is untouched. Cards whose stored block already
+equals the fresh one are not written.
+
+Run from project root:
+    python scripts/backfill-priem.py ORG --since YYYY-MM-DD [--until YYYY-MM-DD] [--dry-run] [-y]
+
+Options:
+    ORG        1C organization: Alenka or MDS
+    --since    First date of the period (YYYY-MM-DD), inclusive
+    --until    Last date of the period (YYYY-MM-DD), inclusive (default: today)
+    --dry-run  Fetch and match only — report what would change, write nothing
+    -y         Skip confirmation prompt
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+import sys
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Iterator
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient
+from parsers.json_parser import AppointmentParser
+from storage.done_cards_storage import DoneCardsStorage
+
+ONE_C_CLIENTS: dict[str, type[OneCClient]] = {
+    "Alenka": AlenkaOneCClient,
+    "MDS": MdsOneCClient,
+}
+
+ONE_C_DATE_FMT = "%d.%m.%Y"  # the only format the 1C endpoint accepts
+LOGS_DIR = ROOT / "logs"
+
+log = logging.getLogger(__name__)
+
+
+def _parse_date(value: str, option: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise SystemExit(f"{option} must be YYYY-MM-DD, got {value!r}")
+
+
+def _date_range(since: datetime, until: datetime) -> Iterator[datetime]:
+    """Yield every date from *since* to *until* inclusive."""
+    day = since
+    while day <= until:
+        yield day
+        day += timedelta(days=1)
+
+
+def _visit_priem(visit: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    priem = visit.get("Прием") or {}
+    guid = priem.get("GUID")
+    return (str(guid) if guid else None), priem
+
+
+def _setup_logging(debug: bool = False) -> Path:
+    LOGS_DIR.mkdir(exist_ok=True)
+    log_file = LOGS_DIR / f"backfill-priem_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    logging.basicConfig(
+        level=logging.DEBUG if debug else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_file, encoding="utf-8"),
+        ],
+    )
+    if debug:
+        # Dump raw HTTP traffic (request/response lines and headers) to stdout.
+        # WARNING: includes the Authorization header — don't share such logs raw.
+        import urllib.request
+        urllib.request.install_opener(urllib.request.build_opener(
+            urllib.request.HTTPHandler(debuglevel=1),
+            urllib.request.HTTPSHandler(debuglevel=1),
+        ))
+    return log_file
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("org", choices=tuple(ONE_C_CLIENTS), help="1C organization")
+    parser.add_argument("--since", required=True, metavar="YYYY-MM-DD", help="First date of the period, inclusive")
+    parser.add_argument("--until", default=None, metavar="YYYY-MM-DD", help="Last date of the period, inclusive (default: today)")
+    parser.add_argument("--dry-run", action="store_true", help="Fetch and match only — write nothing")
+    parser.add_argument("--debug", action="store_true", help="DEBUG log level + raw HTTP dump (headers incl. Authorization)")
+    parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
+    return parser.parse_args(argv)
+
+
+def _diff_keys(stored: dict[str, Any], fresh: dict[str, Any]) -> str:
+    """Human-readable summary of what replacing *stored* with *fresh* changes."""
+    changed = sorted(k for k, v in fresh.items() if stored.get(k) != v)
+    dropped = sorted(k for k in stored if k not in fresh)
+    parts = []
+    if changed:
+        parts.append("set: " + ", ".join(changed))
+    if dropped:
+        parts.append("dropped: " + ", ".join(dropped))
+    return "; ".join(parts)
+
+
+async def _process_day(
+    day_dt: datetime,
+    client: OneCClient,
+    storage: DoneCardsStorage,
+    dry_run: bool,
+    totals: dict[str, int],
+) -> None:
+    day = day_dt.date().isoformat()
+    one_c_day = day_dt.strftime(ONE_C_DATE_FMT)
+
+    log.info("📅 %s: requesting 1C…", day)
+    t_start = time.monotonic()
+    # In a thread: the sync urllib call would otherwise block the event loop,
+    # starving the psycopg pool's background connect/health tasks.
+    payload = await asyncio.to_thread(
+        client.fetch_json_for_period, datebegin=one_c_day, dateend=one_c_day
+    )
+    visits = AppointmentParser.split(payload)
+    log.info("📅 %s: 1C returned %d visit(s) in %.1f s", day, len(visits), time.monotonic() - t_start)
+
+    verb = "would change" if dry_run else "changed"
+    day_changed = day_unchanged = day_missing = 0
+    total = len(visits)
+
+    for idx, visit in enumerate(visits, 1):
+        guid, priem = _visit_priem(visit)
+        totals["visits"] += 1
+        if not guid:
+            totals["no_guid"] += 1
+            log.warning("📅 %s: [%d/%d] visit without Прием.GUID skipped", day, idx, total)
+            continue
+
+        stored = await storage.get_priem(guid)
+        if stored is None:
+            day_missing += 1
+            log.info("📅 %s: [%d/%d] no done_cards row for guid=%s", day, idx, total, guid)
+            continue
+
+        if stored == priem:
+            day_unchanged += 1
+            log.info("📅 %s: [%d/%d] guid=%s already up to date", day, idx, total, guid)
+            continue
+
+        if not dry_run:
+            await storage.replace_priem(card_guid=guid, priem=json.dumps(priem, ensure_ascii=False))
+        day_changed += 1
+        log.info("📅 %s: [%d/%d] guid=%s %s — %s", day, idx, total, guid, verb, _diff_keys(stored, priem))
+
+    totals["updated"] += day_changed
+    totals["unchanged"] += day_unchanged
+    totals["not_found"] += day_missing
+    log.info(
+        "📅 %s: %d visit(s) — %d %s, %d already up to date, %d without a done_cards row",
+        day, len(visits), day_changed, verb, day_unchanged, day_missing,
+    )
+    log.info(
+        "📊 total so far: %d visit(s) — %d %s, %d already up to date, %d without a done_cards row, %d without GUID",
+        totals["visits"], totals["updated"], verb, totals["unchanged"], totals["not_found"], totals["no_guid"],
+    )
+
+
+async def main() -> None:
+    args = _parse_args()
+    since = _parse_date(args.since, "--since")
+    until = _parse_date(args.until, "--until") if args.until else datetime.now()
+    if since > until:
+        raise SystemExit(f"--since {args.since} is after --until {until.date().isoformat()}")
+
+    log_file = _setup_logging(debug=args.debug)
+    days = list(_date_range(since, until))
+
+    print(f"Organization: {args.org}")
+    print(f"Period: {days[0].date().isoformat()} — {days[-1].date().isoformat()} ({len(days)} day(s), one 1C request per day)")
+    if args.dry_run:
+        print("Mode: dry-run (no DB writes)")
+    if not args.y:
+        answer = input("Proceed? [y/N] ").strip().lower()
+        if answer != "y":
+            print("Aborted.")
+            sys.exit(0)
+
+    client = ONE_C_CLIENTS[args.org].from_env()
+    totals = {"visits": 0, "updated": 0, "unchanged": 0, "not_found": 0, "no_guid": 0}
+    failed_days: list[str] = []
+
+    async with DoneCardsStorage() as storage:
+        for day in days:
+            try:
+                await _process_day(day, client, storage, args.dry_run, totals)
+            except RuntimeError as exc:
+                failed_days.append(day.date().isoformat())
+                log.error("📅 %s: 1C fetch failed, skipping day: %s", day.date().isoformat(), exc)
+
+    log.info(
+        "Backfill %s: %d visit(s) over %d day(s) — %d %s, %d already up to date, %d without a done_cards row, %d without GUID",
+        "dry-run complete" if args.dry_run else "complete",
+        totals["visits"], len(days),
+        totals["updated"], "would change" if args.dry_run else "changed",
+        totals["unchanged"], totals["not_found"], totals["no_guid"],
+    )
+    if failed_days:
+        log.error("1C fetch failed for %d day(s): %s", len(failed_days), ", ".join(failed_days))
+    log.info("Log: %s", log_file)
+    if failed_days:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
