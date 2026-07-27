@@ -71,17 +71,25 @@ def _visit_priem(visit: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
     return (str(guid) if guid else None), priem
 
 
-def _setup_logging() -> Path:
+def _setup_logging(debug: bool = False) -> Path:
     LOGS_DIR.mkdir(exist_ok=True)
     log_file = LOGS_DIR / f"backfill-priem_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if debug else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
             logging.StreamHandler(sys.stdout),
             logging.FileHandler(log_file, encoding="utf-8"),
         ],
     )
+    if debug:
+        # Dump raw HTTP traffic (request/response lines and headers) to stdout.
+        # WARNING: includes the Authorization header — don't share such logs raw.
+        import urllib.request
+        urllib.request.install_opener(urllib.request.build_opener(
+            urllib.request.HTTPHandler(debuglevel=1),
+            urllib.request.HTTPSHandler(debuglevel=1),
+        ))
     return log_file
 
 
@@ -91,6 +99,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--since", required=True, metavar="YYYY-MM-DD", help="First date of the period, inclusive")
     parser.add_argument("--until", default=None, metavar="YYYY-MM-DD", help="Last date of the period, inclusive (default: today)")
     parser.add_argument("--dry-run", action="store_true", help="Fetch and match only — write nothing")
+    parser.add_argument("--debug", action="store_true", help="DEBUG log level + raw HTTP dump (headers incl. Authorization)")
     parser.add_argument("-y", action="store_true", help="Skip confirmation prompt")
     return parser.parse_args(argv)
 
@@ -168,7 +177,7 @@ async def main() -> None:
     if since > until:
         raise SystemExit(f"--since {args.since} is after --until {until.date().isoformat()}")
 
-    log_file = _setup_logging()
+    log_file = _setup_logging(debug=args.debug)
     days = list(_date_range(since, until))
 
     print(f"Organization: {args.org}")
