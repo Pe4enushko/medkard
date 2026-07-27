@@ -96,6 +96,26 @@ def test_mds_single_visit_dict_payload_is_wrapped_in_list(monkeypatch):
     assert result == [{"Прием": {"GUID": "solo"}}]
 
 
+def test_mds_appointments_wrapper_is_unwrapped(monkeypatch):
+    _capture_urlopen(monkeypatch, [
+        {"appointments": [{"Прием": {"GUID": "a"}}, {"Прием": {"GUID": "b"}}]},
+    ])
+    client = MdsOneCClient("http://one-c/api", "user", "pass")
+
+    result = client.fetch_json_for_period("01.06.2026", "01.06.2026")
+
+    assert result == [{"Прием": {"GUID": "a"}}, {"Прием": {"GUID": "b"}}]
+
+
+def test_mds_unknown_dict_payload_is_dropped(monkeypatch):
+    _capture_urlopen(monkeypatch, [{"error": "нет данных"}])
+    client = MdsOneCClient("http://one-c/api", "user", "pass")
+
+    result = client.fetch_json_for_period("01.06.2026", "01.06.2026")
+
+    assert result == []
+
+
 def test_mds_allows_empty_password(monkeypatch):
     captured = _capture_urlopen(monkeypatch, [[]])
     client = MdsOneCClient("http://one-c/api", "user", "")

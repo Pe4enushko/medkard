@@ -138,12 +138,31 @@ class MdsOneCClient(OneCClient):
         day = begin
         while day <= end:
             payload = self._fetch_json_for_date(day.strftime("%Y-%m-%d"))
-            if isinstance(payload, list):
-                visits.extend(payload)
-            elif payload:
-                visits.append(payload)
+            visits.extend(self._extract_visits(payload))
             day += timedelta(days=1)
         return visits
+
+    @staticmethod
+    def _extract_visits(payload: Any) -> list[Any]:
+        """Flatten one day's payload into a list of visit dicts.
+
+        Handles a bare list, an {"appointments": [...]} wrapper and a bare
+        single-visit dict (has "Прием"). Any other dict is dropped with a
+        warning listing its keys — appending it whole would fake one
+        GUID-less visit.
+        """
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            if "appointments" in payload:
+                return list(payload["appointments"])
+            if "Прием" in payload:
+                return [payload]
+            logger.warning(
+                "🌐 1C day payload is a dict with neither 'appointments' nor 'Прием'; "
+                "dropped, keys: %s", list(payload)[:20],
+            )
+        return []
 
     def _fetch_json_for_date(self, date: str) -> Any:
         request = urllib.request.Request(
