@@ -304,6 +304,53 @@ class DoneCardsStorage(BaseStorage):
             logger.exception("💾 done_cards UPSERT_PENDING FAILED guid=%s", card_guid)
             raise
 
+    async def get_priem(self, card_guid: str) -> dict | None:
+        """Return the stored "Прием" block for a card, or None if no row matches.
+
+        Matching is case-insensitive: pipeline rows store the guid as sent
+        by 1C while pushed rows store it lowercased.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT card_data -> 'Прием' AS priem FROM done_cards "
+                "WHERE lower(card_guid) = lower(%(guid)s) AND card_data IS NOT NULL",
+                {"guid": card_guid},
+            )
+            row = await cur.fetchone()
+        return row["priem"] if row else None
+
+    async def merge_priem(self, *, card_guid: str, priem: str) -> bool:
+        """Merge a fresh 1C "Прием" block into card_data of the matching row.
+
+        Keys present in *priem* overwrite the stored ones; keys absent from
+        it are kept. Matching is case-insensitive (see :meth:`get_priem`).
+
+        Returns True if a row was updated.
+        """
+        try:
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    """
+                    UPDATE done_cards
+                    SET card_data = jsonb_set(
+                        card_data,
+                        '{Прием}',
+                        COALESCE(card_data -> 'Прием', '{}'::jsonb) || %(priem)s::jsonb
+                    )
+                    WHERE lower(card_guid) = lower(%(guid)s)
+                      AND card_data IS NOT NULL
+                    RETURNING id::text
+                    """,
+                    {"guid": card_guid, "priem": priem},
+                )
+                row = await cur.fetchone()
+            if row:
+                logger.info("💾 done_cards MERGE_PRIEM OK id=%s guid=%s", row["id"], card_guid)
+            return row is not None
+        except Exception:
+            logger.exception("💾 done_cards MERGE_PRIEM FAILED guid=%s", card_guid)
+            raise
+
     async def get_pending(self, organization_id: str | None = None) -> list[dict]:
         """Return card_guid + card_data for pending rows in an organization."""
         async with self._pool.connection() as conn:
