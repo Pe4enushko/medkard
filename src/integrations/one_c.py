@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -11,6 +13,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 class OneCClient:
     appointments_url_env = "ALENKA_ONE_C_APPOINTMENTS_URL"
@@ -53,11 +57,36 @@ class OneCClient:
         return f"Basic {token}"
 
     def _send(self, request: urllib.request.Request) -> Any:
+        body = request.data.decode("utf-8") if request.data else ""
+        logger.info(
+            "🌐 1C request: %s %s%s", request.get_method(), request.full_url,
+            f" body={body}" if body else "",
+        )
+        t_start = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
+                raw = response.read()
+                status = response.status
+        except urllib.error.HTTPError as exc:
+            detail = exc.read()[:500].decode("utf-8", "replace")
+            logger.error(
+                "🌐 1C response: HTTP %d after %.1f s, body: %s",
+                exc.code, time.monotonic() - t_start, detail,
+            )
+            raise RuntimeError(f"1C returned HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
+            logger.error("🌐 1C request failed after %.1f s: %s", time.monotonic() - t_start, exc)
             raise RuntimeError(f"Failed to fetch appointments from 1C: {exc}") from exc
+
+        logger.info(
+            "🌐 1C response: HTTP %d, %d bytes in %.1f s",
+            status, len(raw), time.monotonic() - t_start,
+        )
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            logger.error("🌐 1C response is not valid JSON, first bytes: %r", raw[:300])
+            raise RuntimeError(f"1C response is not valid JSON: {exc}") from exc
 
     def fetch_json_for_period(self, datebegin: str, dateend: str) -> Any:
         """Fetch raw JSON from 1C for a given date period and return it as-is.

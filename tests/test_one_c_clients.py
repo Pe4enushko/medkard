@@ -8,6 +8,8 @@ from integrations.one_c import AlenkaOneCClient, MdsOneCClient
 
 
 class _FakeResponse(io.BytesIO):
+    status = 200
+
     def __enter__(self):
         return self
 
