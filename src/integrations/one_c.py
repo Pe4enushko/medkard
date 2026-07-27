@@ -93,7 +93,7 @@ class MdsOneCClient(OneCClient):
     login_env = "MDS_ONE_C_LOGIN"
     password_env = "MDS_ONE_C_PASSWORD"
     timeout_seconds_env = "MDS_ONE_C_TIMEOUT_SECONDS"
-    requires_password = True
+    requires_password = False
 
     def fetch_json_for_period(self, datebegin: str, dateend: str) -> Any:
         """MDS 1C accepts one day per request: POST {"date": "YYYY-MM-DD"}.

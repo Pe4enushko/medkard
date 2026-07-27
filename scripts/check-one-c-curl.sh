@@ -23,8 +23,8 @@ DATEBEGIN="${2:?Usage: $0 ORG DATEBEGIN DATEEND}"
 DATEEND="${3:?Usage: $0 ORG DATEBEGIN DATEEND}"
 
 case "$ORG" in
-  Alenka) PREFIX="ALENKA" ;;
-  MDS)    PREFIX="MDS" ;;
+  Alenka) PREFIX="ALENKA"; REQUIRES_PASSWORD=1 ;;
+  MDS)    PREFIX="MDS";    REQUIRES_PASSWORD=0 ;;
   *) echo "ORG must be Alenka or MDS, got: $ORG" >&2; exit 2 ;;
 esac
 
@@ -33,9 +33,11 @@ LOGIN="$(eval echo "\${${PREFIX}_ONE_C_LOGIN:-}")"
 PASSWORD="$(eval echo "\${${PREFIX}_ONE_C_PASSWORD:-}")"
 TIMEOUT="$(eval echo "\${${PREFIX}_ONE_C_TIMEOUT_SECONDS:-15}")"
 
-[ -n "$URL" ]      || { echo "${PREFIX}_ONE_C_APPOINTMENTS_URL is not set (source your .env first)" >&2; exit 1; }
-[ -n "$LOGIN" ]    || { echo "${PREFIX}_ONE_C_LOGIN is not set" >&2; exit 1; }
-[ -n "$PASSWORD" ] || { echo "${PREFIX}_ONE_C_PASSWORD is not set" >&2; exit 1; }
+[ -n "$URL" ]   || { echo "${PREFIX}_ONE_C_APPOINTMENTS_URL is not set (source your .env first)" >&2; exit 1; }
+[ -n "$LOGIN" ] || { echo "${PREFIX}_ONE_C_LOGIN is not set" >&2; exit 1; }
+if [ "$REQUIRES_PASSWORD" = "1" ] && [ -z "$PASSWORD" ]; then
+  echo "${PREFIX}_ONE_C_PASSWORD is not set" >&2; exit 1
+fi
 
 # DD.MM.YYYY -> YYYY-MM-DD
 to_iso() {

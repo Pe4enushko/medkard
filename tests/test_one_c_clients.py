@@ -4,8 +4,6 @@ import base64
 import io
 import json
 
-import pytest
-
 from integrations.one_c import AlenkaOneCClient, MdsOneCClient
 
 
@@ -96,7 +94,11 @@ def test_mds_single_visit_dict_payload_is_wrapped_in_list(monkeypatch):
     assert result == [{"Прием": {"GUID": "solo"}}]
 
 
-def test_mds_requires_password(monkeypatch):
+def test_mds_allows_empty_password(monkeypatch):
+    captured = _capture_urlopen(monkeypatch, [[]])
     client = MdsOneCClient("http://one-c/api", "user", "")
-    with pytest.raises(ValueError, match="MDS_ONE_C_PASSWORD"):
-        client.fetch_json_for_period("03.06.2026", "03.06.2026")
+
+    result = client.fetch_json_for_period("03.06.2026", "03.06.2026")
+
+    assert captured[0].get_header("Authorization") == _basic_token("user", "")
+    assert result == []
