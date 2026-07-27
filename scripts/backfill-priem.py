@@ -121,31 +121,32 @@ async def _process_day(
 
     verb = "would change" if dry_run else "changed"
     day_changed = day_unchanged = day_missing = 0
+    total = len(visits)
 
-    for visit in visits:
+    for idx, visit in enumerate(visits, 1):
         guid, priem = _visit_priem(visit)
         totals["visits"] += 1
         if not guid:
             totals["no_guid"] += 1
-            log.warning("📅 %s: visit without Прием.GUID skipped", day)
+            log.warning("📅 %s: [%d/%d] visit without Прием.GUID skipped", day, idx, total)
             continue
 
         stored = await storage.get_priem(guid)
         if stored is None:
             day_missing += 1
-            log.info("📅 %s: no done_cards row for guid=%s", day, guid)
+            log.info("📅 %s: [%d/%d] no done_cards row for guid=%s", day, idx, total, guid)
             continue
 
         changed = _changed_keys(stored, priem)
         if not changed:
             day_unchanged += 1
-            log.debug("📅 %s: guid=%s already up to date", day, guid)
+            log.info("📅 %s: [%d/%d] guid=%s already up to date", day, idx, total, guid)
             continue
 
         if not dry_run:
             await storage.merge_priem(card_guid=guid, priem=json.dumps(priem, ensure_ascii=False))
         day_changed += 1
-        log.info("📅 %s: guid=%s %s keys: %s", day, guid, verb, ", ".join(changed))
+        log.info("📅 %s: [%d/%d] guid=%s %s keys: %s", day, idx, total, guid, verb, ", ".join(changed))
 
     totals["updated"] += day_changed
     totals["unchanged"] += day_unchanged
