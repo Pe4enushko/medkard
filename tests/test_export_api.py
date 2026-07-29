@@ -2,8 +2,8 @@
 Integration tests for GET /visits/export — real Postgres via TestClient with an
 api key scoped to Alenka + MDS. Every request is bounded to this test's own rows
 via a `since` cutoff, so it never pages the whole production table. Covers: auth
-required, native JSONB + trimmed columns, ignored rows exported under their own
-status while broken ones are held back, and exhaustive/no-dup cursor paging.
+required, native JSONB + trimmed columns, the include_ignored opt-in (broken
+rows held back either way), and exhaustive/no-dup cursor paging.
 """
 from __future__ import annotations
 
@@ -108,9 +108,7 @@ def test_export_requires_key(client: TestClient):
 
 
 def test_export_returns_rows_native_jsonb_trimmed(client, test_key, seeded):
-    """Ignored cards ship with the rest under status='ignored' — the audit filters
-    are a clinic-requested feature, and those cards still hold the 1C record.
-    Broken rows (stacktrace, no visit) stay excluded."""
+    """Default call: audited rows only, ignored and broken both absent."""
     audited, ign, brk, cutoff = seeded
     resp = client.get(
         "/visits/export",
@@ -122,9 +120,7 @@ def test_export_returns_rows_native_jsonb_trimmed(client, test_key, seeded):
     assert isinstance(body, list)
     by_guid = {r["card_guid"]: r for r in body}
     assert set(audited) <= set(by_guid)                        # audited cards present
-    assert ign in by_guid                                      # ignored exported...
-    assert by_guid[ign]["status"] == "ignored"                 # ...under its own status
-    assert brk not in by_guid                                  # broken still excluded
+    assert ign not in by_guid and brk not in by_guid           # ignored/broken excluded
     sample = by_guid[audited[0]]
     assert isinstance(sample["card_data"], dict)               # native JSONB in JSON response
     assert set(sample.keys()) == {
@@ -132,6 +128,24 @@ def test_export_returns_rows_native_jsonb_trimmed(client, test_key, seeded):
         "diag_result", "icd_check_result", "updated_at",
     }                                                          # trimmed to seven columns
     assert "token_count" not in sample and "organization_id" not in sample
+
+
+def test_export_include_ignored_opts_in(client, test_key, seeded):
+    """include_ignored=true adds the skipped cards under their own status. Those
+    are a clinic-requested filter, not failures, and they still hold the 1C
+    record — but broken rows stay out even here."""
+    audited, ign, brk, cutoff = seeded
+    resp = client.get(
+        "/visits/export",
+        params={"org": "Alenka", "since": cutoff, "include_ignored": "true"},
+        headers=_auth(test_key),
+    )
+    assert resp.status_code == 200
+    by_guid = {r["card_guid"]: r for r in resp.json()}
+    assert set(audited) <= set(by_guid)                        # audited rows still there
+    assert ign in by_guid
+    assert by_guid[ign]["status"] == "ignored"                 # never labelled 'done'
+    assert brk not in by_guid
 
 
 def test_export_cursor_offset_paging(client, test_key, seeded):

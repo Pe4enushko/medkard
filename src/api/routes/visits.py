@@ -84,21 +84,29 @@ async def export(
     since: str | None = Query(default=None),
     limit: int = Query(default=0, ge=0),
     cursor: int = Query(default=0, ge=0),
+    include_ignored: bool = Query(
+        default=False,
+        description="Include cards the audit deliberately skipped (status='ignored')",
+    ),
     org_access: tuple[str, str] = Depends(require_org_access),
 ) -> list[dict]:
     org_id, _ = org_access
     async with ApiFormatter() as formatter:
-        return await formatter.export(org_id, since, limit, cursor)
+        return await formatter.export(org_id, since, limit, cursor, include_ignored)
 
 
 @router.get("/check_updates")
 async def check_updates(
     since: str | None = Query(default=None),
+    include_ignored: bool = Query(
+        default=False,
+        description="Include cards the audit deliberately skipped (status='ignored')",
+    ),
     org_access: tuple[str, str] = Depends(require_org_access),
 ) -> list[dict]:
     org_id, _ = org_access
     async with ApiFormatter() as formatter:
-        return await formatter.check_updates(org_id, since)
+        return await formatter.check_updates(org_id, since, include_ignored)
 
 
 @router.get("/doctors", response_model=list[DoctorEntry])

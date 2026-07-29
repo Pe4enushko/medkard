@@ -2,9 +2,9 @@
 Integration tests for GET /visits/check_updates — real Postgres via TestClient with
 an api key scoped to Alenka + MDS. Requests carry a `since` bounded to this test's
 own rows, so they never scan the whole table. Covers what distinguishes this
-endpoint from /visits/export: the `since` boundary is inclusive and a bare call
-falls back to a one-week window rather than all history. Status coverage
-(pending and ignored returned, broken not) is asserted here as well.
+endpoint from /visits/export: pending cards are returned too, the `since`
+boundary is inclusive, and a bare call falls back to a one-week window rather
+than all history. Ignored cards require include_ignored; broken are never sent.
 """
 from __future__ import annotations
 
@@ -127,11 +127,10 @@ def test_check_updates_unknown_org_404(client: TestClient, test_key: str):
     assert resp.status_code == 404
 
 
-def test_check_updates_returns_pending_and_ignored_but_not_broken(client, test_key, seeded):
-    """The point of the endpoint: unlike export's original shape, cards come back
-    whether or not they were audited. Ignored cards are included and labelled as
-    such (2026-07-29) — they hold real 1C data, just no audit results. Broken
-    cards stay out: those are a stacktrace, not a visit."""
+def test_check_updates_returns_pending_but_filters_ignored_broken(client, test_key, seeded):
+    """The point of the endpoint: unlike export, pending cards are returned with
+    their raw card_data. Ignored stays out unless asked for, so the default
+    result set is what it always was; broken never comes back at all."""
     guids, cutoff = seeded
     resp = client.get(
         "/visits/check_updates",
@@ -145,13 +144,11 @@ def test_check_updates_returns_pending_and_ignored_but_not_broken(client, test_k
 
     assert guids["pending"] in by_guid
     assert guids["done"] in by_guid
-    assert guids["ignored"] in by_guid
+    assert guids["ignored"] not in by_guid
     assert guids["broken"] not in by_guid
 
     assert by_guid[guids["pending"]]["status"] == "pending"
     assert by_guid[guids["done"]]["status"] == "done"
-    # ignored wins over the stored status ('done') — the CASE must not label it audited
-    assert by_guid[guids["ignored"]]["status"] == "ignored"
 
     sample = by_guid[guids["pending"]]
     assert isinstance(sample["card_data"], dict)        # native JSONB, raw data present
@@ -161,6 +158,24 @@ def test_check_updates_returns_pending_and_ignored_but_not_broken(client, test_k
     }
     assert "ignored" not in sample and "broken" not in sample
     assert "token_count" not in sample and "organization_id" not in sample
+
+
+def test_check_updates_include_ignored_opts_in(client, test_key, seeded):
+    """Opting in adds cards the audit was asked to skip — investigations whose
+    card_data is complete, only the audit results empty. Broken stays out."""
+    guids, cutoff = seeded
+    resp = client.get(
+        "/visits/check_updates",
+        params={"org": "Alenka", "since": cutoff, "include_ignored": "true"},
+        headers=_auth(test_key),
+    )
+    assert resp.status_code == 200
+    by_guid = {r["card_guid"]: r for r in resp.json()}
+
+    assert {guids["pending"], guids["done"], guids["ignored"]} <= set(by_guid)
+    assert guids["broken"] not in by_guid
+    # ignored wins over the stored status ('done') — the CASE must not label it audited
+    assert by_guid[guids["ignored"]]["status"] == "ignored"
 
 
 def test_check_updates_boundary_is_inclusive(client, test_key, seeded):

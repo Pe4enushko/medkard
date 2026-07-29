@@ -3,8 +3,8 @@ Tests ApiFormatter.export against the real Postgres. Every export is bounded to
 this test's own rows via a `since` cutoff captured *before* seeding, so it never
 pages the whole production table. Covers: native JSONB + six-column trim,
 status labelling, exclusive `since`, and exhaustive/no-dup cursor paging.
-Ignored rows are exported (labelled `status='ignored'`); only broken ones are
-held back.
+Ignored rows ship only when include_ignored is set (labelled
+`status='ignored'`); broken ones are always held back.
 """
 from __future__ import annotations
 
@@ -93,18 +93,31 @@ async def test_export_trims_to_six_native_jsonb_columns(seeded):
     }                                                          # trimmed to the seven export columns
 
 
-async def test_export_includes_ignored_but_not_broken(seeded):
-    """Ignored cards carry real 1C data — a filter the clinics asked for, not a
-    failure — so consumers tracing a patient need them. Broken rows hold a
-    stacktrace instead of a visit and stay out."""
+async def test_export_excludes_ignored_by_default(seeded):
+    """Default result set is unchanged, so existing consumers' statistics don't
+    shift when this ships."""
     audited, ign, brk, org_id, cutoff = seeded
     async with ApiFormatter() as fmt:
         rows = await fmt.export(org_id, since=cutoff, limit=0, cursor=0)
+    got = {r["card_guid"] for r in rows}
+    assert set(audited) <= got                                 # audited cards present
+    assert ign not in got and brk not in got                   # ignored/broken filtered out
+
+
+async def test_export_includes_ignored_on_request_but_never_broken(seeded):
+    """Ignored cards carry real 1C data — a filter the clinics asked for, not a
+    failure — so consumers tracing a patient can opt in. Broken rows hold a
+    stacktrace instead of a visit and stay out regardless."""
+    audited, ign, brk, org_id, cutoff = seeded
+    async with ApiFormatter() as fmt:
+        rows = await fmt.export(
+            org_id, since=cutoff, limit=0, cursor=0, include_ignored=True
+        )
     by_guid = {r["card_guid"]: r for r in rows}
-    assert set(audited) <= set(by_guid)                        # audited cards present
+    assert set(audited) <= set(by_guid)                        # audited cards still present
     assert ign in by_guid                                      # ignored exported...
     assert by_guid[ign]["status"] == "ignored"                 # ...and never labelled 'done'
-    assert brk not in by_guid                                  # broken still filtered out
+    assert brk not in by_guid                                  # broken excluded even so
 
 
 async def test_export_since_is_exclusive(seeded):
