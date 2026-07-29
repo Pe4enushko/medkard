@@ -5,7 +5,7 @@
 # against a running `api.app:create_app` instance, without writing a client.
 #
 # Usage:
-#   ./scripts/test-visits-route.sh ROUTE URL API_KEY [ORG] [DATE]
+#   ./scripts/test-visits-route.sh ROUTE URL API_KEY [ORG] [DATE] [DOCTOR_CODE]
 #
 #   ROUTE   check | pull | export | push | check_updates | doctors
 #   URL     base URL of the API, e.g. http://localhost:8000
@@ -15,10 +15,15 @@
 #           (default: today; ignored by push, which sends a mock card body,
 #           and by doctors, which takes org only;
 #           for check_updates it becomes ?since=DATE"T00:00:00")
+#   DOCTOR_CODE  pull only — Прием.Врач_код, narrows the report to one doctor.
+#           Codes come from the doctors route. With no cards for that doctor
+#           the API returns 200 and a one-cell placeholder workbook, not 404;
+#           a code outside [\w-]{1,64} is rejected with 422.
 #
 # Examples:
 #   ./scripts/test-visits-route.sh check  http://localhost:8000 $API_KEY
 #   ./scripts/test-visits-route.sh pull   http://localhost:8000 $API_KEY Alenka 2026-07-01
+#   ./scripts/test-visits-route.sh pull   http://localhost:8000 $API_KEY MDS 2026-07-01 00012
 #   ./scripts/test-visits-route.sh export http://localhost:8000 $API_KEY MDS
 #   ./scripts/test-visits-route.sh push   http://localhost:8000 $API_KEY MDS
 #   ./scripts/test-visits-route.sh check_updates http://localhost:8000 $API_KEY MDS 2026-07-20
@@ -28,7 +33,7 @@ set -euo pipefail
 
 usage() {
   cat <<EOF
-Usage: $0 ROUTE URL API_KEY [ORG] [DATE]
+Usage: $0 ROUTE URL API_KEY [ORG] [DATE] [DOCTOR_CODE]
 
   ROUTE   check | pull | export | push | check_updates | doctors
   URL     base URL of the API, e.g. http://localhost:8000
@@ -38,10 +43,14 @@ Usage: $0 ROUTE URL API_KEY [ORG] [DATE]
           (push ignores DATE — it sends a mock card body instead;
           doctors ignores DATE — it takes org only;
           check_updates turns DATE into ?since=DATE"T00:00:00")
+  DOCTOR_CODE  pull only — Прием.Врач_код from the doctors route. Narrows the
+          report to one doctor; no cards for them still yields 200 with a
+          one-cell placeholder workbook, and a malformed code yields 422.
 
 Examples:
   $0 check  http://localhost:8000 \$API_KEY
   $0 pull   http://localhost:8000 \$API_KEY Alenka 2026-07-01
+  $0 pull   http://localhost:8000 \$API_KEY MDS 2026-07-01 00012
   $0 export http://localhost:8000 \$API_KEY MDS
   $0 push   http://localhost:8000 \$API_KEY MDS
   $0 check_updates http://localhost:8000 \$API_KEY MDS 2026-07-20
@@ -53,11 +62,12 @@ case "${1:-}" in
   -h|--help) usage; exit 0 ;;
 esac
 
-ROUTE="${1:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE]   (ROUTE = check|pull|export|push|check_updates|doctors)}"
-URL="${2:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE]}"
-API_KEY="${3:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE]}"
+ROUTE="${1:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE] [DOCTOR_CODE]   (ROUTE = check|pull|export|push|check_updates|doctors)}"
+URL="${2:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE] [DOCTOR_CODE]}"
+API_KEY="${3:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE] [DOCTOR_CODE]}"
 ORG="${4:-MDS}"
 DATE="${5:-$(date +%Y-%m-%d)}"
+DOCTOR_CODE="${6:-}"
 
 BASE_URL="${URL%/}"
 
@@ -95,6 +105,11 @@ case "$ROUTE" in
   pull)
     REQUEST_URL="${BASE_URL}/visits/pull"
     ARGS=(-G --data-urlencode "org=${ORG}" --data-urlencode "date=${DATE}")
+    # Omit the param entirely when unset: an empty doctor_code is a 422, not
+    # "no filter".
+    if [[ -n "$DOCTOR_CODE" ]]; then
+      ARGS+=(--data-urlencode "doctor_code=${DOCTOR_CODE}")
+    fi
     ;;
   export)
     REQUEST_URL="${BASE_URL}/visits/export"
@@ -123,6 +138,11 @@ esac
 
 echo "Route:   $ROUTE"
 echo "Request: $REQUEST_URL"
+# -G folds the params into the URL only inside curl, so the filter would be
+# invisible in the line above — the one thing worth eyeballing on this route.
+if [[ "$ROUTE" == "pull" && -n "$DOCTOR_CODE" ]]; then
+  echo "Filter:  doctor_code=${DOCTOR_CODE}"
+fi
 echo "---"
 
 curl -sS -i \
