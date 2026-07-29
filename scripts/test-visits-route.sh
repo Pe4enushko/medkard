@@ -7,12 +7,13 @@
 # Usage:
 #   ./scripts/test-visits-route.sh ROUTE URL API_KEY [ORG] [DATE]
 #
-#   ROUTE   check | pull | export | push | check_updates
+#   ROUTE   check | pull | export | push | check_updates | doctors
 #   URL     base URL of the API, e.g. http://localhost:8000
 #   API_KEY bearer token (see scripts/create-api-key.py)
 #   ORG     org name for ?org=          (default: MDS)
 #   DATE    date for check/pull, DD.MM.YYYY not required — ISO YYYY-MM-DD
-#           (default: today; ignored by push, which sends a mock card body;
+#           (default: today; ignored by push, which sends a mock card body,
+#           and by doctors, which takes org only;
 #           for check_updates it becomes ?since=DATE"T00:00:00")
 #
 # Examples:
@@ -21,6 +22,7 @@
 #   ./scripts/test-visits-route.sh export http://localhost:8000 $API_KEY MDS
 #   ./scripts/test-visits-route.sh push   http://localhost:8000 $API_KEY MDS
 #   ./scripts/test-visits-route.sh check_updates http://localhost:8000 $API_KEY MDS 2026-07-20
+#   ./scripts/test-visits-route.sh doctors http://localhost:8000 $API_KEY MDS
 
 set -euo pipefail
 
@@ -28,12 +30,13 @@ usage() {
   cat <<EOF
 Usage: $0 ROUTE URL API_KEY [ORG] [DATE]
 
-  ROUTE   check | pull | export | push | check_updates
+  ROUTE   check | pull | export | push | check_updates | doctors
   URL     base URL of the API, e.g. http://localhost:8000
   API_KEY bearer token (see scripts/create-api-key.py)
   ORG     org name for ?org=          (default: MDS)
   DATE    date for check/pull, ISO YYYY-MM-DD (default: today)
           (push ignores DATE — it sends a mock card body instead;
+          doctors ignores DATE — it takes org only;
           check_updates turns DATE into ?since=DATE"T00:00:00")
 
 Examples:
@@ -42,6 +45,7 @@ Examples:
   $0 export http://localhost:8000 \$API_KEY MDS
   $0 push   http://localhost:8000 \$API_KEY MDS
   $0 check_updates http://localhost:8000 \$API_KEY MDS 2026-07-20
+  $0 doctors http://localhost:8000 \$API_KEY MDS
 EOF
 }
 
@@ -49,7 +53,7 @@ case "${1:-}" in
   -h|--help) usage; exit 0 ;;
 esac
 
-ROUTE="${1:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE]   (ROUTE = check|pull|export|push|check_updates)}"
+ROUTE="${1:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE]   (ROUTE = check|pull|export|push|check_updates|doctors)}"
 URL="${2:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE]}"
 API_KEY="${3:?Usage: $0 ROUTE URL API_KEY [ORG] [DATE]}"
 ORG="${4:-MDS}"
@@ -106,8 +110,13 @@ case "$ROUTE" in
     REQUEST_URL="${BASE_URL}/visits/check_updates"
     ARGS=(-G --data-urlencode "org=${ORG}" --data-urlencode "since=${DATE}T00:00:00")
     ;;
+  doctors)
+    # No date: the listing spans the org's whole card history.
+    REQUEST_URL="${BASE_URL}/visits/doctors"
+    ARGS=(-G --data-urlencode "org=${ORG}")
+    ;;
   *)
-    echo "ROUTE must be check, pull, export, push or check_updates, got: $ROUTE" >&2
+    echo "ROUTE must be check, pull, export, push, check_updates or doctors, got: $ROUTE" >&2
     exit 2
     ;;
 esac
