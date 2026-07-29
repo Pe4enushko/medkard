@@ -114,30 +114,29 @@ class _ApiCardsReader(BaseStorage):
             cur = await conn.execute(query, params)
             return await cur.fetchall()
 
-    async def fetch_changed(
-        self, organization_id: str, since: str | None, include_ignored: bool = False,
-    ) -> list[dict[str, Any]]:
-        """Rows changed since a client-supplied timestamp: done and pending.
+    async def fetch_changed(self, organization_id: str, since: str | None) -> list[dict[str, Any]]:
+        """Rows changed since a client-supplied timestamp: everything we hold.
 
         Deliberately kept separate from fetch_export rather than adding a flag to
         it: this one returns pending cards too (the raw card_data of a not-yet-
         audited card is the whole point) and the boundary is inclusive, since
         the caller derives `since` from a clock rather than from returned rows.
 
-        Ignored cards are opt-in via include_ignored (2026-07-29, softening the
-        2026-07-23 decision to hold them back unconditionally): consumers
-        tracing one patient's history need them, everyone else keeps the old
-        result set. They are a deliberate product feature, not junk — the audit
-        filters (audit/filters.py) were put in at the clinics' own request, the
-        head physician's in particular, so the pipeline doesn't chew through
-        visits with no doctor's narrative to audit. Their card_data is the full
-        1C record; only the three *_result arrays stay empty, so a caller that
-        opts in must filter on status = 'done' before computing any share.
+        Ignored cards come back unconditionally (2026-07-29, reversing the
+        2026-07-23 decision to hold them back). No include_ignored flag here,
+        unlike export: nothing in production consumes this endpoint yet, so
+        there is no result set to keep stable — that flag exists purely to
+        shield callers already live on export. Ignored cards are a deliberate
+        product feature, not junk — the audit filters (audit/filters.py) were
+        put in at the clinics' own request, the head physician's in particular,
+        so the pipeline doesn't chew through visits with no doctor's narrative
+        to audit. Their card_data is the full 1C record; only the three
+        *_result arrays stay empty, so consumers must filter on status = 'done'
+        before computing any share.
 
-        Broken cards stay excluded either way: those hold a stacktrace, not a
-        visit. Consequence for consumers: a card delivered as pending that later
-        turns broken never gets an update — it stays pending on their side. The
-        same holds for ignored when include_ignored is off.
+        Broken cards stay excluded: those hold a stacktrace, not a visit.
+        Consequence for consumers: a card delivered as pending that later turns
+        broken never gets an update — it stays pending on their side.
 
         status/ignored/broken are collapsed into a single status on the way out
         (migration 014 forbids ignored and broken overlapping; 025's status
@@ -153,15 +152,11 @@ class _ApiCardsReader(BaseStorage):
             "FROM done_cards "
             "WHERE organization_id = %(org_id)s::uuid "
             "  AND broken = FALSE "
-            "  AND (%(incl)s OR ignored = FALSE) "
             "  AND updated_at >= COALESCE(%(since)s::timestamptz, now() - interval '7 days') "
             "ORDER BY updated_at, card_guid"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                query,
-                {"org_id": organization_id, "since": since, "incl": include_ignored},
-            )
+            cur = await conn.execute(query, {"org_id": organization_id, "since": since})
             return await cur.fetchall()
 
     async def fetch_doctors(self, organization_id: str) -> list[dict[str, Any]]:
@@ -245,20 +240,17 @@ class ApiFormatter:
             organization_id, since, limit, cursor, include_ignored
         )
 
-    async def check_updates(
-        self, organization_id: str, since: str | None, include_ignored: bool = False,
-    ) -> list[dict[str, Any]]:
-        """Return cards changed at or after `since`.
+    async def check_updates(self, organization_id: str, since: str | None) -> list[dict[str, Any]]:
+        """Return cards changed at or after `since`, in every deliverable status.
 
         since=None → the last week, not all history: a bare call shouldn't drain
         the table. Unlike export, the boundary is inclusive and pending cards
         come back too — the consumer needs a card's raw data whether or not it
         has been audited. Each row's outcome arrives as a single `status`:
-        pending | done, plus ignored when include_ignored is set. Broken cards
-        never appear.
+        pending | done | ignored. Broken cards never appear.
         """
-        return await self._reader.fetch_changed(organization_id, since, include_ignored)
-
+        return await self._reader.fetch_changed(organization_id, since)
+    
     async def doctors(self, organization_id: str) -> list[dict[str, Any]]:
         """Unique (code, name) doctors of the org, sorted by name."""
         return await self._reader.fetch_doctors(organization_id)
