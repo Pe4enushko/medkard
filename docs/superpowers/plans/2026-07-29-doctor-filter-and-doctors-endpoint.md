@@ -4,7 +4,7 @@
 
 **Goal:** Опциональный `doctor_code`-фильтр в `GET /visits/pull` (с xlsx-заглушкой вместо 404) и новый авторизованный `GET /visits/doctors` со списком врачей организации.
 
-**Architecture:** Фильтр вставляется в общий CTE `_VISIT_DATE_CTE` (`src/reporting/api_formatter.py`), поэтому 404-проверка (`check`) и генерация книги (`make_xlsx`) отфильтровываются согласованно. Список врачей — `DISTINCT ON` по `card_data->'Прием'->>'Врач_код'` (full-scan по организации — осознанно, объёмы позволяют). Роуты остаются тонкими (`src/api/routes/cards.py`, префикс уже `/visits`).
+**Architecture:** Фильтр вставляется в общий CTE `_VISIT_DATE_CTE` (`src/reporting/api_formatter.py`), поэтому 404-проверка (`check`) и генерация книги (`make_xlsx`) отфильтровываются согласованно. Список врачей — `DISTINCT ON` по `card_data->'Прием'->>'Врач_код'` (full-scan по организации — осознанно, объёмы позволяют). Роуты остаются тонкими (`src/api/routes/visits.py` после Task 1; префикс уже `/visits`).
 
 **Tech Stack:** FastAPI, psycopg3 (`BaseStorage`), openpyxl, pytest (integration через `TestClient` + реальный Postgres из `.env`).
 
@@ -16,41 +16,61 @@
 - Тесты гонять точечно: `pytest tests/<файл> -v` (pytest.ini: `pythonpath=src`, asyncio_mode=auto). Интеграционные тесты ходят в Postgres из `.env` и требуют организаций `Alenka` и `MDS` в таблице `organizations`.
 - Поле кода врача в данных: `card_data -> 'Прием' ->> 'Врач_код'`; ФИО: `card_data -> 'Прием' ->> 'Врач'`. НЕ путать с верхнеуровневым блоком `Врач` (там только `SPECIALIZATION`).
 - Имя query-параметра — ровно `doctor_code`; текст заглушки — ровно «За {DD.MM.YYYY} приёмов врача с кодом {код} не обнаружено».
-- Никаких новых индексов и миграций. Файл роутов остаётся `cards.py` (переименование файла — не наша тема).
+- Никаких новых индексов и миграций.
+- Переименование cards→visits в medkard доводим до конца (Task 1): файл роутов, тесты, док, смоук-скрипт. (В Искре пути `/cards/*` не трогаем — их переименовывает отдельная ветка; это ограничение engine-плана.)
 - Пушить нельзя; коммитить после каждой задачи.
 
 ---
 
-### Task 1: Ретаргет существующих тестов на `/visits`
+### Task 1: Довести переименование cards→visits
 
-Коммит e60ad16 переименовал только префикс роутера; `tests/test_cards_api.py` всё ещё ходит на `/cards/*` и падает 404-ми. Механическая правка путей.
+Коммит e60ad16 переименовал только префикс роутера (докстринг файла уже говорит «api/visits.py»); файлы, тесты, док и смоук-скрипт остались на cards и тесты падают 404-ми. Доводим механически.
 
 **Files:**
-- Modify: `tests/test_cards_api.py` (все литералы `"/cards/...` → `"/visits/...`; строки 90, 97, 102, 107, 112, 117, 126–128, 132, 137, 140, 156–157, 160, 169, 175)
+- Rename: `src/api/routes/cards.py` → `src/api/routes/visits.py`
+- Modify: `src/api/app.py` (импорт роутера, строка 12)
+- Rename+Modify: `tests/test_cards_api.py` → `tests/test_visits_api.py` (все литералы `"/cards/...` → `"/visits/...`)
+- Rename+Modify: `docs/cards-api.md` → `docs/visits-api.md` (только имя файла; содержимое — Task 6)
+- Rename+Modify: `scripts/test-cards-route.sh` → `scripts/test-visits-route.sh` (URL `/cards/` → `/visits/`, упоминания в комментариях)
 
 **Interfaces:**
 - Consumes: существующие фикстуры `client`, `test_key`, `alenka_only_key` (не меняются).
-- Produces: зелёный baseline для последующих задач; фикстуры этого файла остаются источником паттерна для нового тест-файла Task 2.
+- Produces: модуль роутов — `src/api/routes/visits.py` (все последующие задачи правят его); зелёный baseline; фикстуры `tests/test_visits_api.py` — образец для нового тест-файла Task 2.
 
 - [ ] **Step 1: Убедиться, что тесты падают на /cards**
 
 Run: `pytest tests/test_cards_api.py -v -x`
 Expected: FAIL — 404 от TestClient (роут `/cards/check` больше не существует).
 
-- [ ] **Step 2: Заменить пути**
+- [ ] **Step 2: Переименовать файлы и поправить ссылки**
 
-Во всех строках файла заменить подстроку `"/cards/` на `"/visits/`. Ничего больше не менять.
+```bash
+git mv src/api/routes/cards.py src/api/routes/visits.py
+git mv tests/test_cards_api.py tests/test_visits_api.py
+git mv docs/cards-api.md docs/visits-api.md
+git mv scripts/test-cards-route.sh scripts/test-visits-route.sh
+sed -i 's|"/cards/|"/visits/|g' tests/test_visits_api.py
+sed -i 's|/cards/|/visits/|g; s|test-cards-route|test-visits-route|g; s|routes/cards\.py|routes/visits.py|g' scripts/test-visits-route.sh
+```
+
+В `src/api/app.py` строку 12 заменить:
+
+```python
+from api.routes.visits import router as visits_router
+```
+
+и в `create_app()`: `app.include_router(visits_router)`. В докстринге `test_visits_api.py` поправить `api.cards` → `api.visits`.
 
 - [ ] **Step 3: Прогнать тесты**
 
-Run: `pytest tests/test_cards_api.py -v`
+Run: `pytest tests/test_visits_api.py -v`
 Expected: PASS (все 10).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/test_cards_api.py
-git commit -m "test: retarget pull-API tests to the renamed /visits root"
+git add -A src/api tests docs scripts
+git commit -m "refactor: finish the cards->visits rename (module, tests, doc, smoke script)"
 ```
 
 ---
@@ -63,7 +83,7 @@ git commit -m "test: retarget pull-API tests to the renamed /visits root"
 
 **Interfaces:**
 - Consumes: `BaseStorage` (psycopg3-пул, `dict_row`), существующий `_VISIT_DATE_CTE`.
-- Produces: `ApiFormatter.check(visit_date: date, organization_id: str, doctor_code: str | None = None) -> int` и `ApiFormatter.make_xlsx(visit_date: date, organization_id: str, doctor_code: str | None = None) -> bytes`. Task 4 зовёт их из роута; фикстура `_seed_cards` этого файла переиспользуется в Task 4 и Task 5.
+- Produces: `ApiFormatter.check(visit_date: date, organization_id: str, doctor_code: str | None = None) -> int` и `ApiFormatter.make_xlsx(visit_date: date, organization_id: str, doctor_code: str | None = None) -> bytes`. Task 4 зовёт их из роута; фикстура `seeded_cards` этого файла переиспользуется в Task 4 и Task 5.
 
 - [ ] **Step 1: Написать падающий тест с фикстурой карт**
 
@@ -231,7 +251,7 @@ _VISIT_DATE_CTE = (
 
 - [ ] **Step 4: Прогнать тесты**
 
-Run: `pytest tests/test_visits_doctor_filter.py tests/test_cards_api.py -v`
+Run: `pytest tests/test_visits_doctor_filter.py tests/test_visits_api.py -v`
 Expected: PASS (новые + старые — фильтр по умолчанию `None` ничего не меняет).
 
 - [ ] **Step 5: Commit**
@@ -315,7 +335,7 @@ git commit -m "feat: single-cell placeholder workbook for empty filtered reports
 ### Task 4: роут `/visits/pull` — параметр, заглушка, имя файла
 
 **Files:**
-- Modify: `src/api/routes/cards.py` (роут `pull`, строки 45–65)
+- Modify: `src/api/routes/visits.py` (роут `pull`, строки 45–65)
 - Test: `tests/test_visits_doctor_filter.py` (дополнить)
 
 **Interfaces:**
@@ -324,7 +344,7 @@ git commit -m "feat: single-cell placeholder workbook for empty filtered reports
 
 - [ ] **Step 1: Дописать падающие тесты**
 
-В `tests/test_visits_doctor_filter.py` добавить (фикстуры `client`/`test_key` — по образцу `tests/test_cards_api.py`, но ключ скоупится только на MDS):
+В `tests/test_visits_doctor_filter.py` добавить (фикстуры `client`/`test_key` — по образцу `tests/test_visits_api.py`, но ключ скоупится только на MDS):
 
 ```python
 import io
@@ -387,7 +407,7 @@ Expected: новые тесты FAIL (нет параметра → фильтр
 
 - [ ] **Step 3: Реализовать роут**
 
-В `src/api/routes/cards.py` заменить `pull` (импорт заглушки добавить к остальным: `from parsers.excel import build_empty_report_bytes`):
+В `src/api/routes/visits.py` заменить `pull` (импорт заглушки добавить к остальным: `from parsers.excel import build_empty_report_bytes`):
 
 ```python
 @router.get("/pull")
@@ -424,13 +444,13 @@ async def pull(
 
 - [ ] **Step 4: Прогнать тесты**
 
-Run: `pytest tests/test_visits_doctor_filter.py tests/test_cards_api.py -v`
+Run: `pytest tests/test_visits_doctor_filter.py tests/test_visits_api.py -v`
 Expected: PASS (все).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/api/routes/cards.py tests/test_visits_doctor_filter.py
+git add src/api/routes/visits.py tests/test_visits_doctor_filter.py
 git commit -m "feat: doctor_code filter on /visits/pull with placeholder workbook"
 ```
 
@@ -439,7 +459,7 @@ git commit -m "feat: doctor_code filter on /visits/pull with placeholder workboo
 ### Task 5: `GET /visits/doctors`
 
 **Files:**
-- Modify: `src/api/models.py` (новая модель), `src/reporting/api_formatter.py` (метод reader + метод formatter), `src/api/routes/cards.py` (новый роут после `check_updates`)
+- Modify: `src/api/models.py` (новая модель), `src/reporting/api_formatter.py` (метод reader + метод formatter), `src/api/routes/visits.py` (новый роут после `check_updates`)
 - Test: `tests/test_visits_doctor_filter.py` (дополнить)
 
 **Interfaces:**
@@ -518,7 +538,7 @@ class DoctorEntry(BaseModel):
         return await self._reader.fetch_doctors(organization_id)
 ```
 
-`src/api/routes/cards.py` (импорт `DoctorEntry` из `api.models`; роут после `check_updates`):
+`src/api/routes/visits.py` (импорт `DoctorEntry` из `api.models`; роут после `check_updates`):
 
 ```python
 @router.get("/doctors", response_model=list[DoctorEntry])
@@ -533,13 +553,13 @@ async def doctors(
 
 - [ ] **Step 4: Прогнать тесты**
 
-Run: `pytest tests/test_visits_doctor_filter.py tests/test_cards_api.py -v`
+Run: `pytest tests/test_visits_doctor_filter.py tests/test_visits_api.py -v`
 Expected: PASS (все).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/api/models.py src/reporting/api_formatter.py src/api/routes/cards.py tests/test_visits_doctor_filter.py
+git add src/api/models.py src/reporting/api_formatter.py src/api/routes/visits.py tests/test_visits_doctor_filter.py
 git commit -m "feat: GET /visits/doctors — unique doctors of an org"
 ```
 
@@ -548,7 +568,7 @@ git commit -m "feat: GET /visits/doctors — unique doctors of an org"
 ### Task 6: документация API
 
 **Files:**
-- Modify: `docs/cards-api.md`
+- Modify: `docs/visits-api.md` (переименован в Task 1)
 
 **Interfaces:**
 - Consumes: контракты Task 4/5.
@@ -556,7 +576,7 @@ git commit -m "feat: GET /visits/doctors — unique doctors of an org"
 
 - [ ] **Step 1: Обновить документ**
 
-1. Заголовок и все пути `/cards/*` → `/visits/*` (в первой строке: `# Visits API (\`/visits\`)`); упоминание `scripts/test-cards-route.sh` оставить как есть.
+1. Заголовок и все пути `/cards/*` → `/visits/*` (в первой строке: `# Visits API (\`/visits\`)`); ссылки на файлы — `src/api/routes/visits.py`, `scripts/test-visits-route.sh`.
 2. В секции `GET /visits/pull` добавить параметр и поведение:
 
 ```markdown
@@ -586,6 +606,6 @@ git commit -m "feat: GET /visits/doctors — unique doctors of an org"
 - [ ] **Step 2: Commit**
 
 ```bash
-git add docs/cards-api.md
+git add docs/visits-api.md
 git commit -m "docs: /visits rename, doctor_code filter and /visits/doctors"
 ```
