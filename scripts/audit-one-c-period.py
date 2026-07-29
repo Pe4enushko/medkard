@@ -17,7 +17,7 @@ Options:
     --num-batches  Max concurrent visits processed at a time (default: 5)
     --ftpcreds     Credentials file for FTP upload (ip=, port=, username=, password=)
     --pending-only Skip the 1C fetch entirely and audit only cards pushed via
-                   POST /cards/push (done_cards rows with status='pending').
+                   POST /visits/push (done_cards rows with status='pending').
                    No Excel export or FTP upload runs in this mode.
 """
 
@@ -59,7 +59,7 @@ _parser.add_argument("--ftpcreds", default=None, metavar="FILE", help="Credentia
 _parser.add_argument(
     "--pending-only",
     action="store_true",
-    help="Skip the 1C fetch and audit only cards pushed via POST /cards/push "
+    help="Skip the 1C fetch and audit only cards pushed via POST /visits/push "
          "(status='pending' in done_cards). No Excel export or FTP upload.",
 )
 _parser.add_argument("--legacy-report", action="store_true", help="Use legacy 3-column Excel layout (visits, formal, diagnosis)")

@@ -1,8 +1,8 @@
 """
-Integration tests for GET /cards/check_updates — real Postgres via TestClient with
+Integration tests for GET /visits/check_updates — real Postgres via TestClient with
 an api key scoped to Alenka + MDS. Requests carry a `since` bounded to this test's
 own rows, so they never scan the whole table. Covers what distinguishes this
-endpoint from /cards/export: pending cards are returned too (ignored/broken are
+endpoint from /visits/export: pending cards are returned too (ignored/broken are
 NOT — excluded by decision of 2026-07-23), the `since` boundary is inclusive,
 and a bare call falls back to a one-week window rather than all history.
 """
@@ -109,18 +109,18 @@ async def seeded(alenka_org_id: str):
 
 
 def test_check_updates_requires_key(client: TestClient):
-    resp = client.get("/cards/check_updates", params={"org": "Alenka"})
+    resp = client.get("/visits/check_updates", params={"org": "Alenka"})
     assert resp.status_code in (401, 403)
 
 
 def test_check_updates_requires_org(client: TestClient, test_key: str):
-    resp = client.get("/cards/check_updates", headers=_auth(test_key))
+    resp = client.get("/visits/check_updates", headers=_auth(test_key))
     assert resp.status_code == 422
 
 
 def test_check_updates_unknown_org_404(client: TestClient, test_key: str):
     resp = client.get(
-        "/cards/check_updates",
+        "/visits/check_updates",
         params={"org": f"nope-{uuid.uuid4().hex[:6]}"},
         headers=_auth(test_key),
     )
@@ -133,7 +133,7 @@ def test_check_updates_returns_pending_but_filters_ignored_broken(client, test_k
     feedback will show whether anyone needs them)."""
     guids, cutoff = seeded
     resp = client.get(
-        "/cards/check_updates",
+        "/visits/check_updates",
         params={"org": "Alenka", "since": cutoff},
         headers=_auth(test_key),
     )
@@ -166,7 +166,7 @@ def test_check_updates_boundary_is_inclusive(client, test_key, seeded):
     landed exactly on the boundary."""
     guids, cutoff = seeded
     resp = client.get(
-        "/cards/check_updates",
+        "/visits/check_updates",
         params={"org": "Alenka", "since": cutoff},
         headers=_auth(test_key),
     )
@@ -174,7 +174,7 @@ def test_check_updates_boundary_is_inclusive(client, test_key, seeded):
     target = next(r for r in resp.json() if r["card_guid"] == guids["done"])
 
     resp = client.get(
-        "/cards/check_updates",
+        "/visits/check_updates",
         params={"org": "Alenka", "since": target["updated_at"]},
         headers=_auth(test_key),
     )
@@ -195,7 +195,7 @@ async def test_check_updates_is_org_scoped(client, test_key, mds_org_id, seeded)
         )
     try:
         resp = client.get(
-            "/cards/check_updates",
+            "/visits/check_updates",
             params={"org": "Alenka", "since": cutoff},
             headers=_auth(test_key),
         )
@@ -233,7 +233,7 @@ async def test_check_updates_without_since_defaults_to_a_week(client, test_key, 
             await conn.execute("ALTER TABLE done_cards ENABLE TRIGGER done_cards_set_updated_at")
     try:
         resp = client.get(
-            "/cards/check_updates",
+            "/visits/check_updates",
             params={"org": "Alenka"},
             headers=_auth(test_key),
         )

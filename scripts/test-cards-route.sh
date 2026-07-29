@@ -85,25 +85,25 @@ urlencode_org() {
 
 case "$ROUTE" in
   check)
-    REQUEST_URL="${BASE_URL}/cards/check"
+    REQUEST_URL="${BASE_URL}/visits/check"
     ARGS=(-G --data-urlencode "org=${ORG}" --data-urlencode "date=${DATE}")
     ;;
   pull)
-    REQUEST_URL="${BASE_URL}/cards/pull"
+    REQUEST_URL="${BASE_URL}/visits/pull"
     ARGS=(-G --data-urlencode "org=${ORG}" --data-urlencode "date=${DATE}")
     ;;
   export)
-    REQUEST_URL="${BASE_URL}/cards/export"
+    REQUEST_URL="${BASE_URL}/visits/export"
     ARGS=(-G --data-urlencode "org=${ORG}" --data-urlencode "since=${DATE}T00:00:00" --data-urlencode "limit=10")
     ;;
   push)
-    REQUEST_URL="${BASE_URL}/cards/push?org=$(urlencode_org "$ORG")"
+    REQUEST_URL="${BASE_URL}/visits/push?org=$(urlencode_org "$ORG")"
     ARGS=(-X POST -H "Content-Type: application/json" --data-raw "$_MOCK_CARD_JSON")
     ;;
   check_updates)
     # since is optional server-side (defaults to the last week) — passed here
     # so DATE stays meaningful; statuses returned: done|pending only.
-    REQUEST_URL="${BASE_URL}/cards/check_updates"
+    REQUEST_URL="${BASE_URL}/visits/check_updates"
     ARGS=(-G --data-urlencode "org=${ORG}" --data-urlencode "since=${DATE}T00:00:00")
     ;;
   *)

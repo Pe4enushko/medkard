@@ -1,5 +1,5 @@
 """
-Integration tests for GET /cards/export — real Postgres via TestClient with an
+Integration tests for GET /visits/export — real Postgres via TestClient with an
 api key scoped to Alenka + MDS. Every request is bounded to this test's own rows
 via a `since` cutoff, so it never pages the whole production table. Covers: auth
 required, native JSONB + trimmed columns, audited-only (ignored/broken excluded),
@@ -103,14 +103,14 @@ async def seeded(alenka_org_id: str):
 
 
 def test_export_requires_key(client: TestClient):
-    resp = client.get("/cards/export", params={"org": "Alenka"})
+    resp = client.get("/visits/export", params={"org": "Alenka"})
     assert resp.status_code in (401, 403)
 
 
 def test_export_returns_audited_rows_native_jsonb_trimmed(client, test_key, seeded):
     audited, ign, brk, cutoff = seeded
     resp = client.get(
-        "/cards/export",
+        "/visits/export",
         params={"org": "Alenka", "since": cutoff},
         headers=_auth(test_key),
     )
@@ -134,7 +134,7 @@ def test_export_cursor_offset_paging(client, test_key, seeded):
     seen, cursor = [], 0
     while True:
         resp = client.get(
-            "/cards/export",
+            "/visits/export",
             params={"org": "Alenka", "since": cutoff, "limit": 2, "cursor": cursor},
             headers=_auth(test_key),
         )
@@ -163,7 +163,7 @@ async def test_export_is_org_scoped(client, test_key, mds_org_id, seeded):
         )
     try:
         resp = client.get(
-            "/cards/export",
+            "/visits/export",
             params={"org": "Alenka", "since": cutoff},
             headers=_auth(test_key),
         )

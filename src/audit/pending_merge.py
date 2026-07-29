@@ -2,7 +2,7 @@
 audit/pending_merge.py — folds pending (pushed) done_cards rows into a 1C
 payload's visit list before it's handed to AuditPipeline.run_batched.
 
-Cards pushed via POST /cards/push are stored with status='pending' and never
+Cards pushed via POST /visits/push are stored with status='pending' and never
 re-appear from a normal 1C date-range pull if their visit date falls outside
 that night's window — merging them in here is what lets a pushed update
 actually get (re-)audited.

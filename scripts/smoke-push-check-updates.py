@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-end smoke test for POST /cards/push + GET /cards/check_updates.
+End-to-end smoke test for POST /visits/push + GET /visits/check_updates.
 
 Exercises the pairing the check_updates endpoint exists for: a card pushed by
 1C lands as status='pending' with no audit results, and check_updates must
@@ -173,8 +173,8 @@ async def run(client: httpx.AsyncClient, org_id: str, raw_key: str, fixtures: _F
     # run's own row instead of scanning the org's history.
     before_push = datetime.now(timezone.utc) - timedelta(seconds=5)
 
-    print("\n1. POST /cards/push")
-    resp = await client.post(f"{BASE}/cards/push", params=org_q, json=_mock_card(), headers=auth)
+    print("\n1. POST /visits/push")
+    resp = await client.post(f"{BASE}/visits/push", params=org_q, json=_mock_card(), headers=auth)
     check("push accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
     if resp.status_code == 200:
         body = resp.json()
@@ -194,9 +194,9 @@ async def run(client: httpx.AsyncClient, org_id: str, raw_key: str, fixtures: _F
             row["formal_result"] is None and row["diag_result"] is None,
         )
 
-    print("\n2. GET /cards/check_updates — the pending card must come back")
+    print("\n2. GET /visits/check_updates — the pending card must come back")
     resp = await client.get(
-        f"{BASE}/cards/check_updates",
+        f"{BASE}/visits/check_updates",
         params={**org_q, "since": before_push.isoformat()},
         headers=auth,
     )
@@ -218,7 +218,7 @@ async def run(client: httpx.AsyncClient, org_id: str, raw_key: str, fixtures: _F
     print("\n3. Inclusive `since` boundary")
     if pushed is not None:
         resp = await client.get(
-            f"{BASE}/cards/check_updates",
+            f"{BASE}/visits/check_updates",
             params={**org_q, "since": pushed["updated_at"]},
             headers=auth,
         )
@@ -235,23 +235,23 @@ async def run(client: httpx.AsyncClient, org_id: str, raw_key: str, fixtures: _F
         check("boundary check", False, "skipped — no card from step 2")
 
     print("\n4. Default window (no `since`)")
-    resp = await client.get(f"{BASE}/cards/check_updates", params=org_q, headers=auth)
+    resp = await client.get(f"{BASE}/visits/check_updates", params=org_q, headers=auth)
     check("check_updates 200 without since", resp.status_code == 200, f"got {resp.status_code}")
     if resp.status_code == 200:
         guids = {r["card_guid"] for r in resp.json()}
         check("card present in the default week window", CARD_GUID.lower() in guids)
 
     print("\n5. Auth")
-    resp = await client.get(f"{BASE}/cards/check_updates", params=org_q)
+    resp = await client.get(f"{BASE}/visits/check_updates", params=org_q)
     check("no key → 401/403", resp.status_code in (401, 403), f"got {resp.status_code}")
 
     resp = await client.get(
-        f"{BASE}/cards/check_updates", params=org_q,
+        f"{BASE}/visits/check_updates", params=org_q,
         headers={"Authorization": f"Bearer medkard_not_a_real_key_{TAG}"},
     )
     check("bad key → 401/403", resp.status_code in (401, 403), f"got {resp.status_code}")
 
-    resp = await client.get(f"{BASE}/cards/check_updates", headers=auth)
+    resp = await client.get(f"{BASE}/visits/check_updates", headers=auth)
     check("missing ?org= → 422", resp.status_code == 422, f"got {resp.status_code}")
 
 

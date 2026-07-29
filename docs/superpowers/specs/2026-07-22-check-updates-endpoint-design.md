@@ -4,15 +4,15 @@
 
 Направление данных: medkard сам забирает визиты организаций (Alenka, MDS) из их 1C
 (ночной прогон `scripts/audit-one-c-period.py`), либо принимает push-обновления карт
-от 1C через `POST /cards/push`. medkard их аудирует и складывает результат в
+от 1C через `POST /visits/push`. medkard их аудирует и складывает результат в
 `done_cards`.
 
 Забирать данные у medkard должна Искра — отдельное приложение (репозиторий
 `engine`), в котором врач через нейронку обсуждает карты пациентов. Искра сейчас
 делает это двумя способами (модуль `engine/src/engine/integrations/medcheck/`):
 
-- `GET /cards/pull?date=` — xlsx-отчёт за конкретный день (`MedcheckClient.pull`).
-- `GET /cards/export?since=&limit=&cursor=` — JSON-выгрузка строк `done_cards`,
+- `GET /visits/pull?date=` — xlsx-отчёт за конкретный день (`MedcheckClient.pull`).
+- `GET /visits/export?since=&limit=&cursor=` — JSON-выгрузка строк `done_cards`,
   клиент-управляемый курсор по `updated_at`, отфильтрованная по
   `ignored = FALSE AND broken = FALSE` (только аудированные карты). Искра сейчас
   вызывает его с `since=None` раз в сутки и делает `TRUNCATE` + полный перезалив
@@ -20,7 +20,7 @@
   курсора на своей стороне.
 
 Обе модели рассчитаны на периодический (обычно ночной/дневной) пул. С появлением
-`POST /cards/push` (см. `2026-07-21-cards-push-endpoint-design.md`) 1C может в любой
+`POST /visits/push` (см. `2026-07-21-cards-push-endpoint-design.md`) 1C может в любой
 момент обновить уже поданную карту — она уходит в `status='pending'`, старые
 результаты аудита стираются, и карта ждёт ночной переаудит. Искре сейчас неоткуда
 узнать об этом раньше следующего планового пула.
@@ -85,7 +85,7 @@ upsert в свою реплику).
 
 ## Требования
 
-- Новый эндпоинт `GET /cards/check_updates`, авторизация как у остальных card-роутов
+- Новый эндпоинт `GET /visits/check_updates`, авторизация как у остальных card-роутов
   (`require_org_access`).
 - `org` — **обязательный** query-параметр, как у `check`/`pull`/`export`: ключ может
   быть scoped на несколько организаций, поэтому каждый вызов должен явно называть, за
@@ -175,7 +175,7 @@ CASE WHEN broken THEN 'broken'
 
 ### Роут
 
-`GET /cards/check_updates?org=<name>&since=<ISO-8601>` в `src/api/routes/cards.py` —
+`GET /visits/check_updates?org=<name>&since=<ISO-8601>` в `src/api/routes/cards.py` —
 по образцу существующего `export` (строки 68-77):
 
 ```python

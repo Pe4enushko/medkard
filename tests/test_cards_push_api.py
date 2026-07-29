@@ -1,5 +1,5 @@
 """
-Integration tests for POST /cards/push — hits the real configured Postgres
+Integration tests for POST /visits/push — hits the real configured Postgres
 via FastAPI's TestClient, same fixture pattern as tests/test_cards_api.py.
 """
 from __future__ import annotations
@@ -71,13 +71,13 @@ def _get_pending(organization_id: str | None) -> list[dict]:
 
 def test_push_missing_key_is_rejected(client: TestClient):
     guid = str(uuid.uuid4())
-    resp = client.post("/cards/push?org=Alenka", json={"Прием": {"GUID": guid}})
+    resp = client.post("/visits/push?org=Alenka", json={"Прием": {"GUID": guid}})
     assert resp.status_code in (401, 403)
 
 
 def test_push_without_guid_is_422(client: TestClient, test_key: str):
     resp = client.post(
-        "/cards/push?org=Alenka",
+        "/visits/push?org=Alenka",
         json={"Прием": {}, "Пациент": {"ФИО": "Тест Тестов"}},
         headers=_auth(test_key),
     )
@@ -87,7 +87,7 @@ def test_push_without_guid_is_422(client: TestClient, test_key: str):
 def test_push_with_no_patient_services_or_diagnoses_is_422(client: TestClient, test_key: str):
     guid = str(uuid.uuid4())
     resp = client.post(
-        "/cards/push?org=Alenka",
+        "/visits/push?org=Alenka",
         json={"Прием": {"GUID": guid}},
         headers=_auth(test_key),
     )
@@ -99,7 +99,7 @@ def test_push_with_empty_patient_is_accepted(client: TestClient, test_key: str):
     guid = str(uuid.uuid4())
     try:
         resp = client.post(
-            "/cards/push?org=Alenka",
+            "/visits/push?org=Alenka",
             json={"Прием": {"GUID": guid}, "Пациент": {}},
             headers=_auth(test_key),
         )
@@ -112,7 +112,7 @@ def test_push_with_only_diagnoses_is_accepted(client: TestClient, test_key: str)
     guid = str(uuid.uuid4())
     try:
         resp = client.post(
-            "/cards/push?org=Alenka",
+            "/visits/push?org=Alenka",
             json={"Прием": {"GUID": guid}, "Диагнозы": []},
             headers=_auth(test_key),
         )
@@ -125,7 +125,7 @@ def test_push_new_card_creates_pending_row(client: TestClient, test_key: str, al
     guid = str(uuid.uuid4())
     try:
         resp = client.post(
-            "/cards/push?org=Alenka",
+            "/visits/push?org=Alenka",
             json={"Прием": {"GUID": guid}, "Пациент": {"ФИО": "Тест Тестов"}},
             headers=_auth(test_key),
         )
@@ -145,14 +145,14 @@ def test_push_updates_existing_card_and_resets_to_pending(client: TestClient, te
     guid = str(uuid.uuid4())
     try:
         first = client.post(
-            "/cards/push?org=Alenka",
+            "/visits/push?org=Alenka",
             json={"Прием": {"GUID": guid}, "Пациент": {"ФИО": "Тест"}, "v": 1},
             headers=_auth(test_key),
         )
         assert first.status_code == 200
 
         second = client.post(
-            "/cards/push?org=Alenka",
+            "/visits/push?org=Alenka",
             json={"Прием": {"GUID": guid}, "Пациент": {"ФИО": "Тест"}, "v": 2},
             headers=_auth(test_key),
         )

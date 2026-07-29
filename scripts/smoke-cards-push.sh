@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end smoke test for the cards-push feature (POST /cards/push → nightly audit).
+# End-to-end smoke test for the cards-push feature (POST /visits/push → nightly audit).
 #
 # Unlike scripts/test-cards-route.sh (which fires one request for you to eyeball),
 # this drives the whole push→audit cycle against a live API + the configured
@@ -118,7 +118,7 @@ push() {
   bodyfile="$(mktemp)"
   if ! code="$(curl -sS --max-time 20 -o "$bodyfile" -w '%{http_code}' \
       -X POST "${hdr[@]}" --data-raw "$body" \
-      "${BASE_URL}/cards/push?org=${ORG}" 2>"${bodyfile}.err")"; then
+      "${BASE_URL}/visits/push?org=${ORG}" 2>"${bodyfile}.err")"; then
     code="000"
     printf '000\tconnection failed: %s' "$(tr -d '\n' <"${bodyfile}.err" | head -c 200)"
     rm -f "$bodyfile" "${bodyfile}.err"

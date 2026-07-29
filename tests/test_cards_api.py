@@ -87,34 +87,34 @@ def _load_workbook(content: bytes):
 
 
 def _first_guid_on(client: TestClient, key: str, org: str, date_str: str) -> str:
-    resp = client.get(f"/cards/pull?date={date_str}&org={org}", headers=_auth(key))
+    resp = client.get(f"/visits/pull?date={date_str}&org={org}", headers=_auth(key))
     ws = _load_workbook(resp.content).active
     card_data = ws.cell(row=2, column=3).value
     return _GUID_RE.search(card_data).group(1)
 
 
 def test_missing_key_is_rejected(client: TestClient):
-    resp = client.get("/cards/check?date=2026-06-21&org=Alenka")
+    resp = client.get("/visits/check?date=2026-06-21&org=Alenka")
     assert resp.status_code == 403 or resp.status_code == 401
 
 
 def test_wrong_key_is_rejected(client: TestClient):
-    resp = client.get("/cards/check?date=2026-06-21&org=Alenka", headers=_auth("medkard_bogus"))
+    resp = client.get("/visits/check?date=2026-06-21&org=Alenka", headers=_auth("medkard_bogus"))
     assert resp.status_code == 401
 
 
 def test_unknown_org_is_404(client: TestClient, test_key: str):
-    resp = client.get("/cards/check?date=2026-06-21&org=Nonexistent", headers=_auth(test_key))
+    resp = client.get("/visits/check?date=2026-06-21&org=Nonexistent", headers=_auth(test_key))
     assert resp.status_code == 404
 
 
 def test_key_not_scoped_to_org_is_403(client: TestClient, alenka_only_key: str):
-    resp = client.get("/cards/check?date=2026-06-21&org=MDS", headers=_auth(alenka_only_key))
+    resp = client.get("/visits/check?date=2026-06-21&org=MDS", headers=_auth(alenka_only_key))
     assert resp.status_code == 403
 
 
 def test_check_returns_count_for_known_date(client: TestClient, test_key: str):
-    resp = client.get("/cards/check?date=2026-06-21&org=Alenka", headers=_auth(test_key))
+    resp = client.get("/visits/check?date=2026-06-21&org=Alenka", headers=_auth(test_key))
     assert resp.status_code == 200
     body = resp.json()
     assert body["date"] == "2026-06-21"
@@ -123,21 +123,21 @@ def test_check_returns_count_for_known_date(client: TestClient, test_key: str):
 
 
 def test_org_param_is_case_insensitive(client: TestClient, test_key: str):
-    exact = client.get("/cards/check?date=2026-06-21&org=Alenka", headers=_auth(test_key)).json()
-    lower = client.get("/cards/check?date=2026-06-21&org=alenka", headers=_auth(test_key)).json()
-    upper = client.get("/cards/check?date=2026-06-21&org=ALENKA", headers=_auth(test_key)).json()
+    exact = client.get("/visits/check?date=2026-06-21&org=Alenka", headers=_auth(test_key)).json()
+    lower = client.get("/visits/check?date=2026-06-21&org=alenka", headers=_auth(test_key)).json()
+    upper = client.get("/visits/check?date=2026-06-21&org=ALENKA", headers=_auth(test_key)).json()
     assert exact["count"] == lower["count"] == upper["count"]
 
     # filename always uses the DB's canonical casing, regardless of what the client sent
-    resp = client.get("/cards/pull?date=2026-06-21&org=alenka", headers=_auth(test_key))
+    resp = client.get("/visits/pull?date=2026-06-21&org=alenka", headers=_auth(test_key))
     assert 'filename="report_Alenka_2026-06-21.xlsx"' in resp.headers["content-disposition"]
 
 
 def test_pull_returns_xlsx_file_with_one_row_per_card(client: TestClient, test_key: str):
-    check_resp = client.get("/cards/check?date=2026-06-21&org=Alenka", headers=_auth(test_key))
+    check_resp = client.get("/visits/check?date=2026-06-21&org=Alenka", headers=_auth(test_key))
     expected_count = check_resp.json()["count"]
 
-    resp = client.get("/cards/pull?date=2026-06-21&org=Alenka", headers=_auth(test_key))
+    resp = client.get("/visits/pull?date=2026-06-21&org=Alenka", headers=_auth(test_key))
     assert resp.status_code == 200
     assert resp.headers["content-type"] == (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -153,11 +153,11 @@ def test_pull_returns_xlsx_file_with_one_row_per_card(client: TestClient, test_k
 
 
 def test_org_param_scopes_results(client: TestClient, test_key: str):
-    alenka_count = client.get("/cards/check?date=2026-06-21&org=Alenka", headers=_auth(test_key)).json()["count"]
-    mds_count = client.get("/cards/check?date=2026-06-21&org=MDS", headers=_auth(test_key)).json()["count"]
+    alenka_count = client.get("/visits/check?date=2026-06-21&org=Alenka", headers=_auth(test_key)).json()["count"]
+    mds_count = client.get("/visits/check?date=2026-06-21&org=MDS", headers=_auth(test_key)).json()["count"]
 
     alenka_guid = _first_guid_on(client, test_key, "Alenka", "2026-06-21")
-    resp = client.get("/cards/pull?date=2026-06-21&org=MDS", headers=_auth(test_key))
+    resp = client.get("/visits/pull?date=2026-06-21&org=MDS", headers=_auth(test_key))
     wb = _load_workbook(resp.content)
     ws = wb.active
     guids_in_mds = {ws.cell(row=r, column=3).value for r in range(2, ws.max_row + 1)}
@@ -166,11 +166,11 @@ def test_org_param_scopes_results(client: TestClient, test_key: str):
 
 
 def test_check_empty_for_date_with_no_cards(client: TestClient, test_key: str):
-    resp = client.get("/cards/check?date=1999-01-01&org=Alenka", headers=_auth(test_key))
+    resp = client.get("/visits/check?date=1999-01-01&org=Alenka", headers=_auth(test_key))
     assert resp.status_code == 200
     assert resp.json()["count"] == 0
 
 
 def test_pull_is_404_for_date_with_no_cards(client: TestClient, test_key: str):
-    resp = client.get("/cards/pull?date=1999-01-01&org=Alenka", headers=_auth(test_key))
+    resp = client.get("/visits/pull?date=1999-01-01&org=Alenka", headers=_auth(test_key))
     assert resp.status_code == 404
