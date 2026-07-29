@@ -28,7 +28,9 @@ _VISIT_DATE_CTE = (
     "  FROM done_cards "
     "  WHERE ignored = FALSE "
     "    AND broken = FALSE "
-    "    AND organization_id = %(org_id)s::uuid"
+    "    AND organization_id = %(org_id)s::uuid "
+    "    AND (%(doctor_code)s::text IS NULL "
+    "         OR card_data -> 'Прием' ->> 'Врач_код' = %(doctor_code)s)"
     ") "
 )
 
@@ -41,23 +43,31 @@ class _ApiCardsReader(BaseStorage):
                 row["card_data"] = json.loads(row["card_data"])
         return rows
 
-    async def count_by_date(self, visit_date: date, organization_id: str) -> int:
+    async def count_by_date(
+        self, visit_date: date, organization_id: str, doctor_code: str | None = None
+    ) -> int:
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 _VISIT_DATE_CTE + "SELECT count(*) AS n FROM cards WHERE visit_date = %(date)s::date",
-                {"org_id": organization_id, "date": visit_date},
+                {"org_id": organization_id, "date": visit_date, "doctor_code": doctor_code},
             )
             row = await cur.fetchone()
         return row["n"]
 
-    async def fetch_by_date(self, visit_date: date, organization_id: str) -> list[dict[str, Any]]:
+    async def fetch_by_date(
+        self, visit_date: date, organization_id: str, doctor_code: str | None = None
+    ) -> list[dict[str, Any]]:
         query = (
             _VISIT_DATE_CTE
             + "SELECT card_guid, card_data::text, formal_result, diag_result, icd_check_result "
             "FROM cards WHERE visit_date = %(date)s::date "
             "ORDER BY card_guid"
         )
-        params: dict[str, Any] = {"org_id": organization_id, "date": visit_date}
+        params: dict[str, Any] = {
+            "org_id": organization_id,
+            "date": visit_date,
+            "doctor_code": doctor_code,
+        }
 
         async with self._pool.connection() as conn:
             cur = await conn.execute(query, params)
@@ -135,17 +145,23 @@ class ApiFormatter:
     async def __aexit__(self, *args: object) -> None:
         await self._reader.__aexit__(*args)
 
-    async def check(self, visit_date: date, organization_id: str) -> int:
-        """Return the number of audited cards for *organization_id* on *visit_date*."""
-        return await self._reader.count_by_date(visit_date, organization_id)
+    async def check(
+        self, visit_date: date, organization_id: str, doctor_code: str | None = None
+    ) -> int:
+        """Return the number of audited cards for *organization_id* on *visit_date*,
+        optionally narrowed to one doctor (Прием.Врач_код)."""
+        return await self._reader.count_by_date(visit_date, organization_id, doctor_code)
 
-    async def make_xlsx(self, visit_date: date, organization_id: str) -> bytes:
+    async def make_xlsx(
+        self, visit_date: date, organization_id: str, doctor_code: str | None = None
+    ) -> bytes:
         """Return an in-memory xlsx workbook (bytes), one row per card.
 
         Same row layout as the Excel reports produced by
         audit/excel_formatter.py — built in memory, no disk I/O.
+        Optionally narrowed to one doctor (Прием.Врач_код).
         """
-        rows = await self._reader.fetch_by_date(visit_date, organization_id)
+        rows = await self._reader.fetch_by_date(visit_date, organization_id, doctor_code)
         async with GuidelinesStorage() as _store:
             manifest_meta = build_manifest_meta(await _store.all())
 
