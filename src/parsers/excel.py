@@ -217,6 +217,22 @@ def build_workbook_bytes(
     return buffer.getvalue()
 
 
+def build_empty_report_bytes(message: str) -> bytes:
+    """Single-cell workbook stating that a filtered report has no visits.
+
+    Used by /visits/pull with a doctor_code filter: the integrating service
+    expects a file either way, so absence is stated inside the workbook
+    instead of a 404 (the unfiltered pull keeps its 404 contract).
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.cell(row=1, column=1, value=message)
+    ws.column_dimensions["A"].width = 100
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
 class AuditExcelWriter:
     """Append audit results to an xlsx file, creating it with a header row if absent.
 
