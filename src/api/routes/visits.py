@@ -46,7 +46,11 @@ async def check(
 @router.get("/pull")
 async def pull(
     date_: date = Query(..., alias="date"),
-    doctor_code: str | None = Query(default=None, min_length=1),
+    # The pattern keeps doctor_code safe to interpolate into the
+    # Content-Disposition filename below: no quotes, no CR/LF, no separators.
+    doctor_code: str | None = Query(
+        default=None, min_length=1, max_length=64, pattern=r"^[\w-]+$"
+    ),
     org_access: tuple[str, str] = Depends(require_org_access),
 ) -> Response:
     org_id, org_name = org_access
@@ -66,7 +70,7 @@ async def pull(
         else:
             xlsx_bytes = await formatter.make_xlsx(date_, org_id, doctor_code)
 
-    suffix = f"_doc{doctor_code}" if doctor_code else ""
+    suffix = f"_doc{doctor_code}" if doctor_code is not None else ""
     filename = f"report_{org_name}_{date_.isoformat()}{suffix}.xlsx"
     return Response(
         content=xlsx_bytes,

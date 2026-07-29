@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import sys
 import uuid
 from datetime import date
@@ -32,6 +33,9 @@ from storage.organizations_storage import OrganizationsStorage
 FIXTURE_DATE = date(2044, 1, 1)          # DD.MM.YYYY в карте: 01.01.2044
 DOC_A = "00001"
 DOC_B = "00002"
+
+# GUID печатается как «GUID: <value>» внутри колонки «Данные карты» (col 3).
+_GUID_RE = re.compile(r"GUID:\s*([0-9a-f-]{36})")
 
 
 class _CardsWriter(BaseStorage):
@@ -91,9 +95,24 @@ def _auth(key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
 
 
+def _guids_in_workbook(content: bytes) -> set[str]:
+    """GUID-ы карт из колонки «Данные карты» (без строки заголовка)."""
+    ws = openpyxl.load_workbook(io.BytesIO(content)).active
+    guids = set()
+    for row in range(2, ws.max_row + 1):
+        match = _GUID_RE.search(ws.cell(row=row, column=3).value or "")
+        if match:
+            guids.add(match.group(1))
+    return guids
+
+
 @pytest.fixture
 async def seeded_cards(mds_org_id: str):
-    """2 карты врача 00001, 1 карта 00002, 1 без Врач_код — все на 2044-01-01."""
+    """2 карты врача 00001, 1 карта 00002, 1 без Врач_код — все на 2044-01-01.
+
+    Отдаёт (org_id, guid-ы карт DOC_A), чтобы тесты проверяли не количество
+    строк, а идентичность отфильтрованных карт.
+    """
     cards = [
         _card(DOC_A, "Иванов Иван Иванович"),
         _card(DOC_A, "Иванов Иван Иванович"),
@@ -104,38 +123,40 @@ async def seeded_cards(mds_org_id: str):
     async with _CardsWriter() as writer:
         for guid, card in zip(guids, cards):
             await writer.insert_card(guid, card, mds_org_id)
-    yield mds_org_id
+    yield mds_org_id, set(guids[:2])
     async with _CardsWriter() as writer:
         await writer.delete_cards(guids)
 
 
-async def test_check_counts_only_that_doctor(seeded_cards: str):
+async def test_check_counts_only_that_doctor(seeded_cards):
+    org_id, _ = seeded_cards
     async with ApiFormatter() as formatter:
-        assert await formatter.check(FIXTURE_DATE, seeded_cards, DOC_A) == 2
-        assert await formatter.check(FIXTURE_DATE, seeded_cards, DOC_B) == 1
-        assert await formatter.check(FIXTURE_DATE, seeded_cards, "99999") == 0
+        assert await formatter.check(FIXTURE_DATE, org_id, DOC_A) == 2
+        assert await formatter.check(FIXTURE_DATE, org_id, DOC_B) == 1
+        assert await formatter.check(FIXTURE_DATE, org_id, "99999") == 0
 
 
-async def test_check_without_filter_counts_all(seeded_cards: str):
+async def test_check_without_filter_counts_all(seeded_cards):
+    org_id, _ = seeded_cards
     async with ApiFormatter() as formatter:
-        assert await formatter.check(FIXTURE_DATE, seeded_cards) == 4
+        assert await formatter.check(FIXTURE_DATE, org_id) == 4
 
 
-async def test_make_xlsx_filters_rows(seeded_cards: str):
+async def test_make_xlsx_filters_rows(seeded_cards):
+    org_id, doc_a_guids = seeded_cards
     async with ApiFormatter() as formatter:
-        content = await formatter.make_xlsx(FIXTURE_DATE, seeded_cards, DOC_A)
-    ws = openpyxl.load_workbook(io.BytesIO(content)).active
-    assert ws.max_row - 1 == 2  # минус заголовок
+        content = await formatter.make_xlsx(FIXTURE_DATE, org_id, DOC_A)
+    assert _guids_in_workbook(content) == doc_a_guids
 
 
 def test_pull_with_doctor_code_filters_and_renames(client, test_key, seeded_cards):
+    _, doc_a_guids = seeded_cards
     resp = client.get(
         f"/visits/pull?date=2044-01-01&org=MDS&doctor_code={DOC_A}", headers=_auth(test_key)
     )
     assert resp.status_code == 200
     assert 'filename="report_MDS_2044-01-01_doc00001.xlsx"' in resp.headers["content-disposition"]
-    ws = openpyxl.load_workbook(io.BytesIO(resp.content)).active
-    assert ws.max_row - 1 == 2
+    assert _guids_in_workbook(resp.content) == doc_a_guids
 
 
 def test_pull_unknown_doctor_returns_placeholder_not_404(client, test_key, seeded_cards):
@@ -162,8 +183,10 @@ def test_doctors_lists_unique_codes_sorted_by_name(client, test_key, seeded_card
         {"code": DOC_A, "name": "Иванов Иван Иванович"},
         {"code": DOC_B, "name": "Петрова Анна Сергеевна"},
     ]
-    # карта без Врач_код не рождает пустого врача
-    assert all(d["code"] for d in doctors)
+    # Наша карта без Врач_код не родила пустого врача. Проверяем только свой
+    # посев: общий обход связал бы тест со стендовыми данными организации.
+    assert {"code": "", "name": ""} not in doctors
+    assert not any(d["code"] == "" for d in ours)
 
 
 def test_doctors_requires_auth(client):
