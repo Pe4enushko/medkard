@@ -21,3 +21,8 @@ class CheckResponse(BaseModel):
 class PushResponse(BaseModel):
     card_guid: str
     status: str
+
+
+class DoctorEntry(BaseModel):
+    code: str
+    name: str

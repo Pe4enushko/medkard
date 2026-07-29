@@ -151,3 +151,21 @@ def test_pull_unknown_doctor_returns_placeholder_not_404(client, test_key, seede
 def test_pull_without_filter_keeps_404_contract(client, test_key):
     resp = client.get("/visits/pull?date=1999-01-01&org=MDS", headers=_auth(test_key))
     assert resp.status_code == 404
+
+
+def test_doctors_lists_unique_codes_sorted_by_name(client, test_key, seeded_cards):
+    resp = client.get("/visits/doctors?org=MDS", headers=_auth(test_key))
+    assert resp.status_code == 200
+    doctors = resp.json()
+    ours = [d for d in doctors if d["code"] in (DOC_A, DOC_B)]
+    assert ours == [
+        {"code": DOC_A, "name": "Иванов Иван Иванович"},
+        {"code": DOC_B, "name": "Петрова Анна Сергеевна"},
+    ]
+    # карта без Врач_код не рождает пустого врача
+    assert all(d["code"] for d in doctors)
+
+
+def test_doctors_requires_auth(client):
+    resp = client.get("/visits/doctors?org=MDS")
+    assert resp.status_code in (401, 403)

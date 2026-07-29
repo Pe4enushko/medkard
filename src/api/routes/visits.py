@@ -22,7 +22,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from api.auth import require_org_access
-from api.models import CheckResponse, PushResponse
+from api.models import CheckResponse, DoctorEntry, PushResponse
 from parsers.excel import build_empty_report_bytes
 from reporting.api_formatter import ApiFormatter
 from storage.done_cards_storage import DoneCardsStorage
@@ -95,6 +95,16 @@ async def check_updates(
     org_id, _ = org_access
     async with ApiFormatter() as formatter:
         return await formatter.check_updates(org_id, since)
+
+
+@router.get("/doctors", response_model=list[DoctorEntry])
+async def doctors(
+    org_access: tuple[str, str] = Depends(require_org_access),
+) -> list[DoctorEntry]:
+    org_id, _ = org_access
+    async with ApiFormatter() as formatter:
+        rows = await formatter.doctors(org_id)
+    return [DoctorEntry(code=row["code"], name=row["name"]) for row in rows]
 
 
 def _extract_card_guid(card: dict) -> str | None:

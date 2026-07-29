@@ -131,6 +131,30 @@ class _ApiCardsReader(BaseStorage):
             cur = await conn.execute(query, {"org_id": organization_id, "since": since})
             return await cur.fetchall()
 
+    async def fetch_doctors(self, organization_id: str) -> list[dict[str, Any]]:
+        """Unique doctors of an org from card data: Прием.Врач_код + Прием.Врач.
+
+        DISTINCT ON keeps the freshest card's spelling of the name per code.
+        broken cards are excluded; ignored are NOT — an ignored card still
+        names a real doctor. Full JSONB scan per org — accepted at current
+        volumes (no card_data indexes exist).
+        """
+        query = (
+            "SELECT code, name FROM ("
+            "  SELECT DISTINCT ON (card_data -> 'Прием' ->> 'Врач_код')"
+            "         card_data -> 'Прием' ->> 'Врач_код'          AS code,"
+            "         COALESCE(card_data -> 'Прием' ->> 'Врач', '') AS name"
+            "  FROM done_cards"
+            "  WHERE organization_id = %(org_id)s::uuid"
+            "    AND broken = FALSE"
+            "    AND COALESCE(card_data -> 'Прием' ->> 'Врач_код', '') <> ''"
+            "  ORDER BY card_data -> 'Прием' ->> 'Врач_код', updated_at DESC"
+            ") AS d ORDER BY name, code"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(query, {"org_id": organization_id})
+            return await cur.fetchall()
+
 
 class ApiFormatter:
     """Async context-manager producing pull-API responses for one organization."""
@@ -194,3 +218,7 @@ class ApiFormatter:
         pending | done | ignored | broken.
         """
         return await self._reader.fetch_changed(organization_id, since)
+
+    async def doctors(self, organization_id: str) -> list[dict[str, Any]]:
+        """Unique (code, name) doctors of the org, sorted by name."""
+        return await self._reader.fetch_doctors(organization_id)
