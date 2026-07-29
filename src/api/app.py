@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from api.routes.cards import router as cards_router
+from api.routes.visits import router as visits_router
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="medkard pull API")
-    app.include_router(cards_router)
+    app.include_router(visits_router)
     return app

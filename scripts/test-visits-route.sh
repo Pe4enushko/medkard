@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Ad-hoc smoke test for the pull API's /cards routes (src/api/routes/cards.py).
+# Ad-hoc smoke test for the pull API's /visits routes (src/api/routes/visits.py).
 #
 # Hits one route with mock query params so you can eyeball status code/body
 # against a running `api.app:create_app` instance, without writing a client.
 #
 # Usage:
-#   ./scripts/test-cards-route.sh ROUTE URL API_KEY [ORG] [DATE]
+#   ./scripts/test-visits-route.sh ROUTE URL API_KEY [ORG] [DATE]
 #
 #   ROUTE   check | pull | export | push | check_updates
 #   URL     base URL of the API, e.g. http://localhost:8000
@@ -16,11 +16,11 @@
 #           for check_updates it becomes ?since=DATE"T00:00:00")
 #
 # Examples:
-#   ./scripts/test-cards-route.sh check  http://localhost:8000 $API_KEY
-#   ./scripts/test-cards-route.sh pull   http://localhost:8000 $API_KEY Alenka 2026-07-01
-#   ./scripts/test-cards-route.sh export http://localhost:8000 $API_KEY MDS
-#   ./scripts/test-cards-route.sh push   http://localhost:8000 $API_KEY MDS
-#   ./scripts/test-cards-route.sh check_updates http://localhost:8000 $API_KEY MDS 2026-07-20
+#   ./scripts/test-visits-route.sh check  http://localhost:8000 $API_KEY
+#   ./scripts/test-visits-route.sh pull   http://localhost:8000 $API_KEY Alenka 2026-07-01
+#   ./scripts/test-visits-route.sh export http://localhost:8000 $API_KEY MDS
+#   ./scripts/test-visits-route.sh push   http://localhost:8000 $API_KEY MDS
+#   ./scripts/test-visits-route.sh check_updates http://localhost:8000 $API_KEY MDS 2026-07-20
 
 set -euo pipefail
 
@@ -57,7 +57,7 @@ DATE="${5:-$(date +%Y-%m-%d)}"
 
 BASE_URL="${URL%/}"
 
-# Mock card body for push: minimum viable shape per cards.py's
+# Mock card body for push: minimum viable shape per visits.py's
 # _extract_card_guid + _looks_like_a_visit (needs Прием.GUID and at least
 # one of Пациент/Услуги/Диагнозы).
 _MOCK_CARD_JSON='{

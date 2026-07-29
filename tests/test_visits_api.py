@@ -1,5 +1,5 @@
 """
-Integration tests for the pull API (api.app / api.cards) — hits the real
+Integration tests for the pull API (api.app / api.visits) — hits the real
 configured Postgres via FastAPI's TestClient. Uses one test API key scoped
 to both Alenka and MDS (matching the real deployment where a key is scoped
 to specific orgs), and specifies the org via ?org=.
