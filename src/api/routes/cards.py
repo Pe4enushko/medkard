@@ -1,5 +1,5 @@
 """
-api/cards.py — check/pull routes for the pull API.
+api/visits.py — check/pull routes for the pull API.
 
 Route handlers only: parse query params, delegate to
 reporting.api_formatter.ApiFormatter, return the result. No DB access or
@@ -26,7 +26,7 @@ from api.models import CheckResponse, PushResponse
 from reporting.api_formatter import ApiFormatter
 from storage.done_cards_storage import DoneCardsStorage
 
-router = APIRouter(prefix="/cards", tags=["cards"])
+router = APIRouter(prefix="/visits", tags=["visits"])
 
 _XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -53,7 +53,7 @@ async def pull(
         if count == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No cards for {org_name} on {date_.isoformat()}",
+                detail=f"No visits for {org_name} on {date_.isoformat()}",
             )
         xlsx_bytes = await formatter.make_xlsx(date_, org_id)
 
