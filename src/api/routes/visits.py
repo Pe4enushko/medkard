@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from api.auth import require_org_access
 from api.models import CheckResponse, PushResponse
+from parsers.excel import build_empty_report_bytes
 from reporting.api_formatter import ApiFormatter
 from storage.done_cards_storage import DoneCardsStorage
 
@@ -45,19 +46,28 @@ async def check(
 @router.get("/pull")
 async def pull(
     date_: date = Query(..., alias="date"),
+    doctor_code: str | None = Query(default=None, min_length=1),
     org_access: tuple[str, str] = Depends(require_org_access),
 ) -> Response:
     org_id, org_name = org_access
     async with ApiFormatter() as formatter:
-        count = await formatter.check(date_, org_id)
-        if count == 0:
+        count = await formatter.check(date_, org_id, doctor_code)
+        if count == 0 and doctor_code is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No visits for {org_name} on {date_.isoformat()}",
             )
-        xlsx_bytes = await formatter.make_xlsx(date_, org_id)
+        if count == 0:
+            # Personal report: the caller delivers a file per doctor either way,
+            # so "no visits" is stated inside the workbook, not as a 404.
+            xlsx_bytes = build_empty_report_bytes(
+                f"За {date_.strftime('%d.%m.%Y')} приёмов врача с кодом {doctor_code} не обнаружено"
+            )
+        else:
+            xlsx_bytes = await formatter.make_xlsx(date_, org_id, doctor_code)
 
-    filename = f"report_{org_name}_{date_.isoformat()}.xlsx"
+    suffix = f"_doc{doctor_code}" if doctor_code else ""
+    filename = f"report_{org_name}_{date_.isoformat()}{suffix}.xlsx"
     return Response(
         content=xlsx_bytes,
         media_type=_XLSX_MEDIA_TYPE,

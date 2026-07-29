@@ -6,6 +6,7 @@ existing stand data can't collide, and deletes them afterwards.
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 import uuid
@@ -13,14 +14,18 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import openpyxl
 import pytest
 from dotenv import load_dotenv
+from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 load_dotenv(ROOT / ".env")
 
+from api.app import create_app
 from reporting.api_formatter import ApiFormatter
+from storage.api_keys_storage import ApiKeysStorage
 from storage.base import BaseStorage
 from storage.organizations_storage import OrganizationsStorage
 
@@ -61,10 +66,29 @@ def _card(doctor_code: str | None, doctor_name: str | None) -> dict[str, Any]:
     }
 
 
+@pytest.fixture(scope="module")
+def client() -> TestClient:
+    return TestClient(create_app())
+
+
 @pytest.fixture
 async def mds_org_id() -> str:
     async with OrganizationsStorage() as organizations:
         return await organizations.get_id_by_name("MDS")
+
+
+@pytest.fixture
+async def test_key(mds_org_id: str) -> str:
+    raw_key = f"medkard_test_{uuid.uuid4().hex}"
+    async with ApiKeysStorage() as api_keys:
+        key_id = await api_keys.create_key("pytest-doctor-filter", raw_key, [mds_org_id])
+    yield raw_key
+    async with ApiKeysStorage() as api_keys:
+        await api_keys.revoke_key(key_id)
+
+
+def _auth(key: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {key}"}
 
 
 @pytest.fixture
@@ -98,10 +122,32 @@ async def test_check_without_filter_counts_all(seeded_cards: str):
 
 
 async def test_make_xlsx_filters_rows(seeded_cards: str):
-    import io
-    import openpyxl
-
     async with ApiFormatter() as formatter:
         content = await formatter.make_xlsx(FIXTURE_DATE, seeded_cards, DOC_A)
     ws = openpyxl.load_workbook(io.BytesIO(content)).active
     assert ws.max_row - 1 == 2  # минус заголовок
+
+
+def test_pull_with_doctor_code_filters_and_renames(client, test_key, seeded_cards):
+    resp = client.get(
+        f"/visits/pull?date=2044-01-01&org=MDS&doctor_code={DOC_A}", headers=_auth(test_key)
+    )
+    assert resp.status_code == 200
+    assert 'filename="report_MDS_2044-01-01_doc00001.xlsx"' in resp.headers["content-disposition"]
+    ws = openpyxl.load_workbook(io.BytesIO(resp.content)).active
+    assert ws.max_row - 1 == 2
+
+
+def test_pull_unknown_doctor_returns_placeholder_not_404(client, test_key, seeded_cards):
+    resp = client.get(
+        "/visits/pull?date=2044-01-01&org=MDS&doctor_code=99999", headers=_auth(test_key)
+    )
+    assert resp.status_code == 200
+    ws = openpyxl.load_workbook(io.BytesIO(resp.content)).active
+    assert ws.cell(row=1, column=1).value == "За 01.01.2044 приёмов врача с кодом 99999 не обнаружено"
+    assert ws.max_row == 1
+
+
+def test_pull_without_filter_keeps_404_contract(client, test_key):
+    resp = client.get("/visits/pull?date=1999-01-01&org=MDS", headers=_auth(test_key))
+    assert resp.status_code == 404
