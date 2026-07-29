@@ -76,12 +76,27 @@ class _ApiCardsReader(BaseStorage):
     async def fetch_export(
         self, organization_id: str, since: str | None, limit: int, cursor: int
     ) -> list[dict[str, Any]]:
+        """Paginated history dump: every card we hold data for, audited or not.
+
+        Ignored cards are included and labelled `status = 'ignored'`. They are
+        not junk: the audit filters (audit/filters.py) exist because the clinics
+        themselves — the head physician in particular — asked us not to spend
+        the pipeline on visits with no doctor's narrative to audit (lab panels,
+        instrumental studies, filtered-out ICD codes). Their card_data is the
+        full 1C record, so they carry the diagnostic half of a patient's
+        history; only the three *_result arrays are empty.
+
+        Consumers reading them as audit statistics MUST filter on
+        status = 'done', or ignored cards silently enter the denominator.
+        """
         query = (
-            "SELECT card_guid, card_data, formal_result, diag_result, "
+            "SELECT card_guid, card_data, "
+            "       CASE WHEN ignored THEN 'ignored' ELSE status END AS status, "
+            "       formal_result, diag_result, "
             "       icd_check_result, updated_at "
             "FROM done_cards "
             "WHERE organization_id = %(org_id)s::uuid "
-            "  AND ignored = FALSE AND broken = FALSE "        # audited cards only
+            "  AND broken = FALSE "                            # no card_data to export
             "  AND (%(since)s::timestamptz IS NULL OR updated_at > %(since)s::timestamptz) "
             "ORDER BY updated_at, card_guid "
         )
@@ -103,17 +118,23 @@ class _ApiCardsReader(BaseStorage):
         audited card is the whole point) and the boundary is inclusive, since
         the caller derives `since` from a clock rather than from returned rows.
 
-        ignored/broken cards are excluded (product decision 2026-07-23): nobody
-        has asked for them yet, and feedback will show whether anyone does.
+        Ignored cards are included (2026-07-29, reversing the 2026-07-23
+        decision to hold them back): consumers tracing one patient's history
+        need them. They are a deliberate product feature, not junk — the audit
+        filters (audit/filters.py) were put in at the clinics' own request, the
+        head physician's in particular, so the pipeline doesn't chew through
+        visits with no doctor's narrative to audit. Their card_data is the full
+        1C record; only the three *_result arrays stay empty. Consumers
+        computing audit statistics MUST filter on status = 'done'.
+
+        Broken cards stay excluded: those hold a stacktrace, not a visit.
         Consequence for consumers: a card delivered as pending that later turns
-        ignored/broken never gets an update — it stays pending on their side.
+        broken never gets an update — it stays pending on their side.
 
         status/ignored/broken are collapsed into a single status on the way out
         (migration 014 forbids ignored and broken overlapping; 025's status
-        treats 'done' as "audited, ignored or broken"). With the filter the
-        CASE branches can't fire — kept so that loosening the filter can never
-        leak an ignored card labeled 'done'. Storage keeps all three columns;
-        this is a response shape, not a schema change.
+        treats 'done' as "audited, ignored or broken"). Storage keeps all three
+        columns; this is a response shape, not a schema change.
         """
         query = (
             "SELECT card_guid, card_data, "
@@ -123,7 +144,7 @@ class _ApiCardsReader(BaseStorage):
             "       formal_result, diag_result, icd_check_result, updated_at "
             "FROM done_cards "
             "WHERE organization_id = %(org_id)s::uuid "
-            "  AND ignored = FALSE AND broken = FALSE "
+            "  AND broken = FALSE "
             "  AND updated_at >= COALESCE(%(since)s::timestamptz, now() - interval '7 days') "
             "ORDER BY updated_at, card_guid"
         )
@@ -205,6 +226,7 @@ class ApiFormatter:
 
         since=None → all history; limit=0 → no LIMIT/OFFSET (one-shot daily).
         limit>0 uses cursor as an OFFSET for the backfill loop.
+        Each row carries a `status`: pending | done | ignored.
         """
         return await self._reader.fetch_export(organization_id, since, limit, cursor)
 
@@ -212,10 +234,10 @@ class ApiFormatter:
         """Return cards changed at or after `since`, in every status.
 
         since=None → the last week, not all history: a bare call shouldn't drain
-        the table. Unlike export, includes pending/ignored/broken cards — the
-        consumer needs a card's raw data whether or not it has been audited.
-        Each row's outcome arrives as a single `status`:
-        pending | done | ignored | broken.
+        the table. Unlike export, the boundary is inclusive and pending cards
+        come back too — the consumer needs a card's raw data whether or not it
+        has been audited. Each row's outcome arrives as a single `status`:
+        pending | done | ignored. Broken cards never appear.
         """
         return await self._reader.fetch_changed(organization_id, since)
 

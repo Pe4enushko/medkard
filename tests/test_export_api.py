@@ -2,8 +2,8 @@
 Integration tests for GET /visits/export — real Postgres via TestClient with an
 api key scoped to Alenka + MDS. Every request is bounded to this test's own rows
 via a `since` cutoff, so it never pages the whole production table. Covers: auth
-required, native JSONB + trimmed columns, audited-only (ignored/broken excluded),
-and exhaustive/no-dup cursor paging.
+required, native JSONB + trimmed columns, ignored rows exported under their own
+status while broken ones are held back, and exhaustive/no-dup cursor paging.
 """
 from __future__ import annotations
 
@@ -85,8 +85,8 @@ async def seeded(alenka_org_id: str):
                 {"g": g, "d": _CARD, "o": alenka_org_id},
             )
         await conn.execute(
-            "INSERT INTO done_cards (card_guid, card_data, ignored, broken, organization_id) "
-            "VALUES (%(g)s, %(d)s::jsonb, TRUE, FALSE, %(o)s)",           # ignored -> excluded
+            "INSERT INTO done_cards (card_guid, card_data, status, ignored, broken, organization_id) "
+            "VALUES (%(g)s, %(d)s::jsonb, 'done', TRUE, FALSE, %(o)s)",   # ignored -> exported as 'ignored'
             {"g": ignored_guid, "d": _CARD, "o": alenka_org_id},
         )
         await conn.execute(
@@ -107,7 +107,10 @@ def test_export_requires_key(client: TestClient):
     assert resp.status_code in (401, 403)
 
 
-def test_export_returns_audited_rows_native_jsonb_trimmed(client, test_key, seeded):
+def test_export_returns_rows_native_jsonb_trimmed(client, test_key, seeded):
+    """Ignored cards ship with the rest under status='ignored' — the audit filters
+    are a clinic-requested feature, and those cards still hold the 1C record.
+    Broken rows (stacktrace, no visit) stay excluded."""
     audited, ign, brk, cutoff = seeded
     resp = client.get(
         "/visits/export",
@@ -119,13 +122,15 @@ def test_export_returns_audited_rows_native_jsonb_trimmed(client, test_key, seed
     assert isinstance(body, list)
     by_guid = {r["card_guid"]: r for r in body}
     assert set(audited) <= set(by_guid)                        # audited cards present
-    assert ign not in by_guid and brk not in by_guid           # ignored/broken excluded
+    assert ign in by_guid                                      # ignored exported...
+    assert by_guid[ign]["status"] == "ignored"                 # ...under its own status
+    assert brk not in by_guid                                  # broken still excluded
     sample = by_guid[audited[0]]
     assert isinstance(sample["card_data"], dict)               # native JSONB in JSON response
     assert set(sample.keys()) == {
-        "card_guid", "card_data", "formal_result",
+        "card_guid", "card_data", "status", "formal_result",
         "diag_result", "icd_check_result", "updated_at",
-    }                                                          # trimmed to six columns
+    }                                                          # trimmed to seven columns
     assert "token_count" not in sample and "organization_id" not in sample
 
 

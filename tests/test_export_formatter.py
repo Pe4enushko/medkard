@@ -2,8 +2,9 @@
 Tests ApiFormatter.export against the real Postgres. Every export is bounded to
 this test's own rows via a `since` cutoff captured *before* seeding, so it never
 pages the whole production table. Covers: native JSONB + six-column trim,
-audited-only filter (ignored / broken excluded), exclusive `since`, and
-exhaustive/no-dup cursor paging.
+status labelling, exclusive `since`, and exhaustive/no-dup cursor paging.
+Ignored rows are exported (labelled `status='ignored'`); only broken ones are
+held back.
 """
 from __future__ import annotations
 
@@ -61,8 +62,8 @@ async def seeded(alenka_org_id: str):
                 {"g": g, "d": _CARD, "o": alenka_org_id},
             )
         await conn.execute(
-            "INSERT INTO done_cards (card_guid, card_data, ignored, broken, organization_id) "
-            "VALUES (%(g)s, %(d)s::jsonb, TRUE, FALSE, %(o)s)",           # ignored -> must be excluded
+            "INSERT INTO done_cards (card_guid, card_data, status, ignored, broken, organization_id) "
+            "VALUES (%(g)s, %(d)s::jsonb, 'done', TRUE, FALSE, %(o)s)",   # ignored -> exported, relabelled
             {"g": ignored_guid, "d": _CARD, "o": alenka_org_id},
         )
         await conn.execute(
@@ -87,18 +88,23 @@ async def test_export_trims_to_six_native_jsonb_columns(seeded):
     sample = next(r for r in rows if r["card_guid"] in audited)
     assert isinstance(sample["card_data"], dict)               # native JSONB, not str
     assert set(sample.keys()) == {
-        "card_guid", "card_data", "formal_result",
+        "card_guid", "card_data", "status", "formal_result",
         "diag_result", "icd_check_result", "updated_at",
-    }                                                          # trimmed to the six export columns
+    }                                                          # trimmed to the seven export columns
 
 
-async def test_export_excludes_ignored_and_broken(seeded):
+async def test_export_includes_ignored_but_not_broken(seeded):
+    """Ignored cards carry real 1C data — a filter the clinics asked for, not a
+    failure — so consumers tracing a patient need them. Broken rows hold a
+    stacktrace instead of a visit and stay out."""
     audited, ign, brk, org_id, cutoff = seeded
     async with ApiFormatter() as fmt:
         rows = await fmt.export(org_id, since=cutoff, limit=0, cursor=0)
-    got = {r["card_guid"] for r in rows}
-    assert set(audited) <= got                                 # audited cards present
-    assert ign not in got and brk not in got                   # ignored/broken filtered out
+    by_guid = {r["card_guid"]: r for r in rows}
+    assert set(audited) <= set(by_guid)                        # audited cards present
+    assert ign in by_guid                                      # ignored exported...
+    assert by_guid[ign]["status"] == "ignored"                 # ...and never labelled 'done'
+    assert brk not in by_guid                                  # broken still filtered out
 
 
 async def test_export_since_is_exclusive(seeded):

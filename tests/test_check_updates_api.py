@@ -2,9 +2,9 @@
 Integration tests for GET /visits/check_updates — real Postgres via TestClient with
 an api key scoped to Alenka + MDS. Requests carry a `since` bounded to this test's
 own rows, so they never scan the whole table. Covers what distinguishes this
-endpoint from /visits/export: pending cards are returned too (ignored/broken are
-NOT — excluded by decision of 2026-07-23), the `since` boundary is inclusive,
-and a bare call falls back to a one-week window rather than all history.
+endpoint from /visits/export: the `since` boundary is inclusive and a bare call
+falls back to a one-week window rather than all history. Status coverage
+(pending and ignored returned, broken not) is asserted here as well.
 """
 from __future__ import annotations
 
@@ -127,10 +127,11 @@ def test_check_updates_unknown_org_404(client: TestClient, test_key: str):
     assert resp.status_code == 404
 
 
-def test_check_updates_returns_pending_but_filters_ignored_broken(client, test_key, seeded):
-    """The point of the endpoint: unlike export, pending cards are returned with
-    their raw card_data. ignored/broken are excluded (decision 2026-07-23 —
-    feedback will show whether anyone needs them)."""
+def test_check_updates_returns_pending_and_ignored_but_not_broken(client, test_key, seeded):
+    """The point of the endpoint: unlike export's original shape, cards come back
+    whether or not they were audited. Ignored cards are included and labelled as
+    such (2026-07-29) — they hold real 1C data, just no audit results. Broken
+    cards stay out: those are a stacktrace, not a visit."""
     guids, cutoff = seeded
     resp = client.get(
         "/visits/check_updates",
@@ -144,11 +145,13 @@ def test_check_updates_returns_pending_but_filters_ignored_broken(client, test_k
 
     assert guids["pending"] in by_guid
     assert guids["done"] in by_guid
-    assert guids["ignored"] not in by_guid
+    assert guids["ignored"] in by_guid
     assert guids["broken"] not in by_guid
 
     assert by_guid[guids["pending"]]["status"] == "pending"
     assert by_guid[guids["done"]]["status"] == "done"
+    # ignored wins over the stored status ('done') — the CASE must not label it audited
+    assert by_guid[guids["ignored"]]["status"] == "ignored"
 
     sample = by_guid[guids["pending"]]
     assert isinstance(sample["card_data"], dict)        # native JSONB, raw data present
