@@ -24,7 +24,10 @@ from storage.guidelines_storage import GuidelinesStorage
 _VISIT_DATE_CTE = (
     "WITH cards AS ("
     "  SELECT id, card_guid, card_data, formal_result, diag_result, icd_check_result, "
-    "         to_date(card_data -> 'Прием' ->> 'DATE', 'DD.MM.YYYY') AS visit_date "
+    # medkard_visit_date, not to_date: Прием.DATE arrives both as 1C's
+    # DD.MM.YYYY and as an ISO timestamp, and to_date raises on the latter —
+    # one such card would 500 the whole report (migration 026).
+    "         medkard_visit_date(card_data -> 'Прием' ->> 'DATE') AS visit_date "
     "  FROM done_cards "
     "  WHERE ignored = FALSE "
     "    AND broken = FALSE "

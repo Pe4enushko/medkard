@@ -56,8 +56,12 @@ class _CardsWriter(BaseStorage):
             )
 
 
-def _card(doctor_code: str | None, doctor_name: str | None) -> dict[str, Any]:
-    priem: dict[str, Any] = {"GUID": str(uuid.uuid4()), "DATE": "01.01.2044"}
+def _card(
+    doctor_code: str | None, doctor_name: str | None, date_raw: str = "01.01.2044",
+) -> dict[str, Any]:
+    """date_raw defaults to 1C's DD.MM.YYYY; pass an ISO stamp to cover the
+    other shape providers actually send (see migration 026)."""
+    priem: dict[str, Any] = {"GUID": str(uuid.uuid4()), "DATE": date_raw}
     if doctor_name is not None:
         priem["Врач"] = doctor_name
     if doctor_code is not None:
@@ -108,16 +112,22 @@ def _guids_in_workbook(content: bytes) -> set[str]:
 
 @pytest.fixture
 async def seeded_cards(mds_org_id: str):
-    """2 карты врача 00001, 1 карта 00002, 1 без Врач_код — все на 2044-01-01.
+    """Карты врачей на 2044-01-01 в обоих форматах даты, плюс шум.
+
+    DOC_A: одна карта с 1C-датой DD.MM.YYYY и одна с ISO-меткой — оба формата
+    реально приходят от провайдеров, и до миграции 026 вторая роняла ЛЮБОЙ
+    запрос по датам с DatetimeFieldOverflow. Карта с неразбираемой датой
+    проверяет, что такая строка выпадает из выборки, а не ломает её.
 
     Отдаёт (org_id, guid-ы карт DOC_A), чтобы тесты проверяли не количество
     строк, а идентичность отфильтрованных карт.
     """
     cards = [
         _card(DOC_A, "Иванов Иван Иванович"),
-        _card(DOC_A, "Иванов Иван Иванович"),
+        _card(DOC_A, "Иванов Иван Иванович", date_raw="2044-01-01T15:22:14"),
         _card(DOC_B, "Петрова Анна Сергеевна"),
         _card(None, None),
+        _card(DOC_A, "Иванов Иван Иванович", date_raw="не дата"),
     ]
     guids = [c["Прием"]["GUID"].lower() for c in cards]
     async with _CardsWriter() as writer:

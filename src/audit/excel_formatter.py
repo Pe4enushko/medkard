@@ -67,7 +67,8 @@ class _DoneCardsReader(BaseStorage):
             cur = await conn.execute(
                 "WITH cards AS ("
                 "  SELECT id, card_guid, card_data, formal_result, diag_result, icd_check_result, "
-                "         to_date(card_data -> 'Прием' ->> 'DATE', 'DD.MM.YYYY') AS visit_date "
+                # Both date shapes, see migration 026 / api_formatter's CTE.
+                "         medkard_visit_date(card_data -> 'Прием' ->> 'DATE') AS visit_date "
                 "  FROM done_cards "
                 "  WHERE ignored = FALSE "
                 "    AND broken = FALSE "
