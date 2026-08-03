@@ -120,6 +120,7 @@ async def validate_visit(
         ],
         temperature=0.1,
         response_model=_Findings,
+        metadata={"card_guid": (visit.get("Прием") or {}).get("GUID"), "checker": "formal"},
     )
 
     logger.debug("[validations] raw LLM answer: %s", raw_content)

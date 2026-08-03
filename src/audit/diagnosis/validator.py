@@ -249,6 +249,7 @@ async def _run_checker(
     tools: list,
     human_message: str,
     checker_label: str = "checker",
+    metadata: dict[str, Any] | None = None,
 ) -> tuple[_CheckerRun, int]:
     tool_names = [t.name for t in tools]
     logger.debug("[checker:%s] START — tools=%s", checker_label, tool_names)
@@ -257,6 +258,7 @@ async def _run_checker(
         tools,
         human_message,
         response_format=CheckerOutput,
+        metadata={"checker": checker_label, **(metadata or {})},
     )
     logger.info("🤖 [checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
     issues = _parse_issues(raw_answer)
@@ -296,6 +298,7 @@ class DiagnosisValidator:
         """
         patient: dict = self._visit.get("Пациент", {})
         dx_code = diagnosis.get("КодМКБ", "?")
+        card_guid = (self._visit.get("Прием") or {}).get("GUID")
         logger.info("[diagnosis] validate_diagnosis START — dx=%s", dx_code)
 
         file_id, clinic_tokens = await self._clinic_recs.pick_recs(patient, diagnosis)
@@ -325,18 +328,21 @@ class DiagnosisValidator:
                     get_anamnesis_tools_for(file_id),
                     human_message,
                     checker_label="anamnesis",
+                    metadata={"card_guid": card_guid, "dx_code": dx_code},
                 ),
                 _run_checker(
                     _INSPECTION_PROMPT,
                     get_inspection_tools_for(file_id),
                     human_message,
                     checker_label="inspection",
+                    metadata={"card_guid": card_guid, "dx_code": dx_code},
                 ),
                 _run_checker(
                     _TREATMENT_PROMPT,
                     get_treatment_tools_for(file_id),
                     human_message,
                     checker_label="treatment",
+                    metadata={"card_guid": card_guid, "dx_code": dx_code},
                 ),
             )
             anamnesis_issues = anamnesis_run.issues

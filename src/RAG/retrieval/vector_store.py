@@ -20,6 +20,7 @@ import re
 from urllib.parse import quote_plus
 
 import asyncpg
+import httpx
 import numpy as np
 from dotenv import load_dotenv
 from natasha import Doc, Segmenter
@@ -27,6 +28,7 @@ from pgvector.asyncpg import register_vector
 from rank_bm25 import BM25Okapi
 
 from RAG.retrieval.embeddings import EMBEDDING_DIM, EMBEDDING_MODEL, embed  # noqa: F401
+from LLM.observability import emit
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -37,6 +39,10 @@ logger = logging.getLogger(__name__)
 CANDIDATES_FACTOR: int = 6
 # RRF constant: higher = rankings are more stable; lower = more weight on top results.
 RRF_K: int = 50
+RERANK_BASE_URL: str = os.environ.get("RERANK_BASE_URL", "").rstrip("/")
+RERANK_MODEL: str = os.environ.get("RERANK_MODEL", "")
+RERANK_CANDIDATE_LIMIT: int = int(os.environ.get("RERANK_CANDIDATE_LIMIT", "20"))
+RERANK_TIMEOUT_SECONDS: float = float(os.environ.get("RERANK_TIMEOUT_SECONDS", "10"))
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SELECT_COLS = """
@@ -290,6 +296,52 @@ def _log_hybrid_chunks(
     logger.info("%s", "\n".join(lines))
 
 
+async def rerank_results(query_text: str, results: list[dict], top_k: int) -> list[dict]:
+    """Optionally rerank a bounded candidate set through a vLLM `/rerank` API."""
+    if not RERANK_BASE_URL or not RERANK_MODEL or not results:
+        return results[:top_k]
+
+    candidates = results[:max(top_k, min(RERANK_CANDIDATE_LIMIT, len(results)))]
+    payload = {
+        "model": RERANK_MODEL,
+        "query": query_text,
+        "documents": [str(row.get("chunk") or "") for row in candidates],
+        "top_n": min(top_k, len(candidates)),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=RERANK_TIMEOUT_SECONDS) as client:
+            response = await client.post(f"{RERANK_BASE_URL}/rerank", json=payload)
+            response.raise_for_status()
+            body = response.json()
+        ranked = body.get("results") or []
+        reranked: list[dict] = []
+        for item in ranked:
+            index = item.get("index")
+            if not isinstance(index, int) or index < 0 or index >= len(candidates):
+                continue
+            row = dict(candidates[index])
+            row["rerank_score"] = item.get("relevance_score")
+            reranked.append(row)
+        if reranked:
+            logger.info(
+                "[retrieval] rerank applied model=%s candidates=%d returned=%d",
+                RERANK_MODEL,
+                len(candidates),
+                len(reranked),
+            )
+            emit(
+                "retrieval_rerank",
+                model=RERANK_MODEL,
+                candidate_count=len(candidates),
+                returned_count=len(reranked),
+            )
+            return reranked[:top_k]
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        logger.warning("[retrieval] rerank unavailable, using RRF order: %s", str(exc)[:200])
+        emit("retrieval_rerank_error", model=RERANK_MODEL, exception_type=type(exc).__name__, exception=str(exc)[:200])
+    return results[:top_k]
+
+
 # ── Public hybrid search ──────────────────────────────────────────────────────
 
 async def hybrid_search(
@@ -337,7 +389,7 @@ async def hybrid_search(
 
     # Assemble results
     by_id = {c["id"]: c for c in candidates}
-    ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
+    ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
 
     results = []
     for doc_id, score in ranked:
@@ -346,6 +398,7 @@ async def hybrid_search(
         row["rrf_score"] = score
         results.append(row)
 
+    results = await rerank_results(query_text, results, top_k)
     _log_hybrid_chunks(
         query_text=query_text,
         top_k=top_k,

@@ -22,6 +22,7 @@ class _FakeClient:
         *,
         temperature: float,
         response_model: type[Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> tuple[str, int]:
         self.response_model = response_model
         return self.raw_content, 42

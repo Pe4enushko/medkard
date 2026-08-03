@@ -51,14 +51,17 @@ The `docs` table stores:
 - `metadata` — JSONB with section, page, file_id, etc.
 - `fact_q`, `procedure_q`, `constraint_q` — the query strings themselves
 
-### `hybrid_search(query_text, embedding, query_type, top_k) -> list[dict]`
+### `hybrid_search(query_text, embedding, top_k) -> list[dict]`
 
 General-purpose hybrid retrieval across the entire docs table:
 
 1. Fetches `top_k × CANDIDATES_FACTOR` (default ×6) rows by cosine distance on the column matching `query_type` (`fact_q_embedding` / `procedure_q_embedding` / `constraint_q_embedding`).
 2. Re-ranks the same candidate set with `BM25Okapi` (tokenised via Natasha for Russian text).
 3. Merges vector rank and BM25 rank with **Reciprocal Rank Fusion** (`RRF_K=50`).
-4. Returns the top `top_k` results sorted by `rrf_score` descending.
+4. If `RERANK_BASE_URL` and `RERANK_MODEL` are configured, sends a bounded
+   candidate set to a separate vLLM `/rerank` endpoint and returns its top `top_k`.
+5. Returns the top `top_k` results sorted by reranker score, or by `rrf_score`
+   when reranking is disabled/unavailable.
 
 Result dict shape:
 ```python
@@ -70,6 +73,7 @@ Result dict shape:
     "procedure_q":  str | None,
     "constraint_q": str | None,
     "rrf_score":    float,
+    "rerank_score": float,  # present when optional reranking is enabled
 }
 ```
 

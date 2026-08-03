@@ -222,6 +222,7 @@ class AuditPipeline:
             diagnoses=diagnoses,
             manifest_rows=manifest_rows,
             inspection_data=inspection_data,
+            card_guid=card_guid,
         )
         icd_lookup: dict[int, IcdCodingIssue] = {issue.dx_index: issue for issue in icd_issues}
         logger.info("[pipeline] ICD checker done — %d issue(s), tokens=%d", len(icd_issues), icd_tokens)

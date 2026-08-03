@@ -115,16 +115,21 @@ queries, completion = await client.chat.completions.create_with_completion(
 
 **File:** `LLM/rag_agent.py`, called from `audit/diagnosis/validator.py`  
 **Called from:** `_run_checker()` — three times per diagnosis (anamnesis, inspection, treatment) in parallel.  
-**Client:** LangChain `ChatOpenAI` via `create_agent` (LangGraph ReAct agent)  
+**Client:** LangChain `ChatOpenAI` via `create_react_agent` (LangGraph ReAct agent)
 **Call:**
 
 ```python
-result = await agent.ainvoke({"messages": [("user", human_message)]})
+result = await agent.ainvoke(
+    {"messages": [("user", human_message)]},
+    config={"recursion_limit": AGENT_MAX_STEPS},
+)
 ```
 
 **Input:** system prompt from one of `anamnesis_checker.txt`, `inspection_checker.txt`, `treatment_checker.txt` + a combined user message containing patient info, diagnosis, and examination data.  
-**Output:** `result["messages"][-1].content` — a JSON array of `{issue, sources}` objects parsed by `_parse_issues`.  
-**Token access:** not directly exposed by LangChain's `ainvoke`. To track tokens, attach a `UsageMetadataCallbackHandler` or instrument the underlying `ChatOpenAI` model.
+**Output:** `result["structured_response"]` when native JSON schema succeeds; raw content is only a fallback.
+**Structured output:** `create_react_agent(response_format=...)` uses native provider JSON schema. For the current Qwen/vLLM endpoint, `chat_template_kwargs.enable_thinking=false` is also sent; legacy `guided_json` is not the primary mode.
+**Safeguards:** `ToolCallGuard` limits duplicate calls, total tool calls, and tool-result size. A single `GraphRecursionError` retry switches to compact limits.
+**Telemetry:** events are written to `logs/llm_observability.jsonl`; see [docs/llm-observability.md](llm-observability.md) and [docs/vllm-configuration.md](vllm-configuration.md).
 
 ---
 

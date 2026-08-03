@@ -98,6 +98,7 @@ async def check_icd_codes(
     diagnoses: list[dict[str, Any]],
     manifest_rows: list[Guideline],
     inspection_data: list[dict[str, Any]] | None = None,
+    card_guid: str | None = None,
 ) -> tuple[list[IcdCodingIssue], int]:
     """Check ICD-10 coding correctness for all diagnoses of a single visit.
 
@@ -146,7 +147,11 @@ async def check_icd_codes(
 
     tools = get_icd_checker_tools()
     output, tokens = await _client.call_agent(
-        _SYSTEM_PROMPT, tools, human_message, response_format=_IcdCheckerOutput
+        _SYSTEM_PROMPT,
+        tools,
+        human_message,
+        response_format=_IcdCheckerOutput,
+        metadata={"card_guid": card_guid, "checker": "icd"},
     )
 
     if not isinstance(output, _IcdCheckerOutput):

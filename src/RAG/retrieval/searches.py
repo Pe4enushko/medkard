@@ -31,6 +31,7 @@ from RAG.retrieval.vector_store import (
     _bm25_rank,
     _rrf,
     _vector_search_filtered,
+    rerank_results,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ async def _hybrid_filtered(
     rrf_scores = _rrf([vector_ranking, bm25_ranking], k=RRF_K)
 
     by_id = {c["id"]: c for c in candidates}
-    ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:TARGETED_TOP_K]
+    ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
 
     results = []
     for doc_id, score in ranked:
@@ -82,6 +83,7 @@ async def _hybrid_filtered(
         row["rrf_score"] = score
         results.append(row)
 
+    results = await rerank_results(query, results, TARGETED_TOP_K)
     _log_retrieved_chunks(
         query=query,
         file_id=file_id,
