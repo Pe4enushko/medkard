@@ -118,7 +118,7 @@ async def doctors(
 def _extract_card_guid(card: dict) -> str | None:
     priem = card.get("Прием") or {}
     guid = priem.get("GUID")
-    return str(guid).lower() if guid else None
+    return str(guid) if guid else None
 
 
 _MIN_VIABLE_VISIT_KEYS = ("Пациент", "Услуги", "Диагнозы")

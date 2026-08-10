@@ -122,7 +122,7 @@ def test_push_with_only_diagnoses_is_accepted(client: TestClient, test_key: str)
 
 
 def test_push_new_card_creates_pending_row(client: TestClient, test_key: str, alenka_org_id: str):
-    guid = str(uuid.uuid4())
+    guid = str(uuid.uuid4()).upper()
     try:
         resp = client.post(
             "/visits/push?org=Alenka",
@@ -131,18 +131,18 @@ def test_push_new_card_creates_pending_row(client: TestClient, test_key: str, al
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["card_guid"] == guid.lower()
+        assert body["card_guid"] == guid
         assert body["status"] == "pending"
 
         rows = _get_pending(organization_id=alenka_org_id)
-        matching = [r for r in rows if r["card_guid"] == guid.lower()]
+        matching = [r for r in rows if r["card_guid"] == guid]
         assert len(matching) == 1
     finally:
         _cleanup(guid)
 
 
 def test_push_updates_existing_card_and_resets_to_pending(client: TestClient, test_key: str, alenka_org_id: str):
-    guid = str(uuid.uuid4())
+    guid = str(uuid.uuid4()).upper()
     try:
         first = client.post(
             "/visits/push?org=Alenka",
@@ -160,7 +160,7 @@ def test_push_updates_existing_card_and_resets_to_pending(client: TestClient, te
         assert second.json()["status"] == "pending"
 
         rows = _get_pending(organization_id=alenka_org_id)
-        matching = [r for r in rows if r["card_guid"] == guid.lower()]
+        matching = [r for r in rows if r["card_guid"] == guid]
         assert len(matching) == 1
         assert matching[0]["card_data"]["v"] == 2
     finally:
