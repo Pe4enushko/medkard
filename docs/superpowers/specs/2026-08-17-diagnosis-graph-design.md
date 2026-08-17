@@ -70,23 +70,33 @@ src/audit/diagnosis/validator.py # оркестрация: pick_recs → гра�
 
 ```
 START ─┬─ generate_questions ─────────────┐
-       └─ extract_drugs ── lookup_drugs ──┤
-                                          ▼
-                                     retrieve
-                    ┌─────────────────────┼─────────────────────┐
-             judge_anamnesis       judge_inspection       judge_treatment
-                    └─────────────────────┼─────────────────────┘
-                                   collect_sources ── END
+       ├─ extract_drugs ── lookup_drugs ──┤
+       │                                  ▼
+       │                             retrieve
+       │            ┌─────────────────────┼─────────────────────┐
+       │     judge_anamnesis       judge_inspection       judge_treatment
+       │            └─────────────────────┼─────────────────────┘
+       └─ retrieve_criteria ── judge_criteria ──┤
+                                                ▼
+                                         collect_sources ── END
 ```
 
-`generate_questions` и `extract_drugs → lookup_drugs` — параллельные ветви от
-START (fan-out/fan-in LangGraph); три судьи — параллельные ветви после
-`retrieve`. Циклов и условных рёбер нет; `recursion_limit` не нужен.
+`generate_questions`, `extract_drugs → lookup_drugs` и `retrieve_criteria →
+judge_criteria` — параллельные ветви от START (fan-out/fan-in LangGraph); три
+судьи по вопросам — параллельные ветви после `retrieve`; всё сходится в
+`collect_sources`. Циклов и условных рёбер нет; `recursion_limit` не нужен.
+
+Четыре аспекта: `anamnesis`, `inspection`, `treatment` (по сгенерированным
+вопросам) и `criteria` (по детерминированно вытащенному разделу КР «Критерии
+оценки качества медицинской помощи», §4.5a). Отдельного судьи «по лекарствам»
+нет: справка ГРЛС — часть контекста `treatment`, потому что назначения и
+лекарства в записи неразделимы (решение 2026-08-17).
 
 ### 4.1 Стейт (`diagnosis_state.py`)
 
 ```python
-class Question(TypedDict):     aspect: Literal["anamnesis","inspection","treatment"]; text: str
+Aspect = Literal["anamnesis","inspection","treatment","criteria"]
+class Question(TypedDict):     aspect: Literal["anamnesis","inspection","treatment"]; text: str   # criteria — без вопросов
 class DrugMention(TypedDict):  as_written: str; normalized: str
 class Chunk(TypedDict):
     ref: int                    # номер в контексте судьи (1..n), уникален внутри аспекта
@@ -107,12 +117,13 @@ class JudgeOutput(BaseModel):  issues: list[JudgeIssue]
 class DiagnosisState(TypedDict):
     # вход
     visit_context: str; patient_block: str; diagnosis_block: str
+    visit_date: date | None                  # для status_at в lookup_drugs
     file_id: str; doc_title: str; toc: list[str]
     # промежуточное
     questions: list[Question]; drug_mentions: list[DrugMention]; drug_context: str
-    pools: dict[str, list[Chunk]]            # aspect -> нумерованный пул
+    pools: dict[Aspect, list[Chunk]]         # aspect -> нумерованный пул (criteria — из retrieve_criteria)
     # выход
-    issues: dict[str, list[ResolvedIssue]]   # aspect -> issues с IssueSource
+    issues: dict[Aspect, list[ResolvedIssue]] # aspect -> issues с IssueSource
     sources: list[GuidelineSource]
     errors: list[str]                        # человекочитаемые факты деградации
     tokens: int
@@ -147,19 +158,25 @@ class DiagnosisState(TypedDict):
 `drug_mentions=[]` + `errors`.
 
 `lookup_drugs` — без LLM: для каждого `normalized` — `GrlsStorage.search_by_inn`
-→ `search_by_trade_name` → `DietarySupplementsStorage.search`; результат через
-общий `format_medicine_lookup(...)` (спека ГРЛС §6) в один блок `drug_context`:
+→ `search_by_trade_name` (запрос нормализуется `normalize_query`, субстанции
+исключены — спека ГРЛС §5) → `DietarySupplementsStorage.search`; результат через
+общий `format_medicine_lookup(..., on=visit_date, registry_date=…)` (спека ГРЛС
+§6, статус относительно даты визита по `status_at` §5.1) в один блок
+`drug_context`:
 
 ```
-## Справка по препаратам (ГРЛС, реестр от 2026-08-17)
-- Амоксиклав → МНН амоксициллин + клавулановая кислота; РУ Действующий (до 2027-03-01); ЖНВЛП
-- Ксизал → МНН левоцетиризин; РУ Истёкший (истекло 2025-12-31)
+## Справка по препаратам (ГРЛС, реестр от 2026-08-17; визит 2025-03-10)
+- Амоксиклав → МНН амоксициллин + клавулановая кислота; РУ Действующий (до 2027-03-01); формы: таблетки, порошок для суспензии; отпуск: по рецепту; ЖНВЛП
+- Ксизал → МНН левоцетиризин; РУ Истёкший (истекло 2025-12-31; на дату визита действовало)
+- Гепарин-Рус → МНН гепарин натрия; РУ Действующий, приостановлено применение (предупреждение)
 - Бак-Сет → БАД, свидетельство RU.77.99…
 - Флюдитек → не найден в реестрах
 ```
 
 Ошибка БД → `drug_context="справка недоступна"` + `errors`. Блок идёт **только**
-treatment-судье.
+treatment-судье; правила трактовки статусов (истекло до визита — замечание;
+действовало на дату визита — нет; приостановлено/на подтверждении/иностранная
+упаковка — предупреждение, не брак) — в `treatment_checker.txt` (спека ГРЛС §6).
 
 ### 4.4 `retrieve`
 
@@ -191,7 +208,7 @@ treatment`; `_hybrid_filtered` остаётся для ICD-путей, если 
 `errors`. Полный отказ БД → исключение наружу (карта broken, как сейчас — это не
 деградация, а инфраструктурная авария).
 
-### 4.5 `judge_<aspect>` ×3
+### 4.5 `judge_<aspect>` ×3 (anamnesis / inspection / treatment)
 
 Один structured-вызов `LLMClient.call(..., response_model=JudgeOutput)`:
 
@@ -218,6 +235,45 @@ treatment`; `_hybrid_filtered` остаётся для ICD-путей, если 
    `issues[aspect]=[]` + `errors: "judge_<aspect>: <причина>"`. Карта не
    ломается.
 
+### 4.5a `retrieve_criteria` → `judge_criteria`
+
+Каждая КР содержит стандартную таблицу «Критерии оценки качества медицинской
+помощи» (№ | критерий | да/нет) — чек-лист, по которому качество помощи
+оценивают страховые и Росздравнадзор. Это готовый источник замечаний, который
+вопросный ретрив вытаскивает случайно; поэтому — отдельная детерминированная
+ветка, без генерации вопросов и без реранка.
+
+`retrieve_criteria` (без LLM): чанки КР `file_id`, у которых
+`metadata->>'section' ILIKE CRITERIA_SECTION_PATTERN` (по умолчанию
+`%критерии оценки качества%`), порядок `chunk_index`, кап
+`CRITERIA_MAX_CHUNKS` (по умолчанию 8; таблица обычно 1–3 чанка) → пул
+`pools["criteria"]` с `ref=1..n`. Реализация — `searches.get_section_chunks(
+file_id, pattern, limit)` (рядом с `search_in_guideline`). Пусто (в КР нет
+раздела или ингест назвал его иначе) → `pools["criteria"]=[]`, судья не
+вызывается, `issues["criteria"]=[]`, `errors: "retrieve_criteria: section not
+found"`. Ошибка БД → то же + `errors`.
+
+`judge_criteria` — тот же контракт, что у судей §4.5 (structured `JudgeOutput`,
+`chunk_refs` обязательны, пост-обработка та же), system-промпт
+`criteria_checker.txt`: пройти по каждому критерию таблицы и отметить только те,
+что **проверяемо не выполнены по записи визита** (одно замечание — один
+критерий, с номером/формулировкой критерия); критерии, относящиеся к этапу,
+которого в записи нет (стационар, реабилитация, повторный визит), — не
+замечание; отсутствие данных ≠ невыполнение, если критерий про действие, а не
+про фиксацию в записи. Контекст — как у остальных: пациент, диагноз, запись,
+затем `## Критерии оценки качества «{doc_title}»` с `[ref]`.
+
+Пересечение с формальной проверкой (`rules.json`, ярлык `203n`): там —
+нозологические критерии приказа, здесь — критерии конкретной КР; они
+пересекаются, но КР полнее и свежее. Дедупликацию между контурами не делаем;
+если на стенде дубли окажутся заметными — решать отдельно.
+
+Проверить в плане реализации: (а) как ингест режет таблицу критериев — если она
+разваливается на текстовые чанки без `section` или заголовок раздела в
+`metadata.section` не содержит «критерии оценки качества», паттерн/ингест
+подстроить (`get_sections_for_file` по нескольким КР покажет реальные
+заголовки); (б) укладывается ли таблица в `CRITERIA_MAX_CHUNKS`.
+
 ### 4.6 `collect_sources`
 
 Из **всех** чанков всех пулов (показанных судьям), независимо от цитирования:
@@ -235,14 +291,18 @@ class GuidelineSource(TypedDict):        file_id: str; doc_title: str; sections:
 
 ### 5.1 Модели
 
-- `DiagnosisAuditResult` (`audit/models.py`): + `sources: list[GuidelineSource]`,
-  + `errors: list[str]`. `to_dict()` включает оба.
+- `DiagnosisAuditResult` (`audit/models.py`): + `criteria_issues:
+  list[DiagnosisIssue]` (входит в `all_issues` и в плоский `issues` JSON —
+  контракт не меняется), + `sources: list[GuidelineSource]`, + `errors:
+  list[str]`. `to_dict()` включает всё.
 - `IssueSource` (`storage/models/result.py`): + `chunk_id: str | None`,
   `chunk_index: int | None`; `pretty_format` — без изменений видимого формата.
 - `DiagnosisResult` (то, что уходит в `done_cards.diag_result`): +
   `sources`, `errors`; `pretty_format` печатает блок
   `[ИСТОЧНИКИ]: <doc_title> — разделы: 3.1 Лечение (цит.), 2.2 Диагностика`
-  и, если есть, `[ДЕГРАДАЦИЯ]: …`.
+  и, если есть, `[ДЕГРАДАЦИЯ]: …`; замечания `criteria` печатаются в
+  существующем формате диагноз-замечаний с префиксом «Критерий качества:»
+  (в тексте `issue`, задаётся промптом/пост-обработкой — на реализации).
 - Запись `diag_result` JSON:
   ```json
   {"icd_code": "J06.9", "guideline_file_id": "…",
@@ -300,6 +360,8 @@ class GuidelineSource(TypedDict):        file_id: str; doc_title: str; sections:
 | `DIAG_ASPECT_POOL_MAX_CHUNKS` | 20 | кап пула аспекта |
 | `DIAG_RETRIEVE_CONCURRENCY` | 8 | семафор embed/rerank |
 | `DIAG_CITE_MAX_CHARS` | 300 | длина `cite` |
+| `DIAG_CRITERIA_SECTION_PATTERN` | `%критерии оценки качества%` | ILIKE-паттерн раздела КР для `retrieve_criteria` |
+| `DIAG_CRITERIA_MAX_CHUNKS` | 8 | кап пула `criteria` |
 
 Промпты — `.txt` в `src/LLM/prompts/`, как принято.
 
@@ -325,10 +387,13 @@ class GuidelineSource(TypedDict):        file_id: str; doc_title: str; sections:
   `search_in_guideline`: дедуп по `id`, max скор, кап, сортировка,
   нумерация, слияние `questions`, пропуск упавшего вопроса; `judge_*` —
   резолв `chunk_refs`, отбрасывание невалидных, issue без ref, `cite`
-  обрезка/таблица, деградация при исключении; `collect_sources` — разделы,
-  `cited`;
+  обрезка/таблица, деградация при исключении; `retrieve_criteria` — пул из
+  фейкового `get_section_chunks` (порядок, кап, пустой раздел → судья не
+  вызван + `errors`); `judge_criteria` — тот же набор, что у судей;
+  `lookup_drugs` — `visit_date` доходит до `format_medicine_lookup`;
+  `collect_sources` — разделы, `cited` (включая пул `criteria`);
 - сборка графа: топология (нет циклов), fan-out/fan-in редьюсеры, полный
-  прогон на фейках даёт `DiagnosisAuditResult` с 3 списками + `sources` +
+  прогон на фейках даёт `DiagnosisAuditResult` с 4 списками + `sources` +
   `errors`;
 - `parse_diagnosis` — старая и новая запись; `DiagnosisResult.pretty_format`
   с источниками; Excel — заголовки/ширины с новой колонкой;
@@ -346,7 +411,7 @@ class GuidelineSource(TypedDict):        file_id: str; doc_title: str; sections:
 
 `docs/diagnosis_validator.md` (схема графа, стейт, деградации),
 `docs/rag.md` (ретрив по вопросам, реранк, шаблоны), `docs/vllm-configuration.md`
-(Qwen3-Reranker), `docs/llm_calls.md` (новые вызовы: questions, drugs, 3 judges),
+(Qwen3-Reranker), `docs/llm_calls.md` (новые вызовы: questions, drugs, 4 judges),
 `docs/visits-api.md` (поля `sources`/`errors`), `.env.example`, `CLAUDE.md`
 (схема «Diagnosis checker»). `docs/revision-log.md` — не трогает (нормативка/
 реестры не меняются).
