@@ -10,3 +10,4 @@
 | [rag.md](rag.md) | Embeddings, vector store, hybrid search, LangChain tools, reverse HyDE |
 | [clinic-data-requirements.md](clinic-data-requirements.md) | Формат пакета карт, который клиника передаёт в MedCheck |
 | [iskra-integration.md](iskra-integration.md) | Push карт из МИС или 1С для работы с «Искрой» |
+| [revision-log.md](revision-log.md) | Журнал ревизий: клинреки, реестр лекарств (ГРЛС), нормативка правил — когда что обновлялось |
