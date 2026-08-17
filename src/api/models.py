@@ -26,3 +26,16 @@ class PushResponse(BaseModel):
 class DoctorEntry(BaseModel):
     code: str
     name: str
+
+
+class StorageStatsResponse(BaseModel):
+    """Per-organization stored-data size, in kilobytes.
+
+    Payload size only (see StatsStorage.storage_kb): indexes and page overhead
+    are excluded, so these figures are smaller than the disk a delete frees.
+    """
+
+    organization: str
+    done_cards_kb: float
+    audit_overwrite_journal_kb: float
+    total_kb: float
