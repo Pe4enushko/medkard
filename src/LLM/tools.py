@@ -20,7 +20,6 @@ Usage::
 from __future__ import annotations
 
 import json
-import logging
 from typing import Type
 
 from langchain_core.tools import BaseTool
@@ -37,8 +36,6 @@ from RAG.retrieval.searches import (
 from grls.format import format_medicine_lookup
 from grls.lookup import lookup_medicine
 from storage.models.doc import Doc
-
-logger = logging.getLogger(__name__)
 
 
 # ── Input schema (query only — file_id is bound at construction) ─────────────

@@ -52,3 +52,8 @@ data_snapshots/
 
 # Git worktrees (isolated task workspaces)
 .worktrees/
+# Superpowers SDD scratch (per-plan workspace)
+.superpowers/
+
+# GRLS registry archive (fetched from grls.rosminzdrav.ru, not committed)
+grls*.zip
