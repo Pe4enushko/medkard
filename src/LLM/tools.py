@@ -34,11 +34,9 @@ from RAG.retrieval.searches import (
     search_inspection,
     search_treatment,
 )
-from storage.dietary_supplements_storage import DietarySupplementsStorage
-from storage.drugs_storage import DrugsStorage
-from storage.models.dietary_supplement import DietarySupplement
+from grls.format import format_medicine_lookup
+from grls.lookup import lookup_medicine
 from storage.models.doc import Doc
-from storage.models.drug import Drug
 
 logger = logging.getLogger(__name__)
 
@@ -73,33 +71,6 @@ def _format_results(results: list[dict]) -> str:
         parts.append(f"--- Источник {i} ---\n{doc._format_chunk()}")
 
     return "\n\n".join(parts)
-
-
-# ── Drug lookup helpers ───────────────────────────────────────────────────────
-
-_DRUG_SCORE_THRESHOLD = 0.85
-
-
-def _format_drug(drug: Drug) -> str:
-    parts = [f"Торговое название: {drug.trade_name}"]
-    if drug.inn_name:
-        parts.append(f"МНН: {drug.inn_name}")
-    if drug.dosage_form:
-        parts.append(f"Форма выпуска: {drug.dosage_form}")
-    if drug.dosage:
-        parts.append(f"Дозировка: {drug.dosage}")
-    if drug.patient_exclusions:
-        parts.append(f"Исключение отдельных групп пациентов: {drug.patient_exclusions}")
-    return "\n".join(parts)
-
-
-def _format_supplement(s: DietarySupplement) -> str:
-    parts = [f"Наименование: {s.product_name}"]
-    if s.status:
-        parts.append(f"Статус: {s.status}")
-    if s.label_info:
-        parts.append(f"Информация на этикетке: {s.label_info}")
-    return "\n".join(parts)
 
 
 # ── Tool classes (file_id set as instance attribute) ──────────────────────────
@@ -181,72 +152,21 @@ class SearchTreatmentTool(BaseTool):
 
 
 class SearchMedicineTool(BaseTool):
-    """Look up a drug or dietary supplement by name."""
+    """Look up a drug (GRLS, with certificate status) or a dietary supplement by name."""
 
     name: str = "search_medicine"
     description: str = (
-        "Look up a drug or dietary supplement by trade name or INN. Just provide the name as the query without extra information. "
-        "First searches the drugs registry (trigram, threshold 0.85); "
-        "if nothing found, falls back to the dietary supplements registry (full-text). "
-        "Use when you need to verify whether a prescribed substance is a registered drug or supplement. And when you need to get its details (dosage, form, etc.) from the registry."
+        "Поиск препарата в ГРЛС (Государственный реестр лекарственных средств) по торговому "
+        "названию или МНН, с фолбэком в реестр БАД. Передавай только название, без лишних слов. "
+        "Ответ содержит статус регистрационного удостоверения (действующее / истёкшее / "
+        "аннулированное / с предупреждением), лекарственные формы и условия отпуска. "
+        "Используй, чтобы связать торговое название с действующим веществом и проверить, "
+        "что назначенный препарат зарегистрирован."
     )
     args_schema: Type[BaseModel] = _QueryInput
 
     async def _arun(self, query: str) -> str:  # type: ignore[override]
-        async with DrugsStorage() as drugs_storage:
-            inn_matches = await drugs_storage.search_by_inn(query)
-            if inn_matches:
-                inn_name = inn_matches[0].inn_name
-                logger.info(
-                    '💊 Medicine lookup for "%s": found INN "%s". Not searching for drugs anymore.',
-                    query,
-                    inn_name,
-                )
-                return f'В реестре ЕСКЛП наименование было определено как действующее вещество "{inn_name}"'
-
-            drugs = await drugs_storage.search(query, threshold=_DRUG_SCORE_THRESHOLD)
-
-        if drugs:
-            logger.info(
-                '💊 Medicine lookup for "%s": found %d drug(s)',
-                query,
-                len(drugs),
-            )
-            for i, drug in enumerate(drugs, 1):
-                logger.info(
-                    '💊 Drug finding %d for "%s": trade_name="%s", inn="%s"',
-                    i,
-                    query,
-                    drug.trade_name,
-                    drug.inn_name,
-                )
-            lines = [f"Найдено как лекарственное средство в реестре ЕСКЛП ({len(drugs)}):\n"]
-            lines += [f"--- {i} ---\n{_format_drug(d)}" for i, d in enumerate(drugs, 1)]
-            return "\n\n".join(lines)
-
-        async with DietarySupplementsStorage() as supps_storage:
-            supplements = await supps_storage.search(query)
-
-        if supplements:
-            logger.info(
-                '💊 Medicine lookup for "%s": found %d dietary supplement(s)',
-                query,
-                len(supplements),
-            )
-            for i, supplement in enumerate(supplements, 1):
-                logger.info(
-                    '💊 Dietary supplement finding %d for "%s": product_name="%s", registration_number="%s"',
-                    i,
-                    query,
-                    supplement.product_name,
-                    supplement.registration_number,
-                )
-            lines = [f"Найдено как БАД в Едином реестре свидетельств о государственной регистрации ({len(supplements)}):\n"]
-            lines += [f"--- {i} ---\n{_format_supplement(s)}" for i, s in enumerate(supplements, 1)]
-            return "\n\n".join(lines)
-
-        logger.info('💊 Medicine lookup for "%s": no registry findings', query)
-        return "Препарат или БАД не найден в реестрах."
+        return format_medicine_lookup(await lookup_medicine(query))
 
     def _run(self, query: str) -> str:  # type: ignore[override]
         raise NotImplementedError("Use async invocation (_arun).")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Truncates and reloads drugs and dietary_supplements tables from CSV source files.
+# Truncates and reloads dietary_supplements from CSV. Drugs now come from GRLS: scripts/import-grls.py
 # Usage: ./scripts/seed-reference-lists.sh
 set -euo pipefail
 
@@ -29,10 +29,9 @@ done < "$ENV_FILE"
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
-DRUGS_CSV="$ROOT_DIR/resources/Drugs list.csv"
 SUPPLEMENTS_CSV="$ROOT_DIR/resources/Dietary supplements.csv"
 
-for f in "$DRUGS_CSV" "$SUPPLEMENTS_CSV"; do
+for f in "$SUPPLEMENTS_CSV"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: source file not found: $f" >&2
         exit 1
@@ -49,41 +48,8 @@ psql_cmd() {
         "$@"
 }
 
-DRUGS_SQL=$(mktemp /tmp/seed-drugs-XXXXXX.sql)
 SUPPS_SQL=$(mktemp /tmp/seed-supps-XXXXXX.sql)
-trap 'rm -f "$DRUGS_SQL" "$SUPPS_SQL"' EXIT
-
-# ── drugs ─────────────────────────────────────────────────────────────────────
-# drugs CSV: comma-separated, UTF-8, has header row.
-# Columns: Торговое наименование, МНН, Лекарственная форма, Дозировка, Исключение отдельных групп пациентов
-
-echo "Seeding drugs from '$DRUGS_CSV' ..."
-
-cat > "$DRUGS_SQL" <<SQL
-TRUNCATE TABLE drugs RESTART IDENTITY;
-
-CREATE TEMP TABLE drugs_staging (
-    trade_name         TEXT,
-    inn_name           TEXT,
-    dosage_form        TEXT,
-    dosage             TEXT,
-    patient_exclusions TEXT
-);
-
-\COPY drugs_staging FROM '$DRUGS_CSV' WITH (FORMAT csv, HEADER true, DELIMITER ',', ENCODING 'UTF8', QUOTE '"')
-
-INSERT INTO drugs (trade_name, inn_name, dosage_form, dosage, patient_exclusions)
-SELECT
-    NULLIF(TRIM(trade_name), ''),
-    NULLIF(TRIM(inn_name), ''),
-    NULLIF(TRIM(dosage_form), ''),
-    NULLIF(TRIM(dosage), ''),
-    NULLIF(TRIM(patient_exclusions), '')
-FROM drugs_staging
-WHERE TRIM(trade_name) <> '';
-SQL
-
-psql_cmd -f "$DRUGS_SQL"
+trap 'rm -f "$SUPPS_SQL"' EXIT
 
 # ── dietary_supplements ───────────────────────────────────────────────────────
 # Dietary supplements CSV: semicolon-separated, UTF-8, has header row.
@@ -138,4 +104,4 @@ SQL
 psql_cmd -f "$SUPPS_SQL"
 
 echo "Done. Rows loaded:"
-psql_cmd -c "SELECT 'drugs' AS tbl, COUNT(*) FROM drugs UNION ALL SELECT 'dietary_supplements', COUNT(*) FROM dietary_supplements;"
+psql_cmd -c "SELECT 'dietary_supplements' AS tbl, COUNT(*) FROM dietary_supplements;"
