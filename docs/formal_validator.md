@@ -18,8 +18,8 @@ Each service in `Услуги` is classified independently. The result is the un
 
 **Classification priority per service:**
 
-1. If `Диагноз.Код` is `Z11.1` → always adds `PROPHYLACTIC_TUBERCULIN` to the result set (independent of services).
-2. Scan every field value for an NMU code matching `[ABАВ]\d{2}\.\d{3}\.\d{3}(\.\d{3})?`:
+1. If any diagnosis in `Диагнозы[].КодМКБ` is `Z11.1` (compared upper-case, whitespace-trimmed) → always adds `PROPHYLACTIC_TUBERCULIN` to the result set (independent of services).
+2. Scan every field value for an NMU code matching `^[ABАВ]\d{2}\.\d{2,3}\.\d{3}(?:\.\d{3})?$` (the middle segment is 2 digits for A-codes and 3 for B-codes, hence `\d{2,3}`):
    - `A*` prefix → `LAB_RESEARCH_INTERVENTION`
    - `B04.*` → `PROPHYLACTIC`
    - `B01.070.001` → `PRIMARY`
@@ -84,7 +84,7 @@ Returns the combined findings list. Empty list means no defects detected.
 carries `source_ref` (the exact clause of the regulation it rests on) and
 `verified_at` (the date that wording was last checked against the primary
 source).  On import the module logs
-`formal rules revised_at=… rules=N oldest verified_at=…`, so the age of the
+`[formal] formal rules revised_at=… rules=N oldest verified_at=…`, so the age of the
 regulatory base is visible in the logs.
 
 The regulations themselves — editions, validity periods, planned replacements
