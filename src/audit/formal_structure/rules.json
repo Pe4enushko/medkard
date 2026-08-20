@@ -1,438 +1,678 @@
-[
-  {
-    "rule_id": "visit_meta_required",
-    "source": "274n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "all"
+{
+  "revised_at": "2026-08-19",
+  "sources_doc": "docs/formal-rules-sources.md",
+  "rules": [
+    {
+      "rule_id": "visit_meta_required",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "visit_date",
+        "specialty",
+        "patient_age",
+        "patient_sex",
+        "service_name"
+      ],
+      "expectation": "В записи должны быть идентифицируемы дата приёма, возраст, пол пациента и оказываемая услуга/тип визита.",
+      "flag_code": "ОТСУТСТВУЮТ_МЕТАДАННЫЕ_ВИЗИТА",
+      "severity": "критичный"
     },
-    "targets": ["visit_date", "specialty", "patient_age", "patient_sex", "service_name"],
-    "expectation": "В записи должны быть идентифицируемы дата приёма, возраст, пол пациента и оказываемая услуга/тип визита.",
-    "flag_code": "ОТСУТСТВУЮТ_МЕТАДАННЫЕ_ВИЗИТА",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "primary_core_sections_required",
-    "source": "274n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["primary"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "primary_core_sections_required",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "primary"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "complaints",
+        "anamnesis",
+        "objective_exam",
+        "diagnosis",
+        "recommendations"
+      ],
+      "expectation": "Для первичного амбулаторного приёма должны быть отражены жалобы, анамнез, объективный осмотр, диагноз и итоговая тактика/рекомендации.",
+      "flag_code": "ПЕРВИЧНЫЙ_ОТСУТСТВУЮТ_ОСНОВНЫЕ_РАЗДЕЛЫ",
+      "severity": "критичный"
     },
-    "targets": ["complaints", "anamnesis", "objective_exam", "diagnosis", "recommendations"],
-    "expectation": "Для первичного амбулаторного приёма должны быть отражены жалобы, анамнез, объективный осмотр, диагноз и итоговая тактика/рекомендации.",
-    "flag_code": "ПЕРВИЧНЫЙ_ОТСУТСТВУЮТ_ОСНОВНЫЕ_РАЗДЕЛЫ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "repeat_core_sections_required",
-    "source": "274n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "repeat_core_sections_required",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "objective_exam",
+        "diagnosis",
+        "recommendations"
+      ],
+      "expectation": "Для повторного приёма должны быть отражены текущий статус пациента, объективный осмотр, диагноз/оценка состояния",
+      "flag_code": "ПОВТОРНЫЙ_ОТСУТСТВУЮТ_ОСНОВНЫЕ_РАЗДЕЛЫ",
+      "severity": "критичный"
     },
-    "targets": ["objective_exam", "diagnosis", "recommendations"],
-    "expectation": "Для повторного приёма должны быть отражены текущий статус пациента, объективный осмотр, диагноз/оценка состояния",
-    "flag_code": "ПОВТОРНЫЙ_ОТСУТСТВУЮТ_ОСНОВНЫЕ_РАЗДЕЛЫ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "repeat_needs_context_or_dynamics",
-    "source": "203n",
-    "rule_type": "conditional_required",
-    "applies_to": {
-      "visit_types": ["repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "repeat_needs_context_or_dynamics",
+      "source": "203n",
+      "rule_type": "conditional_required",
+      "applies_to": {
+        "visit_types": [
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "dynamics",
+        "clinical_context"
+      ],
+      "expectation": "Для повторного приёма должна быть отражена динамика заболевания, эффект лечения или иной клинический контекст повторного визита.",
+      "flag_code": "ПОВТОРНЫЙ_ОТСУТСТВУЕТ_ДИНАМИКА",
+      "severity": "значительный"
     },
-    "targets": ["dynamics", "clinical_context"],
-    "expectation": "Для повторного приёма должна быть отражена динамика заболевания, эффект лечения или иной клинический контекст повторного визита.",
-    "flag_code": "ПОВТОРНЫЙ_ОТСУТСТВУЕТ_ДИНАМИКА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "diagnosis_required",
-    "source": "274n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "child"
+    {
+      "rule_id": "diagnosis_required",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "child"
+      },
+      "targets": [
+        "diagnosis"
+      ],
+      "expectation": "В записи должен быть указан хотя бы один диагноз или заключение по результату осмотра.",
+      "flag_code": "ОТСУТСТВУЕТ_ДИАГНОЗ",
+      "severity": "критичный"
     },
-    "targets": ["diagnosis"],
-    "expectation": "В записи должен быть указан хотя бы один диагноз или заключение по результату осмотра.",
-    "flag_code": "ОТСУТСТВУЕТ_ДИАГНОЗ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "diagnosis_should_be_supported",
-    "source": "203n",
-    "rule_type": "diagnosis_check",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "diagnosis_should_be_supported",
+      "source": "203n",
+      "rule_type": "diagnosis_check",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "complaints",
+        "anamnesis",
+        "objective_exam",
+        "diagnosis"
+      ],
+      "expectation": "Диагноз должен быть логически поддержан жалобами, анамнезом и/или данными объективного осмотра.",
+      "flag_code": "ДИАГНОЗ_НЕ_ПОДТВЕРЖДЁН_ЗАПИСЬЮ",
+      "severity": "значительный"
     },
-    "targets": ["complaints", "anamnesis", "objective_exam", "diagnosis"],
-    "expectation": "Диагноз должен быть логически поддержан жалобами, анамнезом и/или данными объективного осмотра.",
-    "flag_code": "ДИАГНОЗ_НЕ_ПОДТВЕРЖДЁН_ЗАПИСЬЮ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "management_should_follow_diagnosis",
-    "source": "203n",
-    "rule_type": "consistency",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "management_should_follow_diagnosis",
+      "source": "203n",
+      "rule_type": "consistency",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "diagnosis",
+        "recommendations",
+        "treatment_plan",
+        "investigation_plan"
+      ],
+      "expectation": "Назначения, обследования и рекомендации должны быть логически связаны с отражённым диагнозом и состоянием пациента.",
+      "flag_code": "НАЗНАЧЕНИЯ_НЕ_СООТВЕТСТВУЮТ_ДИАГНОЗУ",
+      "severity": "значительный"
     },
-    "targets": ["diagnosis", "recommendations", "treatment_plan", "investigation_plan"],
-    "expectation": "Назначения, обследования и рекомендации должны быть логически связаны с отражённым диагнозом и состоянием пациента.",
-    "flag_code": "НАЗНАЧЕНИЯ_НЕ_СООТВЕТСТВУЮТ_ДИАГНОЗУ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "objective_exam_required",
-    "source": "203n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "objective_exam_required",
+      "source": "203n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat",
+          "prophylactic"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "objective_exam"
+      ],
+      "expectation": "В записи должен быть отражён факт объективного осмотра пациента.",
+      "flag_code": "ОТСУТСТВУЕТ_ОБЪЕКТИВНЫЙ_ОСМОТР",
+      "severity": "критичный"
     },
-    "targets": ["objective_exam"],
-    "expectation": "В записи должен быть отражён факт объективного осмотра пациента.",
-    "flag_code": "ОТСУТСТВУЕТ_ОБЪЕКТИВНЫЙ_ОСМОТР",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "plan_vs_result_separation",
-    "source": "274n",
-    "rule_type": "structure_defect",
-    "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "plan_vs_result_separation",
+      "source": "274n",
+      "rule_type": "structure_defect",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat",
+          "prophylactic"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "investigation_plan",
+        "results"
+      ],
+      "expectation": "План обследования не должен содержать готовые результаты исследования, а результаты не должны быть записаны как план.",
+      "flag_code": "СМЕШАНЫ_ПЛАН_И_РЕЗУЛЬТАТЫ",
+      "severity": "значительный"
     },
-    "targets": ["investigation_plan", "results"],
-    "expectation": "План обследования не должен содержать готовые результаты исследования, а результаты не должны быть записаны как план.",
-    "flag_code": "СМЕШАНЫ_ПЛАН_И_РЕЗУЛЬТАТЫ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "placeholder_values_are_defect",
-    "source": "274n",
-    "rule_type": "structure_defect",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "placeholder_values_are_defect",
+      "source": "274n",
+      "rule_type": "structure_defect",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "any_field"
+      ],
+      "expectation": "placeholder-значения, технический мусор и неинформативные заглушки считаются дефектом оформления записи",
+      "flag_code": "ОБНАРУЖЕНЫ_ЗАГЛУШКИ",
+      "severity": "значительный"
     },
-    "targets": ["any_field"],
-    "expectation": "placeholder-значения, технический мусор и неинформативные заглушки считаются дефектом оформления записи",
-    "flag_code": "ОБНАРУЖЕНЫ_ЗАГЛУШКИ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "duplicate_semantic_blocks_are_defect",
-    "source": "274n",
-    "rule_type": "structure_defect",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "duplicate_semantic_blocks_are_defect",
+      "source": "274n",
+      "rule_type": "structure_defect",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "any_field"
+      ],
+      "expectation": "Дублирование смысловых блоков или неоднократное заполнение одного и того же реквизита с конфликтом значений считается дефектом структуры.",
+      "flag_code": "ДУБЛИРОВАНИЕ_СМЫСЛОВЫХ_БЛОКОВ",
+      "severity": "незначительный"
     },
-    "targets": ["any_field"],
-    "expectation": "Дублирование смысловых блоков или неоднократное заполнение одного и того же реквизита с конфликтом значений считается дефектом структуры.",
-    "flag_code": "ДУБЛИРОВАНИЕ_СМЫСЛОВЫХ_БЛОКОВ",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "service_specialty_visit_alignment",
-    "source": "274n",
-    "rule_type": "consistency",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "service_specialty_visit_alignment",
+      "source": "274n",
+      "rule_type": "consistency",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "service_name",
+        "specialty",
+        "visit_type"
+      ],
+      "expectation": "Услуга, специальность врача и тип визита должны быть согласованы друг с другом.",
+      "flag_code": "НЕСООТВЕТСТВИЕ_УСЛУГИ_И_ВИЗИТА",
+      "severity": "значительный"
     },
-    "targets": ["service_name", "specialty", "visit_type"],
-    "expectation": "Услуга, специальность врача и тип визита должны быть согласованы друг с другом.",
-    "flag_code": "НЕСООТВЕТСТВИЕ_УСЛУГИ_И_ВИЗИТА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "followup_needed_for_nontrivial_case",
-    "source": "203n",
-    "rule_type": "followup_check",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "followup_needed_for_nontrivial_case",
+      "source": "203n",
+      "rule_type": "followup_check",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "follow_up",
+        "state",
+        "diagnosis",
+        "recommendations"
+      ],
+      "condition": "Если состояние описано как средней тяжести, есть осложнение, активный инфекционный процесс, бронхообструкция, отит или иная клинически значимая ситуация.",
+      "expectation": "В таких случаях в записи ожидается указание на повторный осмотр, наблюдение или контроль.",
+      "flag_code": "ОТСУТСТВУЕТ_КОНТРОЛЬ_ПРИ_АКТИВНОМ_ПРОЦЕССЕ",
+      "severity": "значительный"
     },
-    "targets": ["follow_up", "state", "diagnosis", "recommendations"],
-    "condition": "Если состояние описано как средней тяжести, есть осложнение, активный инфекционный процесс, бронхообструкция, отит или иная клинически значимая ситуация.",
-    "expectation": "В таких случаях в записи ожидается указание на повторный осмотр, наблюдение или контроль.",
-    "flag_code": "ОТСУТСТВУЕТ_КОНТРОЛЬ_ПРИ_АКТИВНОМ_ПРОЦЕССЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "prophylactic_absence_of_complaints_allowed",
-    "source": "211n",
-    "rule_type": "prophylactic_exception",
-    "applies_to": {
-      "visit_types": ["prophylactic"],
-      "specialties": [],
-      "age_group": "child"
+    {
+      "rule_id": "prophylactic_absence_of_complaints_allowed",
+      "source": "211n",
+      "rule_type": "prophylactic_exception",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [],
+        "age_group": "child"
+      },
+      "targets": [
+        "complaints"
+      ],
+      "expectation": "Для профилактического осмотра отсутствие жалоб или формулировка 'жалоб нет' допустимы и не считаются дефектом.",
+      "flag_code": "ДОПУСТИМО_БЕЗ_ЖАЛОБ_ПРОФИЛАКТИКА",
+      "severity": "незначительный"
     },
-    "targets": ["complaints"],
-    "expectation": "Для профилактического осмотра отсутствие жалоб или формулировка 'жалоб нет' допустимы и не считаются дефектом.",
-    "flag_code": "ДОПУСТИМО_БЕЗ_ЖАЛОБ_ПРОФИЛАКТИКА",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "prophylactic_absence_of_dynamics_allowed",
-    "source": "211n",
-    "rule_type": "prophylactic_exception",
-    "applies_to": {
-      "visit_types": ["prophylactic"],
-      "specialties": [],
-      "age_group": "child"
+    {
+      "rule_id": "prophylactic_absence_of_dynamics_allowed",
+      "source": "211n",
+      "rule_type": "prophylactic_exception",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [],
+        "age_group": "child"
+      },
+      "targets": [
+        "dynamics",
+        "clinical_context"
+      ],
+      "expectation": "Для профилактического осмотра отсутствие динамики заболевания допустимо, если цель визита профилактическая или административная.",
+      "flag_code": "ДОПУСТИМО_БЕЗ_ДИНАМИКИ_ПРОФИЛАКТИКА",
+      "severity": "незначительный"
     },
-    "targets": ["dynamics", "clinical_context"],
-    "expectation": "Для профилактического осмотра отсутствие динамики заболевания допустимо, если цель визита профилактическая или административная.",
-    "flag_code": "ДОПУСТИМО_БЕЗ_ДИНАМИКИ_ПРОФИЛАКТИКА",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "prophylactic_no_treatment_allowed_if_decision_present",
-    "source": "211n",
-    "rule_type": "allowed_missing",
-    "applies_to": {
-      "visit_types": ["prophylactic"],
-      "specialties": ["pediatrics"],
-      "age_group": "all"
+    {
+      "rule_id": "prophylactic_no_treatment_allowed_if_decision_present",
+      "source": "211n",
+      "rule_type": "allowed_missing",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [
+          "pediatrics"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "recommendations",
+        "treatment_plan"
+      ],
+      "expectation": "Для профилактического осмотра отсутствие лечения допустимо, если в записи есть понятное итоговое медицинское решение или заключение.",
+      "flag_code": "ДОПУСТИМО_БЕЗ_ЛЕЧЕНИЯ_ПРОФИЛАКТИКА",
+      "severity": "незначительный"
     },
-    "targets": ["recommendations", "treatment_plan"],
-    "expectation": "Для профилактического осмотра отсутствие лечения допустимо, если в записи есть понятное итоговое медицинское решение или заключение.",
-    "flag_code": "ДОПУСТИМО_БЕЗ_ЛЕЧЕНИЯ_ПРОФИЛАКТИКА",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "icd_text_alignment",
-    "source": "icd10",
-    "rule_type": "diagnosis_check",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["pediatrics"],
-      "age_group": "all"
+    {
+      "rule_id": "icd_text_alignment",
+      "source": "icd10",
+      "rule_type": "diagnosis_check",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "pediatrics"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "diagnosis_code",
+        "diagnosis_text"
+      ],
+      "expectation": "Клинический диагноз должен соответствовать выбранному коду МКБ-10 по анатомической локализации и патогенезу. Использование симптоматических кодов (класс R) при наличии установленного основного заболевания считается дефектом",
+      "flag_code": "НЕСООТВЕТСТВИЕ_МКБ_И_ТЕКСТА_ДИАГНОЗА",
+      "severity": "значительный"
     },
-    "targets": ["diagnosis_code", "diagnosis_text"],
-    "expectation": "Клинический диагноз должен соответствовать выбранному коду МКБ-10 по анатомической локализации и патогенезу. Использование симптоматических кодов (класс R) при наличии установленного основного заболевания считается дефектом",
-    "flag_code": "НЕСООТВЕТСТВИЕ_МКБ_И_ТЕКСТА_ДИАГНОЗА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "too_general_icd_for_rich_detail",
-    "source": "icd10",
-    "rule_type": "diagnosis_check",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["pediatrics"],
-      "age_group": "child"
+    {
+      "rule_id": "too_general_icd_for_rich_detail",
+      "source": "icd10",
+      "rule_type": "diagnosis_check",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "pediatrics"
+        ],
+        "age_group": "child"
+      },
+      "targets": [
+        "diagnosis_code",
+        "diagnosis_text"
+      ],
+      "expectation": "Если код МКБ слишком общий, а детализация диагноза содержит несколько самостоятельных состояний, это должно помечаться как флаг неполного или грубого кодирования.",
+      "flag_code": "СЛИШКОМ_ОБЩИЙ_КОД_МКБ",
+      "severity": "значительный"
     },
-    "targets": ["diagnosis_code", "diagnosis_text"],
-    "expectation": "Если код МКБ слишком общий, а детализация диагноза содержит несколько самостоятельных состояний, это должно помечаться как флаг неполного или грубого кодирования.",
-    "flag_code": "СЛИШКОМ_ОБЩИЙ_КОД_МКБ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "has_typos",
-    "source": "",
-    "rule_type": "structure_defect",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["pediatrics"],
-      "age_group": "all"
+    {
+      "rule_id": "has_typos",
+      "source": "",
+      "rule_type": "structure_defect",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "pediatrics"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "any_field"
+      ],
+      "expectation": "Запись не должна содержать явных орфографических ошибок, опечаток или искажённых медицинских терминов, затрудняющих понимание документа.",
+      "flag_code": "ОРФОГРАФИЧЕСКИЕ_ОШИБКИ",
+      "severity": "незначительный"
     },
-    "targets": ["any_field"],
-    "expectation": "Запись не должна содержать явных орфографических ошибок, опечаток или искажённых медицинских терминов, затрудняющих понимание документа.",
-    "flag_code": "ОРФОГРАФИЧЕСКИЕ_ОШИБКИ",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "legal_representative_info",
-    "source": "323-FZ",
-    "rule_type": "required_field",
-    "targets": ["companion_info"],
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "child"
+    {
+      "rule_id": "legal_representative_info",
+      "source": "323-FZ",
+      "rule_type": "required_field",
+      "targets": [
+        "companion_info"
+      ],
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "child"
+      },
+      "expectation": "Должно быть указано, в сопровождении какого законного представителя проведен осмотр ребенка младше 15 лет.",
+      "flag_code": "ОТСУТСТВУЕТ_ИНФОРМАЦИЯ_О_СОПРОВОЖДАЮЩЕМ",
+      "severity": "значительный"
     },
-    "expectation": "Должно быть указано, в сопровождении какого законного представителя проведен осмотр ребенка младше 15 лет.",
-    "flag_code": "ОТСУТСТВУЕТ_ИНФОРМАЦИЯ_О_СОПРОВОЖДАЮЩЕМ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "treatment_dosage_clarity",
-    "source": "203n",
-    "rule_type": "content_analysis",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "child"
+    {
+      "rule_id": "treatment_dosage_clarity",
+      "source": "203n",
+      "rule_type": "content_analysis",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "child"
+      },
+      "targets": [
+        "treatment_plan"
+      ],
+      "expectation": "Назначение лекарственных препаратов должно содержать дозировку, кратность и длительность приема.",
+      "flag_code": "НЕПОЛНОЕ_НАЗНАЧЕНИЕ_ПРЕПАРАТА",
+      "severity": "значительный"
     },
-    "targets": ["treatment_plan"],
-    "expectation": "Назначение лекарственных препаратов должно содержать дозировку, кратность и длительность приема.",
-    "flag_code": "НЕПОЛНОЕ_НАЗНАЧЕНИЕ_ПРЕПАРАТА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "diagnosis_justification_presence",
-    "source": "203n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "child"
+    {
+      "rule_id": "diagnosis_justification_presence",
+      "source": "203n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "child"
+      },
+      "targets": [
+        "diagnosis_justification"
+      ],
+      "expectation": "Должно присутствовать текстовое обоснование клинического диагноза.",
+      "flag_code": "ОТСУТСТВУЕТ_ОБОСНОВАНИЕ_ДИАГНОЗА",
+      "severity": "значительный"
     },
-    "targets": ["diagnosis_justification"],
-    "expectation": "Должно присутствовать текстовое обоснование клинического диагноза.",
-    "flag_code": "ОТСУТСТВУЕТ_ОБОСНОВАНИЕ_ДИАГНОЗА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "lab_biomaterial_and_result",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "lab_biomaterial_and_result",
+      "source": "464n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "biomaterial",
+        "result_value",
+        "units",
+        "reference_range",
+        "collection_date"
+      ],
+      "expectation": "Для лабораторных исследований (коды A09.*): должны быть указаны вид биоматериала, результат с единицами измерения, референсные значения и дата забора/выполнения.",
+      "flag_code": "ЛАБОРАТОРИЯ_НЕПОЛНЫЕ_ДАННЫЕ",
+      "severity": "значительный"
     },
-    "targets": ["biomaterial", "result_value", "units", "reference_range", "collection_date"],
-    "expectation": "Для лабораторных исследований (коды A09.*): должны быть указаны вид биоматериала, результат с единицами измерения, референсные значения и дата забора/выполнения.",
-    "flag_code": "ЛАБОРАТОРИЯ_НЕПОЛНЫЕ_ДАННЫЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "ultrasound_protocol_and_conclusion",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "ultrasound_protocol_and_conclusion",
+      "source": "464n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "study_area",
+        "protocol_description",
+        "conclusion"
+      ],
+      "expectation": "Для УЗИ (коды A04.*): должны быть указаны область исследования, описание/протокол и заключение.",
+      "flag_code": "УЗИ_НЕПОЛНЫЙ_ПРОТОКОЛ",
+      "severity": "значительный"
     },
-    "targets": ["study_area", "protocol_description", "conclusion"],
-    "expectation": "Для УЗИ (коды A04.*): должны быть указаны область исследования, описание/протокол и заключение.",
-    "flag_code": "УЗИ_НЕПОЛНЫЙ_ПРОТОКОЛ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "xray_protocol_and_conclusion",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "xray_protocol_and_conclusion",
+      "source": "464n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "study_area",
+        "protocol_description",
+        "conclusion",
+        "study_date"
+      ],
+      "expectation": "Для рентгена и флюорографии (коды A06.*): должны быть указаны область исследования, описание/протокол, заключение и дата исследования.",
+      "flag_code": "РЕНТГЕН_НЕПОЛНЫЙ_ПРОТОКОЛ",
+      "severity": "значительный"
     },
-    "targets": ["study_area", "protocol_description", "conclusion", "study_date"],
-    "expectation": "Для рентгена и флюорографии (коды A06.*): должны быть указаны область исследования, описание/протокол, заключение и дата исследования.",
-    "flag_code": "РЕНТГЕН_НЕПОЛНЫЙ_ПРОТОКОЛ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "ecg_functional_description_and_conclusion",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "ecg_functional_description_and_conclusion",
+      "source": "464n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "parameters_description",
+        "conclusion"
+      ],
+      "expectation": "Для функциональных исследований (коды A05.*, A12.*): должны быть указаны описание параметров/результатов и заключение.",
+      "flag_code": "ФУНКЦИОНАЛЬНОЕ_ИССЛЕДОВАНИЕ_НЕПОЛНОЕ",
+      "severity": "значительный"
     },
-    "targets": ["parameters_description", "conclusion"],
-    "expectation": "Для функциональных исследований (коды A05.*, A12.*): должны быть указаны описание параметров/результатов и заключение.",
-    "flag_code": "ФУНКЦИОНАЛЬНОЕ_ИССЛЕДОВАНИЕ_НЕПОЛНОЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "manipulation_technique_and_outcome",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "manipulation_technique_and_outcome",
+      "source": "464n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "procedure_performed",
+        "area_or_material",
+        "technique_or_result",
+        "complications"
+      ],
+      "expectation": "Для манипуляций (коды A11.*, A16.*): должны быть указаны описание выполненного вмешательства, область/материал, техника/результат и сведения об осложнениях (или их отсутствии) при необходимости.",
+      "flag_code": "МАНИПУЛЯЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
+      "severity": "значительный"
     },
-    "targets": ["procedure_performed", "area_or_material", "technique_or_result", "complications"],
-    "expectation": "Для манипуляций (коды A11.*, A16.*): должны быть указаны описание выполненного вмешательства, область/материал, техника/результат и сведения об осложнениях (или их отсутствии) при необходимости.",
-    "flag_code": "МАНИПУЛЯЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "injection_procedure_completeness",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "injection_procedure_completeness",
+      "source": "464n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "drug_name",
+        "dose",
+        "route",
+        "patient_reaction"
+      ],
+      "expectation": "Для инъекций и процедур (коды A02.*, A03.*): должны быть указаны наименование препарата, доза, путь введения и реакция пациента (если применимо).",
+      "flag_code": "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
+      "severity": "значительный"
     },
-    "targets": ["drug_name", "dose", "route", "patient_reaction"],
-    "expectation": "Для инъекций и процедур (коды A02.*, A03.*): должны быть указаны наименование препарата, доза, путь введения и реакция пациента (если применимо).",
-    "flag_code": "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "tuberculin_objective_data_required",
-    "source": "190n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["prophylactic_tuberculin"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "tuberculin_objective_data_required",
+      "source": "190n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic_tuberculin"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "objective_exam",
+        "test_result"
+      ],
+      "expectation": "В записи туберкулинодиагностики должны быть отражены объективные данные по результатам проведённого исследования (размер папулы, гиперемия или иная реакция на туберкулин).",
+      "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЮТ_ОБЪЕКТИВНЫЕ_ДАННЫЕ",
+      "severity": "критичный"
     },
-    "targets": ["objective_exam", "test_result"],
-    "expectation": "В записи туберкулинодиагностики должны быть отражены объективные данные по результатам проведённого исследования (размер папулы, гиперемия или иная реакция на туберкулин).",
-    "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЮТ_ОБЪЕКТИВНЫЕ_ДАННЫЕ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "tuberculin_specialist_examination_if_pathology",
-    "source": "190n",
-    "rule_type": "conditional_required",
-    "applies_to": {
-      "visit_types": ["prophylactic_tuberculin"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "tuberculin_specialist_examination_if_pathology",
+      "source": "190n",
+      "rule_type": "conditional_required",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic_tuberculin"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "specialist_examination"
+      ],
+      "condition": "Если выявлены патологические состояния, свидетельствующие о наличии туберкулёза (положительная или гиперергическая реакция, вираж туберкулиновой пробы).",
+      "expectation": "При выявлении патологических состояний должна быть отражена информация об осмотре медицинским работником, ответственным за проведение профилактического осмотра.",
+      "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ОСМОТР_СПЕЦИАЛИСТА_ПРИ_ПАТОЛОГИИ",
+      "severity": "критичный"
     },
-    "targets": ["specialist_examination"],
-    "condition": "Если выявлены патологические состояния, свидетельствующие о наличии туберкулёза (положительная или гиперергическая реакция, вираж туберкулиновой пробы).",
-    "expectation": "При выявлении патологических состояний должна быть отражена информация об осмотре медицинским работником, ответственным за проведение профилактического осмотра.",
-    "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ОСМОТР_СПЕЦИАЛИСТА_ПРИ_ПАТОЛОГИИ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "tuberculin_conclusion_required",
-    "source": "190n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["prophylactic_tuberculin"],
-      "specialties": ["all"],
-      "age_group": "all"
-    },
-    "targets": ["conclusion"],
-    "expectation": "В записи должно быть заключение об отсутствии или выявлении патологических состояний, свидетельствующих о наличии туберкулёза.",
-    "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ЗАКЛЮЧЕНИЕ",
-    "severity": "критичный"
-  }
-]
+    {
+      "rule_id": "tuberculin_conclusion_required",
+      "source": "190n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic_tuberculin"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "conclusion"
+      ],
+      "expectation": "В записи должно быть заключение об отсутствии или выявлении патологических состояний, свидетельствующих о наличии туберкулёза.",
+      "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ЗАКЛЮЧЕНИЕ",
+      "severity": "критичный"
+    }
+  ]
+}

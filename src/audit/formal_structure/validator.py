@@ -37,7 +37,9 @@ _RULES_PATH = _HERE / "rules.json"
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "LLM" / "prompts" / "formal_structure_validator.txt"
 # ─────────────────────────────────────────────────────────────────────────────
 
-_RULES: list[dict] = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
+_RULES_DOC: dict = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
+_RULES: list[dict] = _RULES_DOC["rules"]
+_REVISED_AT: str = _RULES_DOC["revised_at"]
 _PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
 
 # ── Flag → regulatory source lookup ───────────────────────────────────────────
