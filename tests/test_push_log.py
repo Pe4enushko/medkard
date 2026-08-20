@@ -234,6 +234,47 @@ async def test_multiple_pushes_in_one_day_aggregate_in_metrics_view(alenka_org_i
 
 
 @pytest.mark.asyncio
+async def test_replace_priem_on_pending_card_does_not_log(alenka_org_id: str):
+    """replace_priem (scripts/backfill-priem.py's write path) never touches
+    status or pushed_at, so it must not fire the push_log trigger even when
+    it happens to run against a row that is already status='pending' — the
+    exact scenario Finding 1 of the final review flagged as a phantom-push
+    risk if the trigger only checked NEW.status = 'pending'.
+    """
+    guid = f"pytest-pushlog-{uuid.uuid4()}"
+    try:
+        async with DoneCardsStorage() as storage:
+            # The trigger is BEFORE UPDATE, so the very first upsert_pending
+            # (an INSERT — no prior row) never fires it. Push a second time
+            # over that pending row so there is one genuine push_log row on
+            # the books, then exercise replace_priem against that same
+            # already-pending row.
+            await storage.upsert_pending(
+                card_guid=guid, card_data=_card(guid), organization_id=alenka_org_id
+            )
+            await storage.upsert_pending(
+                card_guid=guid, card_data=_card(guid, version=2), organization_id=alenka_org_id
+            )
+
+            rows_after_push = await _push_log_rows(storage, guid)
+            assert len(rows_after_push) == 1, "sanity: the second push (pending -> pending) logged exactly one row"
+
+            updated = await storage.replace_priem(
+                card_guid=guid,
+                priem=json.dumps({"GUID": guid, "DATE": "02.08.2026"}, ensure_ascii=False),
+            )
+            assert updated is True, "sanity: replace_priem found and updated the row"
+
+            rows_after_replace = await _push_log_rows(storage, guid)
+            assert len(rows_after_replace) == 1, (
+                "replace_priem on an already-pending row must not add a new "
+                "push_log row — it is not a push"
+            )
+    finally:
+        await _cleanup(guid)
+
+
+@pytest.mark.asyncio
 async def test_metrics_view_does_not_mix_organizations(alenka_org_id: str, mds_org_id: str):
     """A push logged under one org must not inflate another org's same-day count."""
     alenka_guid = f"pytest-pushlog-{uuid.uuid4()}"

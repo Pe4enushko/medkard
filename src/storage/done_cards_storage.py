@@ -273,15 +273,23 @@ class DoneCardsStorage(BaseStorage):
         Sets status='pending' and clears every audit-derived column (results,
         ignored, broken, stacktrace) — a pushed update means the previous
         audit outcome, if any, is stale and must be recomputed from scratch.
+
+        Also stamps pushed_at = now() on every call. This is the signal the
+        done_cards_log_push trigger (migration 027) uses to tell a genuine
+        push apart from an unrelated UPDATE that happens to touch an
+        already-'pending' row (e.g. replace_priem) — see the trigger's WHEN
+        clause and the comment beside it in the migration for why
+        NEW.status = 'pending' alone is not sufficient. No other write path
+        may set this column.
         """
         try:
             async with self._pool.connection() as conn:
                 cur = await conn.execute(
                     """
                     INSERT INTO done_cards
-                        (card_guid, card_data, status, organization_id)
+                        (card_guid, card_data, status, organization_id, pushed_at)
                     VALUES
-                        (%(guid)s, %(data)s::jsonb, 'pending', %(org_id)s)
+                        (%(guid)s, %(data)s::jsonb, 'pending', %(org_id)s, now())
                     ON CONFLICT (card_guid) DO UPDATE SET
                         card_data         = EXCLUDED.card_data,
                         status            = 'pending',
@@ -291,7 +299,8 @@ class DoneCardsStorage(BaseStorage):
                         ignored           = FALSE,
                         broken            = FALSE,
                         stacktrace        = NULL,
-                        organization_id   = EXCLUDED.organization_id
+                        organization_id   = EXCLUDED.organization_id,
+                        pushed_at         = now()
                     RETURNING id::text
                     """,
                     {"guid": card_guid, "data": card_data, "org_id": organization_id},

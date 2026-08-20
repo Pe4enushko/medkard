@@ -25,6 +25,13 @@ COMMENT ON COLUMN push_log.card_data IS
 CREATE INDEX IF NOT EXISTS push_log_org_date_idx ON push_log (organization_id, pushed_at);
 CREATE INDEX IF NOT EXISTS push_log_card_guid_idx ON push_log (card_guid);
 
+-- done_cards.pushed_at: stamped by DoneCardsStorage.upsert_pending on every
+-- call (fresh insert and re-push alike) and touched by no other write path.
+-- Lets the trigger below tell a genuine push apart from an unrelated UPDATE
+-- that happens to touch an already-'pending' row (see the long comment next
+-- to the trigger for why NEW.status = 'pending' alone is not sufficient).
+ALTER TABLE done_cards ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMPTZ;
+
 -- --------------------------------------------------------------------------
 -- The trigger: log every push, dated, with whether it destroyed audit output
 -- --------------------------------------------------------------------------
@@ -52,6 +59,24 @@ $$;
 -- ones rather than losing them, and does not touch status, so it never fires
 -- this trigger at all.
 --
+-- Relying on NEW.status = 'pending' alone is not enough to discriminate a
+-- genuine push from an unrelated UPDATE that happens to touch a row that is
+-- ALREADY status = 'pending' (e.g. DoneCardsStorage.replace_priem, used by
+-- scripts/backfill-priem.py, which never touches status at all). Postgres
+-- evaluates the WHEN clause against the row's resulting status regardless of
+-- whether this statement set it, so such an UPDATE would also fire the
+-- trigger and log a phantom push. Comparing OLD.status <> NEW.status does not
+-- fix this either: a legitimate re-push over an already-pending card (see
+-- test_push_over_pending_card_logs_overrode_audit_false) has
+-- OLD.status = NEW.status = 'pending' too.
+--
+-- upsert_pending is made the only writer that can fire this trigger by having
+-- it stamp pushed_at = now() on every call (fresh INSERT and re-push alike),
+-- something no other write path (replace_priem included) ever touches. The
+-- WHEN clause below requires NEW.pushed_at to be non-null AND to have just
+-- changed from OLD.pushed_at — true for every upsert_pending call, always
+-- false for replace_priem since it never assigns pushed_at at all.
+--
 -- BEFORE UPDATE, so the log write happens as part of the same transaction as
 -- the wipe it is recording — matching the existing done_cards_set_updated_at
 -- trigger's approach.
@@ -60,7 +85,11 @@ DROP TRIGGER IF EXISTS done_cards_log_push ON done_cards;
 CREATE TRIGGER done_cards_log_push
     BEFORE UPDATE ON done_cards
     FOR EACH ROW
-    WHEN (NEW.status = 'pending')
+    WHEN (
+        NEW.status = 'pending'
+        AND NEW.pushed_at IS NOT NULL
+        AND (OLD.pushed_at IS NULL OR OLD.pushed_at <> NEW.pushed_at)
+    )
     EXECUTE FUNCTION done_cards_log_push();
 
 -- Drop artifacts from an earlier version of this migration, if this database
