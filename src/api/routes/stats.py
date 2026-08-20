@@ -28,7 +28,7 @@ async def storage(
     """Kilobytes of stored data for the requesting organization.
 
     Covers the two tables holding per-organization card data: done_cards and
-    audit_overwrite_journal (old cards kept when a push overwrote an audit).
+    push_log (one row per push, dated, noting whether it overrode an audit).
     """
     org_id, org_name = org_access
     async with StatsStorage() as stats:
