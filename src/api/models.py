@@ -37,5 +37,5 @@ class StorageStatsResponse(BaseModel):
 
     organization: str
     done_cards_kb: float
-    audit_overwrite_journal_kb: float
+    push_log_kb: float
     total_kb: float
