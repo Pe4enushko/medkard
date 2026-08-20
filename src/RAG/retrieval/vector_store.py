@@ -27,8 +27,8 @@ from natasha import Doc, Segmenter
 from pgvector.asyncpg import register_vector
 from rank_bm25 import BM25Okapi
 
-from RAG.retrieval.embeddings import EMBEDDING_DIM, EMBEDDING_MODEL, embed  # noqa: F401
 from LLM.observability import emit
+from RAG.retrieval.embeddings import EMBEDDING_DIM, EMBEDDING_MODEL, embed  # noqa: F401
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -41,12 +41,22 @@ CANDIDATES_FACTOR: int = 6
 RRF_K: int = 50
 RERANK_BASE_URL: str = os.environ.get("RERANK_BASE_URL", "").rstrip("/")
 RERANK_MODEL: str = os.environ.get("RERANK_MODEL", "")
-RERANK_CANDIDATE_LIMIT: int = int(os.environ.get("RERANK_CANDIDATE_LIMIT", "20"))
+RERANK_CANDIDATE_LIMIT: int = int(os.environ.get("RERANK_CANDIDATE_LIMIT", "40"))
 RERANK_TIMEOUT_SECONDS: float = float(os.environ.get("RERANK_TIMEOUT_SECONDS", "10"))
+RERANK_QUERY_TEMPLATE: str = os.environ.get(
+    "RERANK_QUERY_TEMPLATE",
+    "<Instruct>: {instruction}\n<Query>: {query}",
+).replace("\\n", "\n")
+RERANK_DOC_TEMPLATE: str = os.environ.get("RERANK_DOC_TEMPLATE", "<Document>: {doc}")
+RERANK_INSTRUCTION: str = os.environ.get(
+    "RERANK_INSTRUCTION",
+    "Оцени, отвечает ли фрагмент клинических рекомендаций на клинический вопрос",
+)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SELECT_COLS = """
     id::text,
+    file_id,
     chunk,
     metadata
 """
@@ -302,13 +312,24 @@ async def rerank_results(query_text: str, results: list[dict], top_k: int) -> li
         return results[:top_k]
 
     candidates = results[:max(top_k, min(RERANK_CANDIDATE_LIMIT, len(results)))]
-    payload = {
-        "model": RERANK_MODEL,
-        "query": query_text,
-        "documents": [str(row.get("chunk") or "") for row in candidates],
-        "top_n": min(top_k, len(candidates)),
-    }
     try:
+        rendered_query = (
+            RERANK_QUERY_TEMPLATE.format(instruction=RERANK_INSTRUCTION, query=query_text)
+            if RERANK_QUERY_TEMPLATE
+            else query_text
+        )
+        rendered_documents = [
+            RERANK_DOC_TEMPLATE.format(doc=str(row.get("chunk") or ""))
+            if RERANK_DOC_TEMPLATE
+            else str(row.get("chunk") or "")
+            for row in candidates
+        ]
+        payload = {
+            "model": RERANK_MODEL,
+            "query": rendered_query,
+            "documents": rendered_documents,
+            "top_n": min(top_k, len(candidates)),
+        }
         async with httpx.AsyncClient(timeout=RERANK_TIMEOUT_SECONDS) as client:
             response = await client.post(f"{RERANK_BASE_URL}/rerank", json=payload)
             response.raise_for_status()
@@ -336,7 +357,7 @@ async def rerank_results(query_text: str, results: list[dict], top_k: int) -> li
                 returned_count=len(reranked),
             )
             return reranked[:top_k]
-    except (httpx.HTTPError, ValueError, TypeError) as exc:
+    except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
         logger.warning("[retrieval] rerank unavailable, using RRF order: %s", str(exc)[:200])
         emit("retrieval_rerank_error", model=RERANK_MODEL, exception_type=type(exc).__name__, exception=str(exc)[:200])
     return results[:top_k]

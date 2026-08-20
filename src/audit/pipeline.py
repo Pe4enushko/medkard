@@ -23,16 +23,21 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any
 
+from audit.diagnosis.clinic_recs import _is_age_eligible, _patient_age
 from audit.diagnosis.validator import DiagnosisValidator
 from audit.filters import CardFilter
 from audit.formal_structure.validator import FormalValidator
 from audit.icd_check.validator import check_icd_codes
 from audit.models import FormalFinding, FormalStructureResult
-from audit.diagnosis.clinic_recs import _is_age_eligible, _patient_age
 from parsers.json_parser import AppointmentParser
 from storage.done_cards_storage import DoneCardsStorage
 from storage.guidelines_storage import GuidelinesStorage
-from storage.models.result import DiagnosisIssue, DiagnosisResult, IcdCodingIssue, Result
+from storage.models.result import (
+    DiagnosisIssue,
+    DiagnosisResult,
+    IcdCodingIssue,
+    Result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +61,12 @@ class AuditPipeline:
         self._card_filter = card_filter or CardFilter([])
         self._done_cards: DoneCardsStorage | None = None
 
-    async def __aenter__(self) -> "AuditPipeline":
+    async def __aenter__(self) -> AuditPipeline:
         self._done_cards = DoneCardsStorage()
         await self._done_cards.__aenter__()
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         if self._done_cards is not None:
             await self._done_cards.__aexit__(*args)
             self._done_cards = None
@@ -257,11 +262,12 @@ class AuditPipeline:
             total_tokens += diag_tokens
             logger.info(
                 "[pipeline] DiagnosisValidator done — visit %s dx %s: "
-                "anamnesis=%d inspection=%d treatment=%d tokens=%d",
+                "anamnesis=%d inspection=%d treatment=%d criteria=%d tokens=%d",
                 visit_id, dx_code,
                 len(diag_result.anamnesis_issues),
                 len(diag_result.inspection_issues),
                 len(diag_result.treatment_issues),
+                len(diag_result.criteria_issues),
                 diag_tokens,
             )
             diagnosis_results.append(
@@ -269,6 +275,8 @@ class AuditPipeline:
                     icd_code=dx_code,
                     issues=diag_result.all_issues,
                     guideline_file_id=diag_result.guideline_file_id,
+                    guideline_sources=diag_result.guideline_sources,
+                    errors=diag_result.errors,
                 )
             )
 
@@ -286,11 +294,12 @@ class AuditPipeline:
                 sugg_result, sugg_tokens = await diag_validator.validate_diagnosis(suggested_diagnosis)
                 total_tokens += sugg_tokens
                 logger.info(
-                    "[pipeline] suggested code audit done — %s: anamnesis=%d inspection=%d treatment=%d tokens=%d",
+                    "[pipeline] suggested code audit done — %s: anamnesis=%d inspection=%d treatment=%d criteria=%d tokens=%d",
                     suggested_code,
                     len(sugg_result.anamnesis_issues),
                     len(sugg_result.inspection_issues),
                     len(sugg_result.treatment_issues),
+                    len(sugg_result.criteria_issues),
                     sugg_tokens,
                 )
                 diagnosis_results.append(
@@ -298,6 +307,8 @@ class AuditPipeline:
                         icd_code=suggested_code,
                         issues=sugg_result.all_issues,
                         guideline_file_id=sugg_result.guideline_file_id,
+                        guideline_sources=sugg_result.guideline_sources,
+                        errors=sugg_result.errors,
                     )
                 )
 

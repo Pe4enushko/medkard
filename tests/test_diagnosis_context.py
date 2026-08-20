@@ -11,21 +11,6 @@ sys.path.insert(0, str(SRC))
 
 
 def _load_validator_module(monkeypatch):
-    fake_chinese = types.ModuleType("LLM.chinese_detector")
-
-    class ChineseDetector:
-        def check_str(self, text: str) -> bool:
-            return False
-
-    fake_chinese.ChineseDetector = ChineseDetector
-    monkeypatch.setitem(sys.modules, "LLM.chinese_detector", fake_chinese)
-
-    fake_tools = types.ModuleType("LLM.tools")
-    fake_tools.get_anamnesis_tools_for = lambda file_id: []
-    fake_tools.get_inspection_tools_for = lambda file_id: []
-    fake_tools.get_treatment_tools_for = lambda file_id: []
-    monkeypatch.setitem(sys.modules, "LLM.tools", fake_tools)
-
     fake_diagnosis_pkg = types.ModuleType("audit.diagnosis")
     fake_diagnosis_pkg.__path__ = [str(SRC / "audit" / "diagnosis")]
     monkeypatch.setitem(sys.modules, "audit.diagnosis", fake_diagnosis_pkg)
@@ -93,44 +78,93 @@ def test_format_visit_context_marks_missing_context(monkeypatch) -> None:
     assert context == "—"
 
 
-def test_parse_issues_accepts_prose_with_fenced_checker_output(monkeypatch) -> None:
+def test_visit_date_accepts_one_c_and_iso_shapes(monkeypatch) -> None:
     validator = _load_validator_module(monkeypatch)
 
-    issues = validator._parse_issues(
-        """
-        По результатам поиска найдено несоответствие.
+    assert validator._visit_date("25.06.2026").isoformat() == "2026-06-25"
+    assert validator._visit_date("2026-06-25T13:10:00").isoformat() == "2026-06-25"
+    assert validator._visit_date("not-a-date") is None
 
-        ```json
-        {
-          "issues": [
-            {
-              "issue": "Не указана длительность приема препарата.",
-              "sources": [
-                {
-                  "doc_title": "Клинические рекомендации",
-                  "section": "Лечение",
-                  "cite": "рекомендуется указать режим дозирования"
-                }
-              ]
+
+async def test_validate_diagnosis_maps_graph_contract(monkeypatch) -> None:
+    validator = _load_validator_module(monkeypatch)
+
+    class ClinicRecs:
+        async def pick_recs(self, patient, diagnosis):
+            return "file-1", 3
+
+    class GuidelinesStorage:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, file_id):
+            return types.SimpleNamespace(name="КР по синуситу")
+
+    guidelines_module = types.ModuleType("storage.guidelines_storage")
+    guidelines_module.GuidelinesStorage = GuidelinesStorage
+    monkeypatch.setitem(sys.modules, "storage.guidelines_storage", guidelines_module)
+
+    searches_module = types.ModuleType("RAG.retrieval.searches")
+
+    async def get_sections_for_file(file_id):
+        return ["2 Диагностика"]
+
+    searches_module.get_sections_for_file = get_sections_for_file
+    monkeypatch.setitem(sys.modules, "RAG.retrieval.searches", searches_module)
+
+    class Graph:
+        async def ainvoke(self, state):
+            assert state["visit_date"].isoformat() == "2026-06-25"
+            assert state["doc_title"] == "КР по синуситу"
+            return {
+                "issues": {
+                    "inspection": [
+                        {
+                            "aspect": "inspection",
+                            "issue": "Не выполнено исследование",
+                            "sources": [
+                                {
+                                    "doc_title": "КР по синуситу",
+                                    "section": "2 Диагностика",
+                                    "cite": "Показано исследование",
+                                    "chunk_id": "chunk-1",
+                                    "chunk_index": 4,
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "sources": [
+                    {
+                        "file_id": "file-1",
+                        "doc_title": "КР по синуситу",
+                        "sections": [
+                            {"section": "2 Диагностика", "chunk_indices": [4], "cited": True}
+                        ],
+                    }
+                ],
+                "errors": ["judge_treatment: timeout"],
+                "tokens": 17,
             }
-          ]
+
+    monkeypatch.setattr(validator, "_get_graph", lambda: Graph())
+    instance = validator.DiagnosisValidator(
+        {
+            "Пациент": {"Возраст": 10},
+            "Прием": {"DATE": "25.06.2026", "GUID": "card-1"},
         }
-        ```
-        """
+    )
+    instance._clinic_recs = ClinicRecs()
+
+    result, tokens = await instance.validate_diagnosis(
+        {"КодМКБ": "J01", "НаименованиеМКБ": "Синусит"}
     )
 
-    assert len(issues) == 1
-    assert issues[0].issue == "Не указана длительность приема препарата."
-    assert issues[0].sources[0].section == "Лечение"
-
-
-def test_parse_issues_accepts_legacy_bare_array(monkeypatch) -> None:
-    validator = _load_validator_module(monkeypatch)
-
-    issues = validator._parse_issues(
-        '[{"issue":"Нет жалоб в записи.","sources":[{"doc_title":"КР"}]}]'
-    )
-
-    assert len(issues) == 1
-    assert issues[0].issue == "Нет жалоб в записи."
-    assert issues[0].sources[0].doc_title == "КР"
+    assert tokens == 20
+    assert result.inspection_issues[0].aspect == "inspection"
+    assert result.inspection_issues[0].sources[0].chunk_id == "chunk-1"
+    assert result.guideline_sources[0].sections[0].cited is True
+    assert result.errors == ["judge_treatment: timeout"]

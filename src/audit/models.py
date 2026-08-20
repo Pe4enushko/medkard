@@ -8,9 +8,15 @@ from dataclasses import dataclass, field
 
 # FormalFinding and FormalStructureResult live in storage.models.result to avoid
 # circular imports; re-exported here for convenience.
-from storage.models.result import DiagnosisResult, FormalFinding, FormalStructureResult, DiagnosisIssue
+from storage.models.result import (
+    DiagnosisIssue,
+    DiagnosisResult,
+    FormalFinding,
+    FormalStructureResult,
+    GuidelineSource,
+)
 
-__all__ = ["DiagnosisResult", "FormalFinding", "FormalStructureResult", "DiagnosisAuditResult"]
+__all__ = ["DiagnosisAuditResult", "DiagnosisResult", "FormalFinding", "FormalStructureResult"]
 
 # ── Formal structure (re-exported from storage.models.result) ─────────────────
 
@@ -24,23 +30,34 @@ class DiagnosisAuditResult:
     anamnesis_issues: list[DiagnosisIssue] = field(default_factory=list)
     inspection_issues: list[DiagnosisIssue] = field(default_factory=list)
     treatment_issues: list[DiagnosisIssue] = field(default_factory=list)
+    criteria_issues: list[DiagnosisIssue] = field(default_factory=list)
     guideline_file_id: str | None = None
     icd_code: str | None = None
+    guideline_sources: list[GuidelineSource] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def all_issues(self) -> list[DiagnosisIssue]:
-        return self.anamnesis_issues + self.inspection_issues + self.treatment_issues
+        return (
+            self.anamnesis_issues
+            + self.inspection_issues
+            + self.treatment_issues
+            + self.criteria_issues
+        )
 
     def to_dict(self) -> dict:
-        def _issue_list(issues: list[DiagnosisIssue]) -> list[dict]:
+        def _issue_list(issues: list[DiagnosisIssue], aspect: str) -> list[dict]:
             return [
                 {
                     "issue": iss.issue,
+                    "aspect": iss.aspect or aspect,
                     "sources": [
                         {
                             "doc_title": s.doc_title,
                             "section": s.section,
                             "cite": s.cite,
+                            "chunk_id": s.chunk_id,
+                            "chunk_index": s.chunk_index,
                         }
                         for s in iss.sources
                     ],
@@ -51,9 +68,26 @@ class DiagnosisAuditResult:
         return {
             "guideline_file_id": self.guideline_file_id,
             "icd_code": self.icd_code,
-            "anamnesis": _issue_list(self.anamnesis_issues),
-            "inspection": _issue_list(self.inspection_issues),
-            "treatment": _issue_list(self.treatment_issues),
+            "anamnesis": _issue_list(self.anamnesis_issues, "anamnesis"),
+            "inspection": _issue_list(self.inspection_issues, "inspection"),
+            "treatment": _issue_list(self.treatment_issues, "treatment"),
+            "criteria": _issue_list(self.criteria_issues, "criteria"),
+            "guideline_sources": [
+                {
+                    "file_id": source.file_id,
+                    "doc_title": source.doc_title,
+                    "sections": [
+                        {
+                            "section": section.section,
+                            "chunk_indices": section.chunk_indices,
+                            "cited": section.cited,
+                        }
+                        for section in source.sections
+                    ],
+                }
+                for source in self.guideline_sources
+            ],
+            "errors": self.errors,
         }
 
     def pretty_format(self) -> str:
@@ -75,5 +109,8 @@ class DiagnosisAuditResult:
             _section("Анамнез", self.anamnesis_issues),
             _section("Осмотр", self.inspection_issues),
             _section("Лечение", self.treatment_issues),
+            _section("Критерии качества", self.criteria_issues),
         ]
+        if self.errors:
+            parts.append("  Деградация: " + "; ".join(self.errors))
         return "\n".join(parts)

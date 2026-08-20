@@ -9,6 +9,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import audit.pipeline as pipeline_module
 from audit.models import DiagnosisAuditResult
+from storage.models.result import (
+    DiagnosisIssue,
+    GuidelineSource,
+    GuidelineSourceSection,
+)
 
 
 class _FakeFormalValidator:
@@ -24,7 +29,38 @@ class _FakeDiagnosisValidator:
         return DiagnosisAuditResult(
             guideline_file_id=f"guideline-{diagnosis['КодМКБ']}",
             icd_code=diagnosis["КодМКБ"],
+            criteria_issues=[
+                DiagnosisIssue(issue="Критерий не выполнен", aspect="criteria")
+            ],
+            guideline_sources=[
+                GuidelineSource(
+                    file_id=f"guideline-{diagnosis['КодМКБ']}",
+                    doc_title="КР",
+                    sections=[GuidelineSourceSection(section="Критерии", cited=True)],
+                )
+            ],
+            errors=["partial"],
         ), 0
+
+
+class _FakeGuidelinesStorage:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def all(self):
+        return []
+
+
+@pytest.fixture(autouse=True)
+def _no_external_services(monkeypatch):
+    async def check_icd_codes(**kwargs):
+        return [], 0
+
+    monkeypatch.setattr(pipeline_module, "GuidelinesStorage", _FakeGuidelinesStorage)
+    monkeypatch.setattr(pipeline_module, "check_icd_codes", check_icd_codes)
 
 
 def test_audit_visit_returns_all_diagnoses(monkeypatch):
@@ -43,6 +79,9 @@ def test_audit_visit_returns_all_diagnoses(monkeypatch):
     result = asyncio.run(pipeline_module.AuditPipeline()._audit_visit(visit))
 
     assert [dx.icd_code for dx in result.diagnosis] == ["A01", "B02"]
+    assert result.diagnosis[0].issues[0].aspect == "criteria"
+    assert result.diagnosis[0].guideline_sources[0].doc_title == "КР"
+    assert result.diagnosis[0].errors == ["partial"]
 
 
 def test_run_skips_visits_with_done_guids(monkeypatch):

@@ -41,13 +41,36 @@ def _diag_json(diagnosis: list[DiagnosisResult]) -> str:
                 "issues": [
                     {
                         "issue": iss.issue,
+                        **({"aspect": iss.aspect} if iss.aspect is not None else {}),
                         "sources": [
-                            {"doc_title": s.doc_title, "section": s.section, "cite": s.cite}
+                            {
+                                "doc_title": s.doc_title,
+                                "section": s.section,
+                                "cite": s.cite,
+                                "chunk_id": s.chunk_id,
+                                "chunk_index": s.chunk_index,
+                            }
                             for s in iss.sources
                         ],
                     }
                     for iss in dr.issues
                 ],
+                "guideline_sources": [
+                    {
+                        "file_id": source.file_id,
+                        "doc_title": source.doc_title,
+                        "sections": [
+                            {
+                                "section": section.section,
+                                "chunk_indices": section.chunk_indices,
+                                "cited": section.cited,
+                            }
+                            for section in source.sections
+                        ],
+                    }
+                    for source in dr.guideline_sources
+                ],
+                "errors": dr.errors,
             }
             for dr in diagnosis
         ],

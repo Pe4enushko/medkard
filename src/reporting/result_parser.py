@@ -11,10 +11,18 @@ onto FormalStructureResult / DiagnosisResult / IcdCodingIssue.
 from __future__ import annotations
 
 from storage.models.guideline import Guideline
-from storage.models.result import DiagnosisResult, FormalFinding, FormalStructureResult, IcdCodingIssue, IssueSource
+from storage.models.result import (
+    DiagnosisResult,
+    FormalFinding,
+    FormalStructureResult,
+    GuidelineSource,
+    GuidelineSourceSection,
+    IcdCodingIssue,
+    IssueSource,
+)
 
 
-def build_manifest_meta(guidelines: list["Guideline"]) -> dict[str, dict]:
+def build_manifest_meta(guidelines: list[Guideline]) -> dict[str, dict]:
     """Return {file_id: {name, date, age_group}} from Guideline objects."""
     return {
         g.file_id: {
@@ -72,18 +80,40 @@ def parse_diagnosis(data: list[dict], manifest_meta: dict[str, dict] | None = No
                         doc_title=s["doc_title"],
                         section=s.get("section"),
                         cite=s.get("cite"),
+                        chunk_id=s.get("chunk_id"),
+                        chunk_index=s.get("chunk_index"),
                     )
                     for s in iss.get("sources", [])
                 ],
+                aspect=iss.get("aspect"),
             )
             for iss in entry.get("issues", [])
         ]
         file_id = entry.get("guideline_file_id")
         meta = manifest_meta.get(file_id) if (manifest_meta and file_id) else None
+        guideline_sources = [
+            GuidelineSource(
+                file_id=source.get("file_id", ""),
+                doc_title=source.get("doc_title", ""),
+                sections=[
+                    GuidelineSourceSection(
+                        section=section.get("section"),
+                        chunk_indices=list(section.get("chunk_indices") or []),
+                        cited=bool(section.get("cited", False)),
+                    )
+                    for section in source.get("sections", [])
+                    if isinstance(section, dict)
+                ],
+            )
+            for source in entry.get("guideline_sources", [])
+            if isinstance(source, dict)
+        ]
         results.append(DiagnosisResult(
             icd_code=entry["icd_code"],
             issues=issues,
             guideline_file_id=file_id,
             guideline_meta=meta,
+            guideline_sources=guideline_sources,
+            errors=list(entry.get("errors") or []),
         ))
     return results

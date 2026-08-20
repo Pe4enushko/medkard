@@ -31,7 +31,7 @@ class IcdCodingIssue:
 
     def pretty_format(self) -> str:
         lines = [
-            f"    [ОШИБКА КОДИРОВАНИЯ МКБ]",
+            "    [ОШИБКА КОДИРОВАНИЯ МКБ]",
             f"    Код врача:       {self.initial_code}",
             f"    Предложен код:   {self.suggested_code}",
             f"    Уверенность:     {self.confidence}/10",
@@ -49,6 +49,8 @@ class IssueSource:
     doc_title: str          # Manifest «Наименование» value
     section: str | None = None  # TOC section title, if known
     cite: str | None = None
+    chunk_id: str | None = None
+    chunk_index: int | None = None
 
     def pretty_format(self) -> str:
         s = f"      [ИСТОЧНИК]: {self.doc_title}"
@@ -65,11 +67,26 @@ class DiagnosisIssue:
 
     issue: str
     sources: list[IssueSource] = field(default_factory=list)
+    aspect: str | None = None
 
     def pretty_format(self) -> str:
         lines = [f"    • [ЗАМЕЧАНИЕ] {self.issue}"]
         lines.extend(src.pretty_format() for src in self.sources)
         return "\n".join(lines)
+
+
+@dataclass
+class GuidelineSourceSection:
+    section: str | None
+    chunk_indices: list[int] = field(default_factory=list)
+    cited: bool = False
+
+
+@dataclass
+class GuidelineSource:
+    file_id: str
+    doc_title: str
+    sections: list[GuidelineSourceSection] = field(default_factory=list)
 
 
 @dataclass
@@ -121,6 +138,8 @@ class DiagnosisResult:
     issues: list[DiagnosisIssue] = field(default_factory=list)
     guideline_file_id: str | None = None
     guideline_meta: dict | None = None  # {name, date, age_group} — populated at export time, not stored in DB
+    guideline_sources: list[GuidelineSource] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     def pretty_format(self) -> str:
         if self.guideline_file_id is None:
@@ -137,13 +156,24 @@ class DiagnosisResult:
         else:
             header_parts.append(f"Клинические рекомендации ID: {self.guideline_file_id}")
 
+        blocks = list(header_parts)
         if not self.issues:
-            header_parts.append("Замечаний по клин. рекоммендациям нет")
-            return "\n".join(header_parts)
+            blocks.append("Замечаний по клин. рекоммендациям нет")
+        else:
+            blocks.append(f"\n{_DELIM}\n".join(iss.pretty_format() for iss in self.issues))
 
-        issue_blocks = [iss.pretty_format() for iss in self.issues]
-        body = f"\n{_DELIM}\n".join(issue_blocks)
-        return "\n".join(header_parts) + "\n" + body
+        if self.guideline_sources:
+            rendered_sources = []
+            for source in self.guideline_sources:
+                sections = "; ".join(
+                    f"{section.section or 'раздел не указан'}{' (цит.)' if section.cited else ''}"
+                    for section in source.sections
+                )
+                rendered_sources.append(f"{source.doc_title} — разделы: {sections}")
+            blocks.append("[ИСТОЧНИКИ]: " + " | ".join(rendered_sources))
+        if self.errors:
+            blocks.append("[ДЕГРАДАЦИЯ]: " + "; ".join(self.errors))
+        return "\n".join(blocks)
 
 
 @dataclass

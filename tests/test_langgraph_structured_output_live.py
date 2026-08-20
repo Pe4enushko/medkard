@@ -11,32 +11,31 @@ sys.path.insert(0, str(ROOT / "src"))
 load_dotenv(ROOT / ".env")
 
 from LLM.client import LLMClient
-from audit.diagnosis.schemas import CheckerOutput
+from LLM.graphs.diagnosis_state import JudgeOutput
 
 
-def test_langgraph_react_agent_returns_checker_output_schema() -> None:
-    output, tokens = asyncio.run(
-        LLMClient(max_retries=0).call_agent(
-            system_prompt=(
-                "You are a structured-output test. Do not use markdown. "
-                "Return only the requested structured response."
-            ),
-            tools=[],
-            human_message=(
-                "Return exactly one issue. "
-                "The issue text must be exactly SCHEMA_TEST_OK. "
-                "Include exactly one source with doc_title=unit-test, "
-                "section=structured-output, cite=schema enforced."
-            ),
-            response_format=CheckerOutput,
+def test_raw_llm_call_returns_judge_output_schema() -> None:
+    raw, tokens = asyncio.run(
+        LLMClient(max_retries=0).call(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Return only the requested structured response.",
+                },
+                {
+                    "role": "user",
+                    "content": "Return exactly one issue named SCHEMA_TEST_OK with chunk_refs [1].",
+                },
+            ],
+            temperature=0,
+            response_model=JudgeOutput,
+            reasoning_effort="low",
         )
     )
+    output = JudgeOutput.model_validate_json(raw)
 
-    assert isinstance(output, CheckerOutput)
+    assert isinstance(output, JudgeOutput)
     assert tokens > 0
     assert len(output.issues) == 1
     assert output.issues[0].issue == "SCHEMA_TEST_OK"
-    assert len(output.issues[0].sources) == 1
-    assert output.issues[0].sources[0].doc_title == "unit-test"
-    assert output.issues[0].sources[0].section == "structured-output"
-    assert output.issues[0].sources[0].cite == "schema enforced"
+    assert output.issues[0].chunk_refs == [1]

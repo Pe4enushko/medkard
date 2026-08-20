@@ -1,67 +1,34 @@
 # DiagnosisValidator
 
-**File:** `audit/diagnosis/validator.py`
+`audit/diagnosis/validator.py` подбирает одну клиническую рекомендацию через
+`ClinicRecs`, собирает входное состояние и запускает ациклический LangGraph из
+`LLM/graphs/diagnosis.py`.
 
-Checks a single diagnosis entry against its matched clinical guideline using three parallel LangChain ReAct agents: anamnesis, inspection, and treatment.
-
-## Usage
-
-```python
-validator = DiagnosisValidator(visit)
-result = await validator.validate_diagnosis(diagnosis)
-# DiagnosisAuditResult(anamnesis_issues, inspection_issues, treatment_issues, ...)
+```text
+START ─┬─ generate_questions ── retrieve ─┬─ judge_anamnesis ─┐
+       │                                  ├─ judge_inspection ┤
+       ├─ extract_drugs ─ lookup_drugs ───┴─ judge_treatment ┤
+       └─ retrieve_criteria ──────────────── judge_criteria ──┤
+                                                              ▼
+                                                       collect_sources ─ END
 ```
 
-## Constructor
+Циклов и ReAct-инструментов в диагноз-контуре нет. Каждый судья получает уже
+подготовленный нумерованный пул чанков и возвращает только текст замечания и
+`chunk_refs`. Источники (`chunk_id`, `chunk_index`, раздел и цитата) разрешаются
+кодом, а не моделью.
 
-```python
-DiagnosisValidator(visit: dict)
-```
+Ошибки генерации вопросов приводят к статическим вопросам. Ошибка отдельного
+поискового запроса пропускает только этот запрос. Невалидный JSON или отказ
+одного судьи дают пустой результат аспекта и запись в `errors`; остальные ветви
+продолжают работу. Инфраструктурные ошибки до запуска графа не маскируются.
 
-Stores the raw visit dict and instantiates a `ClinicRecs` for guideline lookup.
+Четыре аспекта результата: `anamnesis`, `inspection`, `treatment`, `criteria`.
+Каждое замечание имеет поле `aspect`. В `diag_result[]`:
 
-## `validate_diagnosis(diagnosis) -> DiagnosisAuditResult`
+- `issues[].sources` — чанки, подтверждающие конкретное замечание;
+- `guideline_sources` — все разделы и чанки, показанные судьям;
+- `errors` — признаки частичной деградации аудита.
 
-1. Calls `ClinicRecs.pick_recs(patient, diagnosis)` to get the guideline `file_id`.
-2. If no `file_id` found → logs a warning, returns an empty `DiagnosisAuditResult`.
-3. Builds the user message from:
-   - `Пациент` fields (key-value lines)
-   - Diagnosis formatted as `КодМКБ / НаименованиеМКБ / Детализация / ВыявленВпервые`
-   - `ДанныеОсмотра` parsed as `Параметр: Значение` lines
-4. Launches three checker agents **in parallel** via `asyncio.gather`:
-   - `anamnesis` — tools: `SearchAnamnesisTool`, `SearchGuidelineTool`
-   - `inspection` — tools: `SearchInspectionTool`, `SearchGuidelineTool`
-   - `treatment` — tools: `SearchTreatmentTool`, `SearchGuidelineTool`
-5. Returns `DiagnosisAuditResult` with issues grouped by checker.
-
-## `_run_checker(system_prompt, tools, human_message, checker_label) -> _CheckerRun`
-
-Creates a `create_checker_agent(system_prompt, tools)`, invokes it with:
-
-```python
-await agent.ainvoke({"messages": [("user", human_message)]})
-```
-
-Extracts the last message content, logs unexpected `finish_reason`, parses the JSON output via `_parse_issues`.
-
-## `_parse_issues(output) -> list[DiagnisisIssue]`
-
-Strips optional markdown code fences, parses JSON array. Each element must have:
-- `issue` (str) — the finding text
-- `sources` (list) — each with `doc_title`, optional `section`, optional `cite`
-
-Returns an empty list on any parse error.
-
-## DiagnosisAuditResult
-
-```python
-@dataclass
-class DiagnosisAuditResult:
-    anamnesis_issues:  list[DiagnisisIssue]
-    inspection_issues: list[DiagnisisIssue]
-    treatment_issues:  list[DiagnisisIssue]
-    guideline_file_id: str | None
-    icd_code:          str
-```
-
-`all_issues` property returns the flat concatenation of all three lists.
+Основные настройки с дефолтами перечислены в `.env.example` под префиксом
+`DIAG_`.
