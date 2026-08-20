@@ -127,7 +127,7 @@ class FormalValidator:
         """Determine all visit types present in a visit by checking each service.
 
         Each service entry is classified independently:
-        1. Z11.1 ICD code → always adds PROPHYLACTIC_TUBERCULIN.
+        1. Z11.1 among visit["Диагнозы"][].КодМКБ → always adds PROPHYLACTIC_TUBERCULIN.
         2. Per-service NMU code scan:
            - A*                                  → LAB_RESEARCH_INTERVENTION
            - B04.*                               → PROPHYLACTIC
@@ -141,8 +141,12 @@ class FormalValidator:
         result: set[VisitType] = set()
 
         # ── Z11.1 always adds PROPHYLACTIC_TUBERCULIN ─────────────────────────
-        diag_code: str = (visit.get("Диагноз") or {}).get("Код", "") or ""
-        if diag_code.strip().upper() == "Z11.1":
+        diagnoses: list = visit.get("Диагнозы") or []
+        if any(
+            str(d.get("КодМКБ") or "").strip().upper() == "Z11.1"
+            for d in diagnoses
+            if isinstance(d, dict)
+        ):
             result.add(VisitType.PROPHYLACTIC_TUBERCULIN)
 
         services: list = visit.get("Услуги") or []
