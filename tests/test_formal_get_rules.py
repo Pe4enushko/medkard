@@ -102,3 +102,18 @@ def test_rule_without_icd_prefixes_ignores_codes(monkeypatch):
 
     assert _flags(FormalValidator().get_rules({VisitType.PRIMARY}, 40, None)) == ["ОБЫЧНОЕ"]
     assert _flags(FormalValidator().get_rules({VisitType.PRIMARY}, 40, ["J06.9"])) == ["ОБЫЧНОЕ"]
+
+
+def test_adult_prophylactic_rules_do_not_leak_to_children():
+    """404н-правила — только взрослым, 211н-исключения — только детям."""
+    v = FormalValidator()
+
+    adult = _flags(v.get_rules({VisitType.PROPHYLACTIC}, 45, ["Z00.0"]))
+    child = _flags(v.get_rules({VisitType.PROPHYLACTIC}, 10, ["Z00.1"]))
+
+    assert "ПРОФ_ВЗРОСЛЫЙ_НЕПОЛНЫЙ_ОБЪЁМ" in adult
+    assert "ПРОФ_ВЗРОСЛЫЙ_НЕТ_ГРУППЫ_ЗДОРОВЬЯ" in adult
+    assert "ПРОФ_ВЗРОСЛЫЙ_НЕПОЛНЫЙ_ОБЪЁМ" not in child
+
+    assert "ДОПУСТИМО_БЕЗ_ЖАЛОБ_ПРОФИЛАКТИКА" in child
+    assert "ДОПУСТИМО_БЕЗ_ЖАЛОБ_ПРОФИЛАКТИКА" not in adult
