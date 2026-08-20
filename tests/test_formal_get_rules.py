@@ -117,3 +117,53 @@ def test_adult_prophylactic_rules_do_not_leak_to_children():
 
     assert "ДОПУСТИМО_БЕЗ_ЖАЛОБ_ПРОФИЛАКТИКА" in child
     assert "ДОПУСТИМО_БЕЗ_ЖАЛОБ_ПРОФИЛАКТИКА" not in adult
+
+
+def test_dispensary_adult_requires_matching_icd():
+    """Взрослое ДН-правило включается только на кодах из перечня 168н."""
+    v = FormalValidator()
+
+    assert "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО" in _flags(
+        v.get_rules({VisitType.PRIMARY}, 55, ["I11.9"])
+    )
+    assert "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО" not in _flags(
+        v.get_rules({VisitType.PRIMARY}, 55, ["J06.9"])
+    )
+    assert "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО" not in _flags(
+        v.get_rules({VisitType.PRIMARY}, 55, [])
+    )
+
+
+def test_dispensary_child_rule_needs_no_icd():
+    """Детское ДН-правило — без перечня кодов, но только детям."""
+    v = FormalValidator()
+
+    child = v.get_rules({VisitType.PRIMARY}, 10, ["J06.9"])
+    assert "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО" in _flags(child)
+    assert [r["rule_id"] for r in child if r["flag_code"] == "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО"] == [
+        "dispensary_followup_child"
+    ]
+
+    adult = v.get_rules({VisitType.PRIMARY}, 55, ["I11.9"])
+    assert [r["rule_id"] for r in adult if r["flag_code"] == "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО"] == [
+        "dispensary_followup_adult"
+    ]
+
+
+def test_format_rules_renders_new_rules():
+    """_format_rules не падает на правилах с condition и без него."""
+    v = FormalValidator()
+    rules = v.get_rules({VisitType.PRIMARY}, 55, ["I11.9"])
+    text = v._format_rules(rules)
+
+    assert "(ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО)" in text
+    assert len(text.splitlines()) == len(rules)
+
+
+def test_flag_source_lookup_covers_new_flags():
+    """_FLAG_SOURCE строится по всем правилам, включая новые."""
+    import audit.formal_structure.validator as v
+
+    assert v._FLAG_SOURCE["ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО"] in {"168n", "192n"}
+    assert v._FLAG_SOURCE["ПРОФ_ВЗРОСЛЫЙ_НЕПОЛНЫЙ_ОБЪЁМ"] == "404n"
+    assert v._FLAG_SOURCE["НАЗНАЧЕНИЕ_ПО_ТОРГОВОМУ_БЕЗ_МНН"] == "1094n"
