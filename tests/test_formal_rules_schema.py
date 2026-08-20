@@ -86,3 +86,13 @@ def test_no_rule_references_retired_203n():
     """203н-2017 утратил силу; ярлык source больше не используется (спека §4.6)."""
     offenders = [r["rule_id"] for r in _doc()["rules"] if r.get("source") == "203n"]
     assert not offenders, f"правила всё ещё на ярлыке 203n: {offenders}"
+
+
+def test_sources_doc_covers_every_source_label():
+    """У каждого ярлыка source из rules.json есть строка в реестре НПА."""
+    doc = _doc()
+    registry = (ROOT / doc["sources_doc"]).read_text(encoding="utf-8")
+
+    labels = {r.get("source", "") for r in doc["rules"]} - {""}
+    missing = sorted(lbl for lbl in labels if f"`{lbl}`" not in registry)
+    assert not missing, f"ярлыки без строки в {doc['sources_doc']}: {missing}"
