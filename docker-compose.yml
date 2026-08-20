@@ -3,5 +3,5 @@ services:
     build: .
     env_file: .env
     ports:
-      - "${WG_BIND_IP}:${API_PORT}:8000"
+      - "${WG_BIND_IP}:${API_PORT:-13742}:8000"
     restart: unless-stopped
