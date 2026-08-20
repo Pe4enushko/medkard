@@ -431,10 +431,21 @@ def pg_dsn_from_env() -> str:
             f"{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'medkard')}")
 
 
-# Ранжирование целиком средствами Postgres. row_number, а не rank: при массовых
-# ничьих (ts_rank = 0 у всех непопавших) rank отдал бы всей группе лучшую
-# позицию и завысил метрику. row_number с добивкой по id даёт ту произвольную,
-# но реалистичную позицию, которую вернул бы обычный запрос с LIMIT.
+# Ранжирование целиком средствами Postgres.
+#
+# Ранги ВЕТОК — dense_rank, как в проде (084_clinical_guideline_name_embedding
+# .sql:76-77). Это не косметика: с row_number мёртвая ветка (ts_rank = 0 у всех,
+# запрос-название) всё равно обязана выдать кому-то ранги 1, 2, 3… и раздаёт их
+# по id. В RRF такой ранг весит 1/61 — ровно столько же, сколько точное
+# попадание в живой ветке, и записи с малым id систематически всплывают поверх
+# настоящего ответа. Подпись дефекта: recall@1 = 0.06 при recall@10 = 0.95.
+# dense_rank схлопывает всю массу нулей в один ранг, он достаётся и эталону
+# тоже, становится общим слагаемым и сокращается.
+#
+# ИТОГОВАЯ позиция (r_trgm..r_prod_vec наружу) — наоборот, row_number с добивкой
+# по id: при массовых ничьих rank отдал бы всей группе лучшую позицию и завысил
+# метрику, а row_number даёт ту произвольную, но реалистичную позицию, которую
+# вернул бы обычный запрос с LIMIT.
 _RANK_SQL = """
 WITH scored AS (
   SELECT id,
@@ -444,20 +455,23 @@ WITH scored AS (
          1 - (emb <=> %(qv)s::vector)                              AS s_vec
   FROM eval_docs
 ), ranked AS (
-  SELECT id,
-    row_number() OVER (ORDER BY s_trgm  DESC, id) AS r_trgm,
-    row_number() OVER (ORDER BY s_names DESC, id) AS r_names,
-    row_number() OVER (ORDER BY s_tsv   DESC, id) AS r_tsv,
-    row_number() OVER (ORDER BY s_vec   DESC, id) AS r_vec
+  SELECT id, s_trgm, s_tsv, s_vec,
+    dense_rank() OVER (ORDER BY s_trgm  DESC) AS d_trgm,
+    dense_rank() OVER (ORDER BY s_names DESC) AS d_names,
+    dense_rank() OVER (ORDER BY s_tsv   DESC) AS d_tsv,
+    dense_rank() OVER (ORDER BY s_vec   DESC) AS d_vec
   FROM scored
 ), fused AS (
-  SELECT id, r_trgm, r_tsv, r_vec,
-    row_number() OVER (ORDER BY (1.0/(%(k)s + r_names) + 1.0/(%(k)s + r_tsv))
+  SELECT id,
+    row_number() OVER (ORDER BY s_trgm DESC, id) AS r_trgm,
+    row_number() OVER (ORDER BY s_tsv  DESC, id) AS r_tsv,
+    row_number() OVER (ORDER BY s_vec  DESC, id) AS r_vec,
+    row_number() OVER (ORDER BY (1.0/(%(k)s + d_names) + 1.0/(%(k)s + d_tsv))
                        DESC, id)                                   AS r_prod,
-    row_number() OVER (ORDER BY (r_vec + %(w)s * r_trgm) ASC, id)  AS r_hybrid,
-    row_number() OVER (ORDER BY (r_vec + r_trgm) ASC, id)          AS r_even,
-    row_number() OVER (ORDER BY (1.0/(%(k)s + r_names) + 1.0/(%(k)s + r_tsv)
-                                 + 1.0/(%(k)s + r_vec)) DESC, id)  AS r_prod_vec
+    row_number() OVER (ORDER BY (d_vec + %(w)s * d_trgm) ASC, id)  AS r_hybrid,
+    row_number() OVER (ORDER BY (d_vec + d_trgm) ASC, id)          AS r_even,
+    row_number() OVER (ORDER BY (1.0/(%(k)s + d_names) + 1.0/(%(k)s + d_tsv)
+                                 + 1.0/(%(k)s + d_vec)) DESC, id)  AS r_prod_vec
   FROM ranked
 )
 SELECT min(r_trgm), min(r_tsv), min(r_prod), min(r_vec),
