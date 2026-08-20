@@ -110,7 +110,7 @@ def _mock_card(version: int) -> dict:
 
 
 async def run(client: httpx.AsyncClient, org_id: str, raw_key: str, card_fixtures: CardFixtures) -> None:
-    guid = CARD_GUID.lower()  # POST /visits/push stores the guid lowercased
+    guid = CARD_GUID.lower()  # defensive: CARD_GUID is already lowercase by construction (uuid4() output), not because the server lowercases it
 
     print("\n1. First push (new card) — INSERT, not an overwrite, logs nothing")
     resp = await push_card(client, BASE, ORG_NAME, raw_key, _mock_card(1))
@@ -201,6 +201,7 @@ async def run(client: httpx.AsyncClient, org_id: str, raw_key: str, card_fixture
 
 async def main() -> int:
     org_id: str | None = None
+    key_id: str | None = None
 
     print(f"Smoke test push_log/push_metrics_by_date against {BASE}")
     print(f"  org={ORG_NAME}  card_guid={CARD_GUID}")
@@ -225,6 +226,10 @@ async def main() -> int:
                 async with ApiKeyFixtures() as key_fixtures:
                     dropped = await key_fixtures.delete_key(KEY_LABEL)
                     print(f"  deleted {dropped} api key row(s) (scopes cascaded)")
+                    if key_id is not None:
+                        left = await key_fixtures.count_key_scopes(key_id)
+                        if left:
+                            print(f"  \033[31mWARNING: {left} scope row(s) still present\033[0m")
                 if org_id is not None:
                     await org_fixtures.delete_org(org_id)
                     print("  deleted organization")
