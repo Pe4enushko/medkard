@@ -9,7 +9,7 @@ AUDIT_TESTS_DIR="$ROOT/e2e/tests/audit"
 E2E_PYTHON_BIN="${E2E_PYTHON_BIN:-python}"
 
 mapfile -t TESTS < <(
-    rg --files "$AUDIT_TESTS_DIR" \
+    find "$AUDIT_TESTS_DIR" -type f \
         | grep '/test_diagnosis_graph_.*\.py$' \
         | sort
 )
