@@ -204,17 +204,28 @@ class FormalValidator:
 
         return result
 
-    def get_rules(self, visit_types: set[VisitType], patient_age: int | None) -> list[dict]:
-        """Return rules applicable to the given visit types and patient age.
+    def get_rules(
+        self,
+        visit_types: set[VisitType],
+        patient_age: int | None,
+        icd_codes: list[str] | None = None,
+    ) -> list[dict]:
+        """Return rules applicable to the given visit types, age and ICD codes.
 
         Age group matching: a rule passes if its ``age_group`` is ``"all"``,
         or matches the derived group (``"child"`` if age < 18, ``"adult"`` otherwise).
         ``patient_age=None`` skips age filtering (matches any age_group).
+
+        ICD matching: a rule carrying ``applies_to.icd_prefixes`` passes only if
+        one of ``icd_codes`` starts with one of those prefixes.  Without codes
+        such a rule never applies.
         """
         type_keys = {_VISIT_TYPE_RULE_KEY[vt] for vt in visit_types}
         age_group: str | None = None
         if patient_age is not None:
             age_group = "child" if patient_age < 18 else "adult"
+
+        codes = [c.strip().upper() for c in (icd_codes or []) if c and c.strip()]
 
         seen: set[str] = set()
         rules: list[dict] = []
@@ -227,6 +238,9 @@ class FormalValidator:
                 rule_age = applies.get("age_group", "all")
                 if rule_age != "all" and rule_age != age_group:
                     continue
+            prefixes = applies.get("icd_prefixes") or []
+            if prefixes and not any(c.startswith(p) for c in codes for p in prefixes):
+                continue
             fc = rule.get("flag_code", "")
             if fc not in seen:
                 seen.add(fc)
@@ -324,7 +338,12 @@ class FormalValidator:
 
         _raw_age = (visit.get("Пациент") or {}).get("AGE")
         patient_age: int | None = int(_raw_age) if isinstance(_raw_age, str) and _raw_age.strip().isdigit() else (_raw_age if isinstance(_raw_age, int) else None)
-        rules = self.get_rules(visit_types, patient_age)
+        icd_codes: list[str] = [
+            str(d.get("КодМКБ") or "")
+            for d in (visit.get("Диагнозы") or [])
+            if isinstance(d, dict)
+        ]
+        rules = self.get_rules(visit_types, patient_age, icd_codes)
         logger.debug("[formal] applicable rules (%d): %s", len(rules), [r.get("flag_code") for r in rules])
 
         system_prompt = self._render_prompt(rules)
