@@ -27,7 +27,8 @@ from LLM.visit_classifier import VisitClassifier
 
 _chinese_detector = ChineseDetector()
 
-NMU_RE = re.compile(r"^[ABАВ]\d{2}\.\d{3}\.\d{3}(?:\.\d{3})?$", re.I)
+# Средний сегмент: 2 цифры у A-кодов (A04.16.001), 3 у B-кодов (B01.070.001).
+NMU_RE = re.compile(r"^[ABАВ]\d{2}\.\d{2,3}\.\d{3}(?:\.\d{3})?$", re.I)
 
 logger = logging.getLogger(__name__)
 
