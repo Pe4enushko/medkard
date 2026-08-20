@@ -93,9 +93,110 @@ def check(label: str, condition: bool, detail: str = "") -> None:
         _failures.append(label)
 
 
+def _mock_card(version: int) -> dict:
+    """Minimal card shaped like 1C's payload — push only requires Прием.GUID."""
+    from datetime import datetime, timezone
+
+    return {
+        "Прием": {
+            "GUID": CARD_GUID,
+            "DATE": datetime.now(timezone.utc).strftime("%d.%m.%Y"),
+            "TYPE": "Первичный",
+        },
+        "Пациент": {"Возраст": "42"},
+        "e2e_tag": TAG,
+        "e2e_version": version,
+    }
+
+
 async def run(client: httpx.AsyncClient, org_id: str, raw_key: str, card_fixtures: CardFixtures) -> None:
-    """Filled in by the next task — the actual push_log test scenario."""
-    print("\n(scenario not yet implemented)")
+    guid = CARD_GUID.lower()  # POST /visits/push stores the guid lowercased
+
+    print("\n1. First push (new card) — INSERT, not an overwrite, logs nothing")
+    resp = await push_card(client, BASE, ORG_NAME, raw_key, _mock_card(1))
+    check("first push accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
+
+    row = await card_fixtures.card_row(guid)
+    check("card landed in done_cards", row is not None)
+    if row is not None:
+        check("status is 'pending' after first push", row["status"] == "pending", str(row["status"]))
+
+    log_after_insert = await card_fixtures.push_log_rows(guid)
+    check(
+        "no push_log row from the initial INSERT",
+        len(log_after_insert) == 0,
+        f"found {len(log_after_insert)} row(s), expected 0 — the trigger is BEFORE UPDATE, not BEFORE INSERT",
+    )
+
+    print("\n2. Re-push the same (still-pending) card — logs overrode_audit=false")
+    resp = await push_card(client, BASE, ORG_NAME, raw_key, _mock_card(2))
+    check("second push accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
+
+    log_after_repush = await card_fixtures.push_log_rows(guid)
+    check(
+        "exactly one push_log row after the pending re-push",
+        len(log_after_repush) == 1,
+        f"found {len(log_after_repush)} row(s)",
+    )
+    if log_after_repush:
+        check(
+            "that row has overrode_audit=false",
+            log_after_repush[0]["overrode_audit"] is False,
+            f"overrode_audit={log_after_repush[0]['overrode_audit']}",
+        )
+
+    print("\n3. Stage a fake completed audit, then push over it — logs overrode_audit=true")
+    await card_fixtures.stage_audited(guid)
+    staged = await card_fixtures.card_row(guid)
+    check(
+        "card is staged as done with a formal_result",
+        staged is not None and staged["status"] == "done" and staged["formal_result"] is not None,
+        f"row={staged}",
+    )
+
+    resp = await push_card(client, BASE, ORG_NAME, raw_key, _mock_card(3))
+    check("third push accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
+
+    row_after_override = await card_fixtures.card_row(guid)
+    if row_after_override is not None:
+        check(
+            "audit columns wiped again after the override push",
+            row_after_override["status"] == "pending" and row_after_override["formal_result"] is None,
+            f"status={row_after_override['status']} formal_result={row_after_override['formal_result']}",
+        )
+
+    log_after_override = await card_fixtures.push_log_rows(guid)
+    check(
+        "exactly two push_log rows total",
+        len(log_after_override) == 2,
+        f"found {len(log_after_override)} row(s)",
+    )
+    if len(log_after_override) == 2:
+        check(
+            "second row has overrode_audit=true",
+            log_after_override[1]["overrode_audit"] is True,
+            f"overrode_audit={log_after_override[1]['overrode_audit']}",
+        )
+
+    print("\n4. push_metrics_by_date reflects exactly these two pushes for today")
+    metrics = await card_fixtures.push_metrics_for_org_today(ORG_NAME)
+
+    check("push_metrics_by_date has a row for this org/today", metrics is not None, str(metrics))
+    if metrics is not None:
+        check("pushes_total == 2", metrics["pushes_total"] == 2, f"got {metrics['pushes_total']}")
+        check(
+            "pushes_overrode_audit == 1", metrics["pushes_overrode_audit"] == 1,
+            f"got {metrics['pushes_overrode_audit']}",
+        )
+        check(
+            "pushes_no_override == 1", metrics["pushes_no_override"] == 1,
+            f"got {metrics['pushes_no_override']}",
+        )
+        check(
+            "total == overrode + no_override",
+            metrics["pushes_total"] == metrics["pushes_overrode_audit"] + metrics["pushes_no_override"],
+            str(metrics),
+        )
 
 
 async def main() -> int:
