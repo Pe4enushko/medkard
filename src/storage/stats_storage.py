@@ -1,8 +1,8 @@
 """
 StatsStorage — async psycopg3 interface for per-organization storage figures.
 
-Spans done_cards and audit_overwrite_journal, so it lives here rather than in
-DoneCardsStorage (which is scoped to a single table).
+Spans done_cards and push_log, so it lives here rather than in DoneCardsStorage
+(which is scoped to a single table).
 
 Sizes are measured with pg_column_size() summed over the organization's rows,
 not pg_total_relation_size(): the question is how much space one org's data
@@ -36,7 +36,7 @@ class StatsStorage(BaseStorage):
     async def storage_kb(self, *, organization_id: str) -> dict[str, float]:
         """Return kilobytes stored for an organization, per table plus total.
 
-        Keys: done_cards_kb, audit_overwrite_journal_kb, total_kb.
+        Keys: done_cards_kb, push_log_kb, total_kb.
         An organization with no rows yields zeros, never None.
         """
         async with self._pool.connection() as conn:
@@ -49,24 +49,24 @@ class StatsStorage(BaseStorage):
                         WHERE organization_id = %(org_id)s
                     ), 0) / 1024.0 AS done_cards_kb,
                     COALESCE((
-                        SELECT sum(pg_column_size(audit_overwrite_journal.*))
-                        FROM audit_overwrite_journal
+                        SELECT sum(pg_column_size(push_log.*))
+                        FROM push_log
                         WHERE organization_id = %(org_id)s
-                    ), 0) / 1024.0 AS audit_overwrite_journal_kb
+                    ), 0) / 1024.0 AS push_log_kb
                 """,
                 {"org_id": organization_id},
             )
             row = await cur.fetchone()
 
         done_cards_kb = round(float(row["done_cards_kb"]), 2)
-        journal_kb = round(float(row["audit_overwrite_journal_kb"]), 2)
+        push_log_kb = round(float(row["push_log_kb"]), 2)
         result = {
             "done_cards_kb": done_cards_kb,
-            "audit_overwrite_journal_kb": journal_kb,
+            "push_log_kb": push_log_kb,
             # Rounded from the unrounded parts so the total never drifts from
             # their sum by more than a cent of a kilobyte.
             "total_kb": round(
-                float(row["done_cards_kb"]) + float(row["audit_overwrite_journal_kb"]), 2
+                float(row["done_cards_kb"]) + float(row["push_log_kb"]), 2
             ),
         }
         logger.info("💾 storage stats org_id=%s %s", organization_id, result)
