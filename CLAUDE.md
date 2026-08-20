@@ -42,6 +42,9 @@ python scripts/audit-one-c-period.py Alenka [--days N] [--date DD.MM.YYYY] [--ig
 # Audit a single local JSON file
 python scripts/audit-file.py <path-to-visit-json>
 
+# Re-audit cards frozen with broken = TRUE (offline: reads card_data from DB)
+python scripts/fix-broken.py ORG|--all [-y] [--dry-run] [--num-batches N]
+
 # Replay today's cached 1C data (for development)
 python scripts/mock-run-today.py
 ```
