@@ -37,7 +37,6 @@ CRITERIA_SECTION_PATTERN = os.environ.get(
     "DIAG_CRITERIA_SECTION_PATTERN",
     "%критерии оценки качества%",
 )
-CRITERIA_MAX_CHUNKS = int(os.environ.get("DIAG_CRITERIA_MAX_CHUNKS", "8"))
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
@@ -356,7 +355,6 @@ async def retrieve_criteria(
         rows = await get_chunks(
             state["file_id"],
             CRITERIA_SECTION_PATTERN,
-            CRITERIA_MAX_CHUNKS,
         )
     except Exception as exc:  # noqa: BLE001 - criteria is an optional graph branch
         return {
@@ -372,7 +370,7 @@ async def retrieve_criteria(
         [("", rows)],
         file_id=state["file_id"],
         doc_title=state["doc_title"],
-        limit=CRITERIA_MAX_CHUNKS,
+        limit=None,
     )
     for chunk in pool:
         chunk["questions"] = []
@@ -380,14 +378,89 @@ async def retrieve_criteria(
 
 
 def _render_pool(pool: list[Chunk]) -> str:
-    parts: list[str] = []
+    allowed_refs = ", ".join(str(chunk["ref"]) for chunk in pool)
+    parts = [
+        (
+            f"Допустимые значения chunk_refs: {allowed_refs}. "
+            "Используй только номер после chunk_ref=; "
+            "номера разделов в него не входят."
+        )
+    ]
     for chunk in pool:
-        chunk_index = chunk["chunk_index"] if chunk["chunk_index"] is not None else "—"
-        location = f"{chunk['section'] or 'раздел не указан'} | фрагмент {chunk_index}"
-        if chunk["page"] is not None:
-            location += f" | стр. {chunk['page']}"
-        parts.append(f"[{chunk['ref']}] {location}\n{chunk['text']}")
+        parts.append(
+            f"### Источник chunk_ref={chunk['ref']}\n"
+            f"Раздел: {chunk['section'] or 'не указан'}\n{chunk['text']}"
+        )
     return "\n\n".join(parts)
+
+
+def _markdown_cell(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        rendered = json.dumps(value, ensure_ascii=False)
+    else:
+        rendered = str(value)
+    return rendered.replace("|", "\\|").replace("\r\n", "<br>").replace("\n", "<br>")
+
+
+def _render_criteria_pool(pool: list[Chunk]) -> str:
+    """Reconstruct all ingested row batches as one criteria table."""
+    columns: list[str] = []
+    table_rows: list[tuple[int, dict[str, object]]] = []
+    unparsed: list[Chunk] = []
+
+    for chunk in pool:
+        try:
+            raw_rows = json.loads(chunk["text"])
+        except (json.JSONDecodeError, TypeError):
+            unparsed.append(chunk)
+            continue
+        if not isinstance(raw_rows, list) or not raw_rows:
+            unparsed.append(chunk)
+            continue
+
+        parsed_any = False
+        for raw_row in raw_rows:
+            if not isinstance(raw_row, dict):
+                continue
+            row = {str(key): value for key, value in raw_row.items()}
+            for column in row:
+                if column not in columns:
+                    columns.append(column)
+            table_rows.append((chunk["ref"], row))
+            parsed_any = True
+        if not parsed_any:
+            unparsed.append(chunk)
+
+    allowed_refs = ", ".join(str(chunk["ref"]) for chunk in pool)
+    parts = [
+        (
+            f"Допустимые значения chunk_refs: {allowed_refs}. "
+            "Первый столбец — техническая ссылка на источник. "
+            "Номер критерия из таблицы не является chunk_ref."
+        )
+    ]
+    if table_rows:
+        headers = ["chunk_ref (источник)", *columns]
+        parts.extend(
+            [
+                "| " + " | ".join(_markdown_cell(header) for header in headers) + " |",
+                "| " + " | ".join("---" for _header in headers) + " |",
+            ]
+        )
+        for ref, row in table_rows:
+            values = [ref, *(row.get(column, "") for column in columns)]
+            parts.append(
+                "| " + " | ".join(_markdown_cell(value) for value in values) + " |"
+            )
+
+    for chunk in unparsed:
+        parts.append(
+            f"### Нераспознанная часть таблицы chunk_ref={chunk['ref']}\n"
+            f"Раздел: {chunk['section'] or 'не указан'}\n{chunk['text']}"
+        )
+    return "\n".join(parts)
 
 
 async def judge_aspect(
@@ -422,8 +495,11 @@ async def judge_aspect(
         if aspect == "criteria"
         else "Фрагменты клинических рекомендаций"
     )
+    rendered_pool = (
+        _render_criteria_pool(pool) if aspect == "criteria" else _render_pool(pool)
+    )
     context_parts.append(
-        f"## {heading} «{state.get('doc_title', '')}»\n{_render_pool(pool)}"
+        f"## {heading} «{state.get('doc_title', '')}»\n{rendered_pool}"
     )
 
     tokens = 0
@@ -561,7 +637,7 @@ def build_aspect_pool(
     *,
     file_id: str,
     doc_title: str,
-    limit: int = ASPECT_POOL_MAX_CHUNKS,
+    limit: int | None = ASPECT_POOL_MAX_CHUNKS,
 ) -> list[Chunk]:
     """Deduplicate retrieval rows, cap by relevance, then number in document order."""
     by_id: dict[str, Chunk] = {}
@@ -589,10 +665,14 @@ def build_aspect_pool(
                 candidate["questions"] = current["questions"]
                 by_id[chunk_id] = candidate
 
-    selected = sorted(by_id.values(), key=_chunk_score, reverse=True)[:limit]
+    selected = sorted(by_id.values(), key=_chunk_score, reverse=True)
+    if limit is not None:
+        selected = selected[:limit]
     selected.sort(
         key=lambda chunk: (
             chunk.get("section") or "",
+            chunk.get("page") if chunk.get("page") is not None else -1,
+            chunk.get("table_index") if chunk.get("table_index") is not None else -1,
             chunk.get("chunk_index") if chunk.get("chunk_index") is not None else 2**31,
             chunk["id"],
         )

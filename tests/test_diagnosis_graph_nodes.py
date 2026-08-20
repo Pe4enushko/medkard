@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import sys
 import types
 
 import LLM.graphs.diagnosis_nodes as nodes
 from LLM.graphs.diagnosis_nodes import (
     _default_medicine_lookup,
+    _render_criteria_pool,
+    _render_pool,
     build_aspect_pool,
     collect_guideline_sources,
     extract_drugs,
@@ -70,6 +73,64 @@ def test_build_aspect_pool_deduplicates_caps_and_numbers_in_document_order() -> 
     assert [chunk["ref"] for chunk in pool] == [1, 2]
     assert pool[1]["questions"] == ["q1", "q2"]
     assert pool[1]["rrf_score"] == 0.3
+
+
+def test_render_pool_does_not_expose_chunk_index_as_a_competing_ref() -> None:
+    pool = build_aspect_pool(
+        [("q", [_row("a", section="2.1 Осмотр", index=25, rrf=0.4)])],
+        file_id="file-1",
+        doc_title="КР",
+    )
+
+    rendered = _render_pool(pool)
+
+    assert "Допустимые значения chunk_refs: 1" in rendered
+    assert "chunk_ref=1" in rendered
+    assert "фрагмент 25" not in rendered
+
+
+def test_render_criteria_pool_reconstructs_batches_as_one_table() -> None:
+    pool = build_aspect_pool(
+        [
+            (
+                "",
+                [
+                    _row(
+                        "a",
+                        section="Критерии оценки качества",
+                        index=0,
+                        rrf=0.0,
+                        text=json.dumps(
+                            [{"№": "1", "Критерий": "Собран анамнез"}],
+                            ensure_ascii=False,
+                        ),
+                        content_type="table",
+                    ),
+                    _row(
+                        "b",
+                        section="Критерии оценки качества",
+                        index=1,
+                        rrf=0.0,
+                        text=json.dumps(
+                            [{"№": "2", "Критерий": "Проведён осмотр"}],
+                            ensure_ascii=False,
+                        ),
+                        content_type="table",
+                    ),
+                ],
+            )
+        ],
+        file_id="file-1",
+        doc_title="КР",
+        limit=None,
+    )
+
+    rendered = _render_criteria_pool(pool)
+
+    assert rendered.count("| chunk_ref (источник) | № | Критерий |") == 1
+    assert "| 1 | 1 | Собран анамнез |" in rendered
+    assert "| 2 | 2 | Проведён осмотр |" in rendered
+    assert "Номер критерия из таблицы не является chunk_ref" in rendered
 
 
 def test_resolve_judge_output_discards_unknown_and_duplicate_refs(caplog) -> None:
@@ -319,7 +380,7 @@ async def test_retrieve_skips_one_failed_question_and_builds_all_pools(
 
 
 async def test_retrieve_criteria_marks_missing_section_as_degradation() -> None:
-    async def get_chunks(file_id, pattern, limit):
+    async def get_chunks(file_id, pattern):
         return []
 
     update = await retrieve_criteria(
@@ -331,6 +392,72 @@ async def test_retrieve_criteria_marks_missing_section_as_degradation() -> None:
         "pools": {"criteria": []},
         "errors": ["retrieve_criteria: section not found"],
     }
+
+
+async def test_retrieve_criteria_keeps_the_complete_section() -> None:
+    rows = [
+        _row(
+            f"criteria-{index}",
+            section="Критерии оценки качества",
+            index=index,
+            rrf=0.0,
+            text=f"row {index}",
+            content_type="table",
+        )
+        for index in range(12)
+    ]
+
+    async def get_chunks(file_id, pattern):
+        assert (file_id, pattern) == ("file-1", "%критерии оценки качества%")
+        return rows
+
+    update = await retrieve_criteria(
+        {"file_id": "file-1", "doc_title": "КР"},
+        get_chunks=get_chunks,
+    )
+
+    assert len(update["pools"]["criteria"]) == 12
+    assert [chunk["ref"] for chunk in update["pools"]["criteria"]] == list(range(1, 13))
+
+
+async def test_judge_criteria_receives_the_reconstructed_table() -> None:
+    pool = build_aspect_pool(
+        [
+            (
+                "",
+                [
+                    _row(
+                        "criteria-1",
+                        section="Критерии оценки качества",
+                        index=7,
+                        rrf=0.0,
+                        text=json.dumps(
+                            [{"№": "20", "Критерий": "Проведён осмотр"}],
+                            ensure_ascii=False,
+                        ),
+                        content_type="table",
+                    )
+                ],
+            )
+        ],
+        file_id="file-1",
+        doc_title="КР",
+        limit=None,
+    )
+    client = _Client('{"issues":[]}')
+
+    update = await judge_aspect(
+        {"doc_title": "КР", "pools": {"criteria": pool}},
+        "criteria",
+        client=client,
+        detector=_Detector(),
+    )
+
+    user_context = client.calls[0][0][1]["content"]
+    assert update["issues"] == {"criteria": []}
+    assert "| chunk_ref (источник) | № | Критерий |" in user_context
+    assert "| 1 | 20 | Проведён осмотр |" in user_context
+    assert "фрагмент 7" not in user_context
 
 
 async def test_judge_aspect_degrades_on_invalid_json_without_losing_tokens() -> None:

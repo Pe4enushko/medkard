@@ -99,7 +99,7 @@ async def test_search_in_guideline_skips_reranker_for_empty_pool(monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_get_section_chunks_by_pattern_preserves_pattern_and_limit(
+async def test_get_section_chunks_by_pattern_reads_the_complete_table_in_order(
     monkeypatch,
 ) -> None:
     class Pool:
@@ -118,8 +118,11 @@ async def test_get_section_chunks_by_pattern_preserves_pattern_and_limit(
     pool = Pool()
     searches, _ = _load_searches(monkeypatch, rows=[], pool=pool)
 
-    result = await searches.get_section_chunks_by_pattern("file-1", "%критерии%", 8)
+    result = await searches.get_section_chunks_by_pattern("file-1", "%критерии%")
 
-    assert pool.params == ("file-1", "%критерии%", 8)
+    assert pool.params == ("file-1", "%критерии%")
     assert "ILIKE $2" in pool.query
+    assert "LIMIT" not in pool.query
+    assert "metadata->>'page'" in pool.query
+    assert "metadata->>'table_index'" in pool.query
     assert result[0]["file_id"] == "file-1"

@@ -154,9 +154,8 @@ async def get_section_chunks(file_id: str, section: str) -> list[dict]:
 async def get_section_chunks_by_pattern(
     file_id: str,
     pattern: str,
-    limit: int,
 ) -> list[dict]:
-    """Return chunks whose section matches an ILIKE pattern, in document order."""
+    """Return every chunk whose section matches a pattern, in document order."""
     from RAG.retrieval.vector_store import _get_pool
 
     pool = await _get_pool()
@@ -166,11 +165,13 @@ async def get_section_chunks_by_pattern(
         FROM docs
         WHERE file_id = $1
           AND metadata->>'section' ILIKE $2
-        ORDER BY (metadata->>'chunk_index')::INT ASC
-        LIMIT $3
+        ORDER BY
+          COALESCE((metadata->>'page')::INT, -1) ASC,
+          COALESCE((metadata->>'table_index')::INT, -1) ASC,
+          COALESCE((metadata->>'chunk_index')::INT, -1) ASC,
+          id ASC
         """,
         file_id,
         pattern,
-        limit,
     )
     return [dict(row) for row in rows]
