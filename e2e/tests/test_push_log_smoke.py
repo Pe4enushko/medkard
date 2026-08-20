@@ -21,11 +21,12 @@ is passed.
 
 Run from the repo root against a running API:
 
-    python e2e/tests/test_push_log_smoke.py local
+    python e2e/tests/test_push_log_smoke.py
     python e2e/tests/test_push_log_smoke.py https://medkard.example --keep
 
-  local        resolves to http://localhost:{API_PORT}, API_PORT read from
-               .env (default 8000 if unset — see .env.example)
+  url (optional) defaults to "local", which resolves to http://localhost:{API_PORT},
+               API_PORT read from .env (default 8000 if unset — see .env.example).
+               Pass "local"/"localhost" explicitly or any other URL to override.
   --keep       leave the org/key/card/push_log rows behind for manual
                inspection instead of tearing down; prints what was left
 """
@@ -55,8 +56,10 @@ from organizations import OrganizationFixtures  # noqa: E402
 _parser = argparse.ArgumentParser(description="Smoke-test push_log/push_metrics_by_date against a running API")
 _parser.add_argument(
     "url",
+    nargs="?",
+    default="local",
     help='Base URL of the API, e.g. http://localhost:8000, or "local"/"localhost" '
-    "for http://localhost:{API_PORT}",
+    "for http://localhost:{API_PORT} (default: local)",
 )
 _parser.add_argument("--keep", action="store_true", help="Skip teardown and print what was left behind")
 _args = _parser.parse_args()
