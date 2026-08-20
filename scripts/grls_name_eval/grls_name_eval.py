@@ -1,29 +1,38 @@
 #!/usr/bin/env python
-"""Эвал: полезен ли вектор поверх триграммного поиска по реестру лекарств.
+"""Эвал способов поиска по реестру лекарств — на настоящем Postgres.
 
-Вопрос, на который отвечает скрипт: обучена ли embedding-модель воспринимать
-русские торговые наименования («Амоксиклав», «Конкор») и фармако-терапевтические
-группы как что-то осмысленное, или на них работает только лексическое
-совпадение. От ответа зависит, нужны ли в drug_registry движка колонка
-embedding, HNSW на 39 тыс. строк и фаза эмбеддинга в синке (спека engine
+Вопрос: нужен ли вектор поверх лексики, и какая лексика лучше. От ответа зависит,
+есть ли в drug_registry движка колонка embedding, HNSW на 39 тыс. строк и фаза
+эмбеддинга в синке (спека engine
 docs/superpowers/specs/2026-08-20-grls-integration-design.md, §4.5 — другой
 репозиторий, ветка grls-integration).
 
-Сравниваются три способа поиска по одному корпусу и одним запросам:
-  trigram      — только лексика (pg_trgm-совместимая мера, см. _trigrams);
-  vector       — только косинус по эмбеддингу;
-  hybrid       — слияние рангов с весом, как в миграции 084: r_vec + 0.3*r_trgm;
-  hybrid_even  — то же слияние БЕЗ весов: r_vec + r_trgm. Вес 0.3 подобран под
-                 клинреки (084) и на лекарствах может не подойти — равные веса
-                 показывают, сколько даёт сама идея слияния, отдельно от
-                 удачности коэффициента.
+Считается НЕ приближением, а тем же движком, что будет в проде: скрипт создаёт
+ВРЕМЕННУЮ таблицу в БД из .env, кладёт туда корпус, строит текстовые индексы
+(GIN pg_trgm, GIN tsvector) и ранжирует запросы средствами Postgres —
+`similarity()`, `ts_rank()`, `websearch_to_tsquery('russian', …)`, `pgvector`.
+Временная таблица живёт внутри сессии и исчезает при выходе; в БД ничего не
+остаётся.
+
+СРАВНИВАЕМЫЕ МЕТОДЫ:
+  trigram      — pg_trgm по всему индексируемому тексту;
+  tsv          — to_tsvector('russian') по «остальному» (ФТГ, формы, отпуск,
+                 держатель), без названий;
+  trgm+tsv     — ПРОДАКШН-КАНДИДАТ: триграммы по названиям (торговое + МНН) плюс
+                 tsv по остальному, слияние через RRF. То, что планируется в Искре;
+  vector       — только косинус по эмбеддингу (pgvector);
+  hybrid       — vector + trigram с весом, как в миграции 084: r_vec + 0.3*r_trgm;
+  hybrid_even  — vector + trigram без весов: вес 0.3 подобран под клинреки и на
+                 лекарствах может не подойти;
+  trgm+tsv+vec — продакшн-кандидат плюс вектор: показывает, что вектор ДОБАВЛЯЕТ
+                 к тому, что и так будет.
 
 ЧТО ИНДЕКСИРУЕТСЯ (--index):
   blob (по умолчанию) — search_blob: торговое | МНН | ФТГ | лекформы | отпуск |
                         держатель. Так делает спека §4.5;
   name               — только торговое наименование (узкий эксперимент).
 Режим меняет выводы: с blob'ом МНН и ФТГ лежат ВНУТРИ индексируемого текста и
-находятся лексикой, поэтому у вектора остаётся меньше работы, чем в режиме name.
+находятся лексикой, поэтому у вектора остаётся меньше работы.
 
 КЛАССЫ ЗАПРОСОВ (см. build_queries):
   L0 exact       — точное название: проверка вменяемости, ожидается ~100%;
@@ -37,21 +46,20 @@ docs/superpowers/specs/2026-08-20-grls-integration-design.md, §4.5 — друг
   L8 ftg partial — фрагмент ФТГ («противоопухолевое», «средство растительного»).
 
 МНОЖЕСТВЕННЫЙ ОТВЕТ. У классов L6–L8 правильных ответов много: одну ФТГ делят
-десятки препаратов. Поэтому у каждого запроса не один gold, а множество, и
-ранг считается по ПЕРВОМУ релевантному. Для L0–L5 множество из одного элемента,
-так что метрика та же самая — recall@k читается одинаково во всех классах:
-«хотя бы один релевантный попал в топ-k». В отчёте печатается средний размер
-множества (|gold|): чем он больше, тем легче задача, и тем осторожнее надо
-сравнивать классы между собой.
+десятки препаратов. Поэтому эталон — множество, а ранг считается по ПЕРВОМУ
+релевантному. Для L0–L5 множество из одного элемента, метрика читается
+одинаково: «хотя бы один релевантный попал в топ-k». В отчёте печатается
+средний размер множества (|gold|): классы с разным |gold| между собой
+несравнимы, сравнивать надо МЕТОДЫ внутри класса.
 
-Запуск (нужен доступ к эндпоинту эмбеддингов):
+Запуск (нужны доступ к эндпоинту эмбеддингов и Postgres из .env):
 
     python grls_name_eval.py --from-zip ~/projects/grls2026-08-17-1.zip
     python grls_name_eval.py --from-db "postgresql://user@host/medkard"
 
-Эндпоинт, ключ и модель берутся из .env репозитория (EMBEDDING_BASE_URL или
-OPENAI_BASE_URL, OPENAI_API_KEY, EMBEDDING_MODEL) — как в medkard
-src/RAG/retrieval/embeddings.py; перебиваются флагами.
+Эндпоинт, ключ, модель и параметры Postgres берутся из .env репозитория
+(EMBEDDING_BASE_URL или OPENAI_BASE_URL, OPENAI_API_KEY, EMBEDDING_MODEL,
+POSTGRES_*) — как в medkard; перебиваются флагами.
 
 ВАЖНО: выгрузка открытых данных (data-*.csv / data-*.json) для эвала НЕ
 годится — в ней ноль торговых наименований и МНН (та же спека, §3.3). Имена —
@@ -104,8 +112,16 @@ DEFAULT_BASE_URL = (
 DEFAULT_API_KEY = os.getenv("OPENAI_API_KEY", "")
 DEFAULT_MODEL = os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B")
 
-# Слияние рангов — как в 084_clinical_guideline_name_embedding.sql
+METHODS = ("trigram", "tsv", "trgm+tsv", "vector", "hybrid", "hybrid_even", "trgm+tsv+vec")
+
+# Вес слияния — как в 084_clinical_guideline_name_embedding.sql
 W_TSV = 0.3
+# RRF: score = Σ 1/(K + rank). Так сливает ветки medkard (BM25 + вектор, см.
+# CLAUDE.md). Сумма рангов для этого не годится: если ветка по запросу пустая
+# (ts_rank = 0 у всех, запрос — название), её ранг произволен и подмешивает в
+# сумму чистый шум, утягивая вниз даже точные попадания другой ветки. У RRF
+# вклад плохого ранга затухает, и пустая ветка почти ничего не портит.
+RRF_K = 60
 EMBED_BATCH = 64
 TOP_K = 10
 SEED = 20260820
@@ -131,10 +147,8 @@ def grls_norm(text: str | None) -> str:
     return _SPACES.sub(" ", text).strip().lower()
 
 
-# ─────────────────────────── триграммы ───────────────────────────
-# pg_trgm: каждое слово дополняется двумя пробелами слева и одним справа,
-# similarity = |A ∩ B| / |A ∪ B| (Jaccard). Реализация повторяет эту семантику,
-# чтобы цифры эвала были сопоставимы с тем, что даст Postgres.
+# Триграммы нужны только для отбора пар в L5 (лексическая похожесть МНН и
+# торгового). Ранжирование считает Postgres — приближение в нём не участвует.
 _WORD_SPLIT = re.compile(r"[^0-9a-zа-я]+")
 
 
@@ -154,18 +168,14 @@ def trgm_similarity(a: str, b_trg: set[str]) -> float:
     if not a_trg or not b_trg:
         return 0.0
     inter = len(a_trg & b_trg)
-    if not inter:
-        return 0.0
-    return inter / len(a_trg | b_trg)
+    return inter / len(a_trg | b_trg) if inter else 0.0
 
 
 # ─────────────────────────── производные формы ───────────────────────────
 # Те же правила, что в medkard src/grls/normalize.py: первый сегмент до запятой
 # = лекарственная форма, последний сегмент после ' - ' = условия отпуска.
 def split_forms(forms_raw: str | None) -> list[str]:
-    if not forms_raw:
-        return []
-    return [p.strip() for p in forms_raw.split(";") if p.strip()]
+    return [p.strip() for p in (forms_raw or "").split(";") if p.strip()]
 
 
 def _unique(items: list[str]) -> list[str]:
@@ -185,23 +195,31 @@ def derive_dispensing(forms: list[str]) -> list[str]:
     return _unique([el.rsplit(" - ", 1)[1].strip() for el in forms if " - " in el])
 
 
-def search_blob(rec: dict) -> str:
-    """Поисковый текст записи — как search_blob() в спеке engine §4.5.
+def names_text(rec: dict) -> str:
+    """Названия: торговое + МНН. По ним в проде идут триграммы."""
+    return " | ".join(p.strip() for p in (rec.get("trade_name"), rec.get("inn_name"))
+                      if p and p.strip() and p.strip() != "~")
 
-    Порядок фиксированный, пустые поля пропускаются. forms_raw целиком НЕ идёт:
-    у препарата с десятком упаковок это килобайты, размывающие и лексический, и
-    векторный сигнал; его суть уже в dosage_forms/dispensing.
-    """
+
+def rest_text(rec: dict) -> str:
+    """Всё остальное: ФТГ, лекформы, отпуск, держатель. По нему в проде идёт tsv."""
     forms = split_forms(rec.get("forms_raw"))
     parts = [
-        rec.get("trade_name"),
-        rec.get("inn_name"),
         rec.get("pharm_group"),
         ", ".join(derive_dosage_forms(forms)[:6]),
         ", ".join(derive_dispensing(forms)[:4]),
         rec.get("holder"),
     ]
     return " | ".join(p.strip() for p in parts if p and p.strip() and p.strip() != "~")
+
+
+def search_blob(rec: dict) -> str:
+    """Поисковый текст записи целиком — как search_blob() в спеке engine §4.5.
+
+    forms_raw целиком НЕ идёт: у препарата с десятком упаковок это килобайты,
+    размывающие и лексический, и векторный сигнал; суть уже в производных.
+    """
+    return " | ".join(p for p in (names_text(rec), rest_text(rec)) if p)
 
 
 # ─────────────────────────── чтение корпуса ───────────────────────────
@@ -258,20 +276,14 @@ def load_from_zip(path: str) -> list[dict]:
 
 
 def load_from_db(dsn: str) -> list[dict]:
-    try:
-        import psycopg2
-        import psycopg2.extras
-    except ImportError:
-        sys.exit("нужен psycopg2: pip install psycopg2-binary")
-    conn = psycopg2.connect(dsn)
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+    import psycopg
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT trade_name, inn_name, pharm_group, forms_raw, holder "
             "FROM grls_registry WHERE NOT is_substance AND trade_name IS NOT NULL"
         )
-        rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return rows
+        cols = [d.name for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
 def dedupe(rows: list[dict]) -> list[dict]:
@@ -289,11 +301,9 @@ def dedupe(rows: list[dict]) -> list[dict]:
         cur = seen.get(key)
         if cur is None:
             seen[key] = r
-            continue
-        # предпочитаем более полную запись (заполнены МНН и ФТГ)
-        score = lambda x: bool(x.get("inn_name")) + bool(x.get("pharm_group"))
-        if score(r) > score(cur):
-            seen[key] = r
+        elif (bool(r.get("inn_name")) + bool(r.get("pharm_group")) >
+              bool(cur.get("inn_name")) + bool(cur.get("pharm_group"))):
+            seen[key] = r  # предпочитаем более полную запись
     return list(seen.values())
 
 
@@ -346,21 +356,17 @@ def build_queries(corpus: list[dict], per_level: int, rng: random.Random) -> lis
     элемент, для ФТГ — все препараты той же группы.
     """
     named = [(i, r) for i, r in enumerate(corpus) if len(grls_norm(r["trade_name"])) >= 5]
-    # L5 имеет смысл только там, где МНН лексически НЕ похож на торговое:
-    # «Церебролизин» ← «церебролизин» триграммы находят тривиально.
     with_inn = [
         (i, r) for i, r in named
         if r.get("inn_name")
         and trgm_similarity(r["inn_name"], _trigrams(r["trade_name"])) < INN_LEXICAL_MAX
     ]
-    # ФТГ → все препараты этой группы (правильных ответов много)
     ftg_members: dict[str, list[int]] = defaultdict(list)
     for i, r in enumerate(corpus):
         key = grls_norm(r.get("pharm_group"))
         if len(key) >= FTG_MIN_CHARS:
             ftg_members[key].append(i)
-    with_ftg = [(i, r) for i, r in named
-                if grls_norm(r.get("pharm_group")) in ftg_members]
+    with_ftg = [(i, r) for i, r in named if grls_norm(r.get("pharm_group")) in ftg_members]
 
     queries: list[dict] = []
 
@@ -385,7 +391,6 @@ def build_queries(corpus: list[dict], per_level: int, rng: random.Random) -> lis
         lambda r: _typo(_typo(_typo(grls_norm(r["trade_name"]), rng), rng), rng))
     add("L4 phonetic", named, lambda r: _phonetic(grls_norm(r["trade_name"]), rng))
     add("L5 inn2trade", with_inn, lambda r: r["inn_name"])
-    # ФТГ: точная, с двумя опечатками, фрагментом. Ответ — любой препарат группы.
     add("L6 ftg exact", with_ftg, lambda r: r["pharm_group"], by_ftg)
     add("L7 ftg typo", with_ftg,
         lambda r: _typo(_typo(grls_norm(r["pharm_group"]), rng), rng), by_ftg)
@@ -412,55 +417,118 @@ def embed(texts: list[str], base_url: str, api_key: str, model: str) -> list[lis
     return out
 
 
-def _norm_vec(v: list[float]) -> list[float]:
-    n = sum(x * x for x in v) ** 0.5 or 1.0
-    return [x / n for x in v]
+def _pgvector(v: list[float]) -> str:
+    return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
 
 
-# ─────────────────────────── поиск и метрики ───────────────────────────
-def rank_positions(scores: list[tuple[int, float]]) -> dict[int, int]:
-    """Индекс документа → его ранг (1 = лучший), по убыванию score."""
-    ordered = sorted(scores, key=lambda p: -p[1])
-    return {idx: rank for rank, (idx, _s) in enumerate(ordered, start=1)}
+# ─────────────────────────── Postgres ───────────────────────────
+def pg_dsn_from_env() -> str:
+    from urllib.parse import quote
+    user = os.getenv("POSTGRES_USER", "")
+    pwd = os.getenv("POSTGRES_PASSWORD", "")
+    auth = f"{quote(user)}:{quote(pwd)}@" if user else ""
+    return (f"postgresql://{auth}{os.getenv('POSTGRES_HOST', 'localhost')}:"
+            f"{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'medkard')}")
 
 
-def evaluate(queries, n_docs, corpus_vecs, query_vecs, corpus_trg) -> dict:
-    """Ранг ПЕРВОГО релевантного документа по каждому методу.
+# Ранжирование целиком средствами Postgres. row_number, а не rank: при массовых
+# ничьих (ts_rank = 0 у всех непопавших) rank отдал бы всей группе лучшую
+# позицию и завысил метрику. row_number с добивкой по id даёт ту произвольную,
+# но реалистичную позицию, которую вернул бы обычный запрос с LIMIT.
+_RANK_SQL = """
+WITH scored AS (
+  SELECT id,
+         similarity(doc_norm,   %(q)s)                             AS s_trgm,
+         similarity(names_norm, %(q)s)                             AS s_names,
+         ts_rank(rest_tsv, websearch_to_tsquery('russian', %(q)s)) AS s_tsv,
+         1 - (emb <=> %(qv)s::vector)                              AS s_vec
+  FROM eval_docs
+), ranked AS (
+  SELECT id,
+    row_number() OVER (ORDER BY s_trgm  DESC, id) AS r_trgm,
+    row_number() OVER (ORDER BY s_names DESC, id) AS r_names,
+    row_number() OVER (ORDER BY s_tsv   DESC, id) AS r_tsv,
+    row_number() OVER (ORDER BY s_vec   DESC, id) AS r_vec
+  FROM scored
+), fused AS (
+  SELECT id, r_trgm, r_tsv, r_vec,
+    row_number() OVER (ORDER BY (1.0/(%(k)s + r_names) + 1.0/(%(k)s + r_tsv))
+                       DESC, id)                                   AS r_prod,
+    row_number() OVER (ORDER BY (r_vec + %(w)s * r_trgm) ASC, id)  AS r_hybrid,
+    row_number() OVER (ORDER BY (r_vec + r_trgm) ASC, id)          AS r_even,
+    row_number() OVER (ORDER BY (1.0/(%(k)s + r_names) + 1.0/(%(k)s + r_tsv)
+                                 + 1.0/(%(k)s + r_vec)) DESC, id)  AS r_prod_vec
+  FROM ranked
+)
+SELECT min(r_trgm), min(r_tsv), min(r_prod), min(r_vec),
+       min(r_hybrid), min(r_even), min(r_prod_vec)
+FROM fused WHERE id = ANY(%(gold)s)
+"""
 
-    Для классов с одним правильным ответом это его ранг; для ФТГ-классов —
-    лучший из группы. Метрика читается одинаково: «релевантный в топ-k».
-    """
+
+def build_table(conn, corpus, docs, doc_vecs, dim) -> None:
+    with conn.cursor() as cur:
+        for ext in ("pg_trgm", "vector"):
+            try:
+                cur.execute(f"CREATE EXTENSION IF NOT EXISTS {ext}")
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                sys.exit(f"нет расширения {ext} и его не создать: {e}\n"
+                         "эвал считает лексику и вектор средствами Postgres — без них никак")
+        cur.execute(f"""
+            CREATE TEMP TABLE eval_docs (
+                id         int PRIMARY KEY,
+                doc_norm   text,
+                names_norm text,
+                rest       text,
+                rest_tsv   tsvector GENERATED ALWAYS AS
+                           (to_tsvector('russian', coalesce(rest, ''))) STORED,
+                emb        vector({dim})
+            ) ON COMMIT PRESERVE ROWS
+        """)
+        cur.executemany(
+            "INSERT INTO eval_docs (id, doc_norm, names_norm, rest, emb) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            [(i, grls_norm(docs[i]), grls_norm(names_text(r)), rest_text(r),
+              _pgvector(doc_vecs[i])) for i, r in enumerate(corpus)],
+        )
+        # Текстовые индексы — как будут в проде (спека §4.5).
+        cur.execute("CREATE INDEX ON eval_docs USING GIN (doc_norm gin_trgm_ops)")
+        cur.execute("CREATE INDEX ON eval_docs USING GIN (names_norm gin_trgm_ops)")
+        cur.execute("CREATE INDEX ON eval_docs USING GIN (rest_tsv)")
+        cur.execute("ANALYZE eval_docs")
+        conn.commit()
+
+
+def evaluate(conn, queries) -> dict:
     stats: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
     sizes: dict[str, list[int]] = defaultdict(list)
-    for qi, q in enumerate(queries):
-        gold = q["gold_ids"]
-        sizes[q["level"]].append(len(gold))
-
-        trgm = [(i, trgm_similarity(q["query"], corpus_trg[i])) for i in range(n_docs)]
-        qv = query_vecs[qi]
-        vec = [(i, sum(a * b for a, b in zip(qv, corpus_vecs[i]))) for i in range(n_docs)]
-        # гибрид: слияние РАНГОВ (как 084), а не сырых score — шкалы разные
-        r_trgm, r_vec = rank_positions(trgm), rank_positions(vec)
-        hybrid = [(i, -(r_vec[i] + W_TSV * r_trgm[i])) for i in range(n_docs)]
-        hybrid_even = [(i, -(r_vec[i] + r_trgm[i])) for i in range(n_docs)]
-
-        for method, scored in (("trigram", trgm), ("vector", vec),
-                               ("hybrid", hybrid), ("hybrid_even", hybrid_even)):
-            ranks = rank_positions(scored)
-            stats[q["level"]][method].append(min(ranks[g] for g in gold))
+    with conn.cursor() as cur:
+        for n, q in enumerate(queries, start=1):
+            gold = sorted(q["gold_ids"])
+            sizes[q["level"]].append(len(gold))
+            cur.execute(_RANK_SQL, {"q": grls_norm(q["query"]), "qv": q["vec"],
+                                    "w": W_TSV, "k": RRF_K, "gold": gold})
+            for method, rank in zip(METHODS, cur.fetchone()):
+                stats[q["level"]][method].append(rank)
+            if n % 100 == 0:
+                print(f"    {n}/{len(queries)}", flush=True)
     return {"ranks": stats, "sizes": sizes}
 
 
-def report(result: dict, index_mode: str) -> None:
+def report(result: dict, index_mode: str, model: str) -> None:
     stats, sizes = result["ranks"], result["sizes"]
-    print("\n" + "=" * 88)
-    print(f"индексируется: {index_mode}")
-    print(f"{'класс запросов':<16}{'метод':<13}{'recall@1':>10}{'recall@5':>10}"
+    width = 96
+    print("\n" + "=" * width)
+    print(f"индексируется: {index_mode}    модель: {model}")
+    print(f"{'класс':<16}{'метод':<14}{'recall@1':>10}{'recall@5':>10}"
           f"{'recall@10':>11}{'MRR':>8}{'n':>6}{'|gold|':>8}")
-    print("=" * 88)
+    print("=" * width)
     for level in sorted(stats):
         mean_gold = sum(sizes[level]) / max(len(sizes[level]), 1)
-        for method in ("trigram", "vector", "hybrid", "hybrid_even"):
+        best = (0.0, "")
+        for method in METHODS:
             ranks = stats[level][method]
             if not ranks:
                 continue
@@ -469,19 +537,25 @@ def report(result: dict, index_mode: str) -> None:
             r5 = sum(1 for r in ranks if r <= 5) / n
             r10 = sum(1 for r in ranks if r <= TOP_K) / n
             mrr = sum(1.0 / r for r in ranks) / n
-            print(f"{level:<16}{method:<13}{r1:>10.3f}{r5:>10.3f}{r10:>11.3f}"
+            best = max(best, (mrr, method))
+            print(f"{level:<16}{method:<14}{r1:>10.3f}{r5:>10.3f}{r10:>11.3f}"
                   f"{mrr:>8.3f}{n:>6}{mean_gold:>8.1f}")
-        print("-" * 88)
+        if best[1]:
+            print(f"{'':<16}лучший по MRR: {best[1]}")
+        print("-" * width)
     print("\nrecall@k = доля запросов, где хотя бы один правильный ответ попал в топ-k.")
-    print("|gold| — среднее число правильных ответов: у L6–L8 их много (одну ФТГ")
-    print("делят десятки препаратов), поэтому классы между собой сравнивать нельзя,")
-    print("сравнивать надо МЕТОДЫ внутри класса.\n")
+    print("|gold| — среднее число правильных ответов: у L6–L8 их много, поэтому")
+    print("классы между собой несравнимы; сравнивать надо МЕТОДЫ внутри класса.\n")
     print("Как читать (спека engine §4.5):")
-    print("  • vector/hybrid НЕ обходят trigram ни в одном классе → колонку embedding,")
-    print("    HNSW и фазу эмбеддинга убрать, строить поиск на pg_trgm;")
-    print("  • выигрыш только на L5/L6 (МНН и ФТГ) → взвесить: в режиме --index blob")
-    print("    оба поля лежат внутри индексируемого текста и находятся лексикой;")
-    print("  • выигрыш на L2–L4 и L7 (опечатки) → вектор оправдан, это его работа;")
+    print("  • trgm+tsv — то, что планируется в Искре; это базовая линия,")
+    print("    остальные методы оцениваются тем, насколько они её обходят;")
+    print("  • trgm+tsv+vec не лучше trgm+tsv → вектор не добавляет ничего поверх")
+    print("    того, что и так будет: колонку embedding, HNSW и фазу эмбеддинга убрать;")
+    print("  • выигрыш вектора только на L5/L6 → в режиме blob МНН и ФТГ и так внутри")
+    print("    индексируемого текста, лексика их найдёт; взвесить трезво;")
+    print("  • выигрыш на L2–L4 и L7 (опечатки) → вот это довод за вектор;")
+    print("  • tsv проседает на L7 → ожидаемо, tsv не терпит опечаток вовсе;")
+    print("    это довод держать названия под триграммами, а не под tsv;")
     print("  • hybrid_even заметно лучше hybrid → вес 0.3 из 084 под лекарства не")
     print("    подходит, подбирать свой.")
 
@@ -497,38 +571,41 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=5000,
                    help="размер корпуса уникальных препаратов (0 = все; больше корпус — честнее и дороже)")
     p.add_argument("--per-level", type=int, default=150, help="запросов на класс")
+    p.add_argument("--pg-dsn", default=None,
+                   help="БД для временной таблицы эвала (по умолчанию POSTGRES_* из .env)")
     p.add_argument("--base-url", default=DEFAULT_BASE_URL,
                    help="по умолчанию EMBEDDING_BASE_URL / OPENAI_BASE_URL из .env")
-    p.add_argument("--api-key", default=DEFAULT_API_KEY,
-                   help="по умолчанию OPENAI_API_KEY из .env")
-    p.add_argument("--model", default=DEFAULT_MODEL,
-                   help="по умолчанию EMBEDDING_MODEL из .env")
+    p.add_argument("--api-key", default=DEFAULT_API_KEY, help="по умолчанию OPENAI_API_KEY из .env")
+    p.add_argument("--model", default=DEFAULT_MODEL, help="по умолчанию EMBEDDING_MODEL из .env")
     p.add_argument("--dump-queries", metavar="FILE", help="выгрузить запросы в JSON для разбора")
     args = p.parse_args()
 
+    try:
+        import psycopg
+    except ImportError:
+        sys.exit("нужен psycopg (v3): pip install 'psycopg[binary]'")
+
     rng = random.Random(SEED)
+    pg_dsn = args.pg_dsn or pg_dsn_from_env()
 
     print(f".env: {ENV_PATH or 'не найден — переменные только из окружения'}")
     print(f"эндпоинт: {args.base_url}")
     print(f"модель:   {args.model}  (ключ: {'задан' if args.api_key else 'ПУСТ'})")
+    print(f"postgres: {re.sub(r'//[^@]*@', '//***@', pg_dsn)}")
     print(f"индекс:   {args.index}")
-    if not args.base_url:
-        sys.exit("не задан эндпоинт: EMBEDDING_BASE_URL/OPENAI_BASE_URL в .env либо --base-url")
 
-    print("1/4 читаю корпус…", flush=True)
+    print("1/5 читаю корпус…", flush=True)
     rows = load_from_zip(args.from_zip) if args.from_zip else load_from_db(args.from_db)
     corpus = dedupe(rows)
     print(f"    уникальных препаратов: {len(corpus)}")
     if args.limit and len(corpus) > args.limit:
         corpus = rng.sample(corpus, args.limit)
         print(f"    корпус сокращён до {len(corpus)} (--limit)")
-
     docs = [search_blob(r) if args.index == "blob" else r["trade_name"] for r in corpus]
-    corpus_trg = [_trigrams(d) for d in docs]
     with_ftg = sum(1 for r in corpus if len(grls_norm(r.get("pharm_group"))) >= FTG_MIN_CHARS)
     print(f"    с пригодной ФТГ: {with_ftg} ({100 * with_ftg // max(len(corpus), 1)}%)")
 
-    print("2/4 строю запросы…", flush=True)
+    print("2/5 строю запросы…", flush=True)
     queries = build_queries(corpus, args.per_level, rng)
     print(f"    запросов: {len(queries)}")
     if args.dump_queries:
@@ -537,14 +614,21 @@ def main() -> None:
              for q in queries], ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"    выгружены: {args.dump_queries}")
 
-    print(f"3/4 эмбеддинг корпуса и запросов моделью {args.model}…", flush=True)
-    corpus_vecs = [_norm_vec(v) for v in embed(docs, args.base_url, args.api_key, args.model)]
-    query_vecs = [_norm_vec(v) for v in
-                  embed([q["query"] for q in queries], args.base_url, args.api_key, args.model)]
+    print(f"3/5 эмбеддинг корпуса и запросов моделью {args.model}…", flush=True)
+    doc_vecs = embed(docs, args.base_url, args.api_key, args.model)
+    q_vecs = embed([q["query"] for q in queries], args.base_url, args.api_key, args.model)
+    for q, v in zip(queries, q_vecs):
+        q["vec"] = _pgvector(v)
+    dim = len(doc_vecs[0])
+    print(f"    размерность: {dim}")
 
-    print("4/4 считаю…", flush=True)
-    result = evaluate(queries, len(corpus), corpus_vecs, query_vecs, corpus_trg)
-    report(result, args.index)
+    print("4/5 временная таблица и текстовые индексы…", flush=True)
+    with psycopg.connect(pg_dsn) as conn:
+        build_table(conn, corpus, docs, doc_vecs, dim)
+        print("5/5 ранжирую средствами Postgres…", flush=True)
+        result = evaluate(conn, queries)
+    # временная таблица исчезла вместе с сессией — в БД ничего не осталось
+    report(result, args.index, args.model)
 
 
 if __name__ == "__main__":
