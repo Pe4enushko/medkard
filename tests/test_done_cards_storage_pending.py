@@ -26,6 +26,7 @@ async def _cleanup(guid: str) -> None:
     async with DoneCardsStorage() as storage:
         async with storage._pool.connection() as conn:
             await conn.execute("DELETE FROM done_cards WHERE card_guid = %(g)s", {"g": guid})
+            await conn.execute("DELETE FROM push_log WHERE card_guid = %(g)s", {"g": guid})
 
 
 @pytest.mark.asyncio
