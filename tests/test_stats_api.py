@@ -67,15 +67,13 @@ def _cleanup(guid: str) -> None:
         async with DoneCardsStorage() as storage:
             async with storage._pool.connection() as conn:
                 await conn.execute("DELETE FROM done_cards WHERE card_guid = %(g)s", {"g": guid})
-                await conn.execute(
-                    "DELETE FROM audit_overwrite_journal WHERE card_guid = %(g)s", {"g": guid}
-                )
+                await conn.execute("DELETE FROM push_log WHERE card_guid = %(g)s", {"g": guid})
 
     asyncio.get_event_loop().run_until_complete(_delete())
 
 
 def _overwrite_an_audited_card(guid: str, org_id: str) -> None:
-    """Audit a card then push over it, producing one journal row."""
+    """Audit a card then push over it, producing one push_log row."""
 
     async def _run():
         now = datetime.now(timezone.utc)
@@ -120,9 +118,9 @@ def test_storage_returns_kilobytes_for_org(client: TestClient, test_key: str):
     body = resp.json()
     assert body["organization"] == "Alenka"
     assert body["done_cards_kb"] > 0, "Alenka has stored cards, so its size must be non-zero"
-    assert body["audit_overwrite_journal_kb"] >= 0
+    assert body["push_log_kb"] >= 0
     assert body["total_kb"] == pytest.approx(
-        body["done_cards_kb"] + body["audit_overwrite_journal_kb"], abs=0.01
+        body["done_cards_kb"] + body["push_log_kb"], abs=0.01
     )
 
 
@@ -133,8 +131,8 @@ def test_storage_org_slug_is_case_insensitive(client: TestClient, test_key: str)
     assert lower.json()["organization"] == "Alenka"
 
 
-def test_journal_growth_shows_up_in_storage_stats(client: TestClient, test_key: str, alenka_org_id: str):
-    """Archiving a clobbered audit increases the journal's reported size."""
+def test_push_log_growth_shows_up_in_storage_stats(client: TestClient, test_key: str, alenka_org_id: str):
+    """A push over an audited card increases push_log's reported size."""
     guid = f"pytest-stats-{uuid.uuid4()}"
     try:
         before = client.get("/stats/storage?org=Alenka", headers=_auth(test_key)).json()
@@ -142,6 +140,6 @@ def test_journal_growth_shows_up_in_storage_stats(client: TestClient, test_key: 
         _overwrite_an_audited_card(guid, alenka_org_id)
 
         after = client.get("/stats/storage?org=Alenka", headers=_auth(test_key)).json()
-        assert after["audit_overwrite_journal_kb"] > before["audit_overwrite_journal_kb"]
+        assert after["push_log_kb"] > before["push_log_kb"]
     finally:
         _cleanup(guid)
