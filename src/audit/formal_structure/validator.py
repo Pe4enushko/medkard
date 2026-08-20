@@ -46,6 +46,14 @@ _PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
 _FLAG_SOURCE: dict[str, str] = {r["flag_code"]: r.get("source", "") for r in _RULES}
 _ALL_FLAGS: list[str] = list(_FLAG_SOURCE)
 
+_VERIFIED_DATES: list[str] = sorted(r["verified_at"] for r in _RULES if r.get("verified_at"))
+logger.info(
+    "[formal] formal rules revised_at=%s rules=%d oldest verified_at=%s",
+    _REVISED_AT,
+    len(_RULES),
+    _VERIFIED_DATES[0] if _VERIFIED_DATES else "none",
+)
+
 
 def _levenshtein(a: str, b: str) -> int:
     if len(a) < len(b):
