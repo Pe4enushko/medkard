@@ -29,6 +29,7 @@ from RAG.retrieval.vector_store import close_pool
 
 CASES_PATH = ROOT / "e2e" / "fixtures" / "eval_broken_cards" / "cases.json"
 VALID_ASPECTS = {"anamnesis", "inspection", "treatment", "criteria"}
+RETRIEVAL_STAGES = {f"retrieve_{aspect}" for aspect in VALID_ASPECTS}
 TIMEOUT_SECONDS = float(os.environ.get("E2E_DIAG_GRAPH_TIMEOUT_SECONDS", "900"))
 
 _PASS = "  \033[32mok\033[0m"
@@ -103,10 +104,26 @@ async def _run_case(case: dict[str, Any]) -> list[str]:
         any(tokens > 0 for _result, tokens in graph_results),
         str([tokens for _result, tokens in graph_results]),
     )
+    unexplained_empty_sources = []
+    for result, _tokens in graph_results:
+        retrieval_errors = {
+            error.partition(":")[0]
+            for error in result.errors
+            if error.startswith("retrieve_")
+        }
+        if not result.guideline_sources and not RETRIEVAL_STAGES.issubset(
+            retrieval_errors
+        ):
+            unexplained_empty_sources.append(
+                {
+                    "icd_code": result.icd_code,
+                    "unreported_stages": sorted(RETRIEVAL_STAGES - retrieval_errors),
+                }
+            )
     check(
-        "graph exposed the guideline chunks shown to judges",
-        any(result.guideline_sources for result, _tokens in graph_results),
-        "all guideline_sources collections are empty",
+        "graph exposed guideline chunks or explained their absence",
+        not unexplained_empty_sources,
+        str(unexplained_empty_sources),
     )
 
     issues = [issue for result, _tokens in graph_results for issue in result.all_issues]
