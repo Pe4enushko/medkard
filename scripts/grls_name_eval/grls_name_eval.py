@@ -46,6 +46,38 @@ import zipfile
 from collections import defaultdict
 from pathlib import Path
 
+# .env репозитория — грузим ДО чтения переменных, чтобы дефолты в argparse
+# уже видели значения. Ищем вверх от скрипта: scripts/grls_name_eval/ → корень.
+def _load_env() -> Path | None:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / ".env"
+        if candidate.is_file():
+            try:
+                from dotenv import load_dotenv
+                load_dotenv(candidate)
+            except ImportError:  # без python-dotenv разбираем сами: KEY=VALUE
+                for line in candidate.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, value = line.partition("=")
+                    os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+            return candidate
+    return None
+
+
+ENV_PATH = _load_env()
+
+# Переменные — как у medkard (src/RAG/retrieval/embeddings.py): база берётся из
+# EMBEDDING_BASE_URL, иначе OPENAI_BASE_URL; ключ — OPENAI_API_KEY.
+DEFAULT_BASE_URL = (
+    os.getenv("EMBEDDING_BASE_URL")
+    or os.getenv("OPENAI_BASE_URL")
+    or "https://api.openai.com/v1"
+)
+DEFAULT_API_KEY = os.getenv("OPENAI_API_KEY", "")
+DEFAULT_MODEL = os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B")
+
 # Слияние рангов — как в 084_clinical_guideline_name_embedding.sql
 W_TSV = 0.3
 EMBED_BATCH = 64
@@ -323,13 +355,22 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=5000,
                    help="размер корпуса уникальных названий (0 = все; больше корпус — честнее и дороже)")
     p.add_argument("--per-level", type=int, default=150, help="запросов на класс")
-    p.add_argument("--base-url", default=os.getenv("LLM_BASE_URL", "http://192.168.1.80:4000/v1"))
-    p.add_argument("--api-key", default=os.getenv("LLM_API_KEY", ""))
-    p.add_argument("--model", default=os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B"))
+    p.add_argument("--base-url", default=DEFAULT_BASE_URL,
+                   help="по умолчанию EMBEDDING_BASE_URL / OPENAI_BASE_URL из .env")
+    p.add_argument("--api-key", default=DEFAULT_API_KEY,
+                   help="по умолчанию OPENAI_API_KEY из .env")
+    p.add_argument("--model", default=DEFAULT_MODEL,
+                   help="по умолчанию EMBEDDING_MODEL из .env")
     p.add_argument("--dump-misses", metavar="FILE", help="выгрузить промахи в JSON для разбора")
     args = p.parse_args()
 
     rng = random.Random(SEED)
+
+    print(f".env: {ENV_PATH or 'не найден — переменные только из окружения'}")
+    print(f"эндпоинт: {args.base_url}")
+    print(f"модель:   {args.model}  (ключ: {'задан' if args.api_key else 'ПУСТ'})")
+    if not args.base_url:
+        sys.exit("не задан эндпоинт: EMBEDDING_BASE_URL/OPENAI_BASE_URL в .env либо --base-url")
 
     print("1/4 читаю корпус…", flush=True)
     rows = load_from_zip(args.from_zip) if args.from_zip else load_from_db(args.from_db)
