@@ -113,6 +113,12 @@ for f in e2e/tests/audit/test_*.py; do python "$f" || exit 1; done
 а не проставляется тестом в обход — иначе тест проверял бы не тот код, который
 работает на бою.
 
+Каждый кейс этапа 2 печатает свой `correlation_id` прямо в строке с именем
+кейса — тот же id, что `_traced_card_audit`/`graph_trace.trace_context` кладут
+во все записи `logs/graphtraces.jsonl` для этого прогона. По упавшему кейсу
+не нужно искать нужный кусок трейса по времени или `card_guid` — можно сразу
+`grep correlation_id logs/graphtraces.jsonl`.
+
 ## Почему нет teardown и нет флагов командной строки
 
 `_audit_visit` вызывает `_upsert_done_card`, но тот выходит сразу, пока

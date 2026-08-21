@@ -59,6 +59,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(ROOT / ".env")
 
 from audit.formal_structure.validator import FormalValidator, VisitType  # noqa: E402
+from audit.graph_trace import new_correlation_id, trace_context  # noqa: E402
 from audit.pipeline import AuditPipeline  # noqa: E402
 
 _OK, _BAD = "  \033[32mok\033[0m    ", "  \033[31mПРОВАЛ\033[0m"
@@ -180,11 +181,18 @@ async def _stage_two(cases: list[Case], report: _Report) -> None:
     watch = _FormalCallWatch()
     watch.install()
     for case in cases:
-        print(f"\n  {case.name}")
+        correlation_id = new_correlation_id()
+        print(f"\n  {case.name}  (correlation_id={correlation_id})")
         watch.reset()
         pipeline = AuditPipeline()  # deliberately not `async with` — see module docstring
+        card_guid = (case.visit.get("Прием") or {}).get("GUID")
         try:
-            result = await pipeline._audit_visit(case.visit)
+            # Bind the id before the call so _traced_card_audit's own
+            # `current_correlation_id() or new_correlation_id()` picks up this
+            # one instead of minting a fresh, unprinted one — one id ties the
+            # report line to the matching logs/graphtraces.jsonl records.
+            with trace_context(correlation_id, card_guid):
+                result = await pipeline._audit_visit(case.visit)
         except Exception:
             report.check(f"[{case.name}] аудит отработал", False, traceback.format_exc())
             continue
