@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-End-to-end smoke test for GET /visits/check.
+End-to-end smoke test for GET /visits/check_updates.
 
-Creates a throwaway organization + API key + one card, stages it as an
-audited ("done") card with a controlled Прием.DATE, and asserts /visits/check
-counts it on that date and not on other dates, plus the auth/404 paths.
+Creates a throwaway organization + API key + one card, pushes it and
+deliberately leaves it pending (no staging as done), and asserts
+/visits/check_updates returns the card for an inclusive `since` boundary
+at-or-before the push and omits it for a `since` strictly after the push.
 
 Run from the repo root against a running API:
 
-    python e2e/tests/test_visits_check_smoke.py
-    python e2e/tests/test_visits_check_smoke.py https://medkard.example --keep
+    python e2e/tests/routes/test_visits_check_updates_smoke.py
+    python e2e/tests/routes/test_visits_check_updates_smoke.py https://medkard.example --keep
 
   url (optional) defaults to "local", which resolves to http://localhost:{API_PORT},
                API_PORT read from .env (default 8000 if unset — see .env.example).
@@ -24,15 +25,15 @@ import asyncio
 import os
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent / "helpers"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "helpers"))
 
 load_dotenv(ROOT / ".env")
 
@@ -40,7 +41,7 @@ from api_keys import ApiKeyFixtures, issue_key  # noqa: E402
 from cards import CardFixtures, push_card  # noqa: E402
 from organizations import OrganizationFixtures  # noqa: E402
 
-_parser = argparse.ArgumentParser(description="Smoke-test GET /visits/check against a running API")
+_parser = argparse.ArgumentParser(description="Smoke-test GET /visits/check_updates against a running API")
 _parser.add_argument(
     "url",
     nargs="?",
@@ -61,9 +62,9 @@ def _resolve_base_url(url_arg: str) -> str:
 
 BASE = _resolve_base_url(_args.url)
 TAG = uuid.uuid4().hex[:8]
-ORG_NAME = f"e2e-check-{TAG}"
-KEY_LABEL = f"e2e-check-{TAG}"
-CARD_GUID = f"e2e-check-{TAG}-{uuid.uuid4()}"
+ORG_NAME = f"e2e-checkupd-{TAG}"
+KEY_LABEL = f"e2e-checkupd-{TAG}"
+CARD_GUID = f"e2e-checkupd-{TAG}-{uuid.uuid4()}"
 
 _PASS, _FAIL = "  \033[32mok\033[0m", "  \033[31mFAILED\033[0m"
 _failures: list[str] = []
@@ -85,59 +86,64 @@ def _mock_card() -> dict:
     }
 
 
+async def _db_now(card_fixtures: CardFixtures) -> str:
+    """Return Postgres's own now() (ISO). done_cards.updated_at is stamped by the
+    DB server's clock (migration 022's trigger), which can drift from this
+    host's — comparing `since` boundaries against a locally-captured timestamp
+    is flaky under any clock skew, so every boundary here comes from the DB."""
+    async with card_fixtures._pool.connection() as conn:
+        cur = await conn.execute("SELECT now()")
+        row = await cur.fetchone()
+        return row["now"].isoformat()
+
+
 async def run(client: httpx.AsyncClient, raw_key: str, card_fixtures: CardFixtures) -> None:
     guid = CARD_GUID.lower()
-    today = datetime.now(timezone.utc).strftime("%d.%m.%Y")
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%d.%m.%Y")
+    before_push = await _db_now(card_fixtures)
 
-    print("\n1. Push and stage the card as done, dated today")
+    print("\n1. Push a card, leave it pending (no staging)")
     resp = await push_card(client, BASE, ORG_NAME, raw_key, _mock_card())
     check("push accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
-    await card_fixtures.stage_done_with_meta(guid, visit_date=today)
 
-    print("\n2. check?date=today counts the card")
+    row = await card_fixtures.card_row(guid)
+    check("card is pending after push", row is not None and row["status"] == "pending", f"row={row}")
+
+    after_push = await _db_now(card_fixtures)
+
+    print("\n2. check_updates without since includes the pending card")
     resp = await client.get(
-        f"{BASE.rstrip('/')}/visits/check",
-        params={"org": ORG_NAME, "date": datetime.now(timezone.utc).date().isoformat()},
+        f"{BASE.rstrip('/')}/visits/check_updates",
+        params={"org": ORG_NAME},
         headers={"Authorization": f"Bearer {raw_key}"},
     )
-    check("check today accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
-    if resp.status_code == 200:
-        body = resp.json()
-        check("count == 1 for today", body.get("count") == 1, f"body={body}")
+    check("check_updates accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
+    rows = resp.json() if resp.status_code == 200 else []
+    check("pending card present without since", any(r["card_guid"] == guid for r in rows), f"got {len(rows)} row(s)")
 
-    print("\n3. check?date=yesterday counts nothing")
+    print("\n3. check_updates?since=<before push> includes the card (inclusive boundary)")
     resp = await client.get(
-        f"{BASE.rstrip('/')}/visits/check",
-        params={"org": ORG_NAME, "date": (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()},
+        f"{BASE.rstrip('/')}/visits/check_updates",
+        params={"org": ORG_NAME, "since": before_push},
         headers={"Authorization": f"Bearer {raw_key}"},
     )
-    check("check yesterday accepted (200)", resp.status_code == 200, f"got {resp.status_code}")
-    if resp.status_code == 200:
-        body = resp.json()
-        check("count == 0 for yesterday", body.get("count") == 0, f"body={body}")
+    rows = resp.json() if resp.status_code == 200 else []
+    check("card present for since=before-push", any(r["card_guid"] == guid for r in rows), f"got {len(rows)} row(s)")
 
-    print("\n4. check against an unknown org -> 404")
+    print("\n4. check_updates?since=<after push> excludes the card")
     resp = await client.get(
-        f"{BASE.rstrip('/')}/visits/check",
-        params={"org": f"unknown-org-{TAG}", "date": datetime.now(timezone.utc).date().isoformat()},
+        f"{BASE.rstrip('/')}/visits/check_updates",
+        params={"org": ORG_NAME, "since": after_push},
         headers={"Authorization": f"Bearer {raw_key}"},
     )
-    check("unknown org -> 404", resp.status_code == 404, f"got {resp.status_code}: {resp.text[:200]}")
-
-    print("\n5. check without Authorization -> 401")
-    resp = await client.get(
-        f"{BASE.rstrip('/')}/visits/check",
-        params={"org": ORG_NAME, "date": datetime.now(timezone.utc).date().isoformat()},
-    )
-    check("missing auth -> 401", resp.status_code == 401, f"got {resp.status_code}: {resp.text[:200]}")
+    rows = resp.json() if resp.status_code == 200 else []
+    check("card absent for since=after-push", not any(r["card_guid"] == guid for r in rows), f"got {len(rows)} row(s)")
 
 
 async def main() -> int:
     org_id: str | None = None
     key_id: str | None = None
 
-    print(f"Smoke test GET /visits/check against {BASE}")
+    print(f"Smoke test GET /visits/check_updates against {BASE}")
     print(f"  org={ORG_NAME}  card_guid={CARD_GUID}")
 
     async with OrganizationFixtures() as org_fixtures, CardFixtures() as card_fixtures:

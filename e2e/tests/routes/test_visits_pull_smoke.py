@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-End-to-end smoke test for GET /stats/storage.
+End-to-end smoke test for GET /visits/pull.
 
-Creates a throwaway organization + API key, checks that a freshly created org
-reports zero storage, pushes and stages one card, then asserts the storage
-figures reflect it (done_cards_kb > 0, total_kb == done_cards_kb + push_log_kb,
-organization field echoes the org name).
+Creates a throwaway organization + API key + one card, stages it as an
+audited ("done") card with a controlled Прием.DATE, and asserts /visits/pull
+returns an xlsx report for that date, plus the empty-day 404-vs-200 paths.
 
 Run from the repo root against a running API:
 
-    python e2e/tests/test_stats_storage_smoke.py
-    python e2e/tests/test_stats_storage_smoke.py https://medkard.example --keep
+    python e2e/tests/routes/test_visits_pull_smoke.py
+    python e2e/tests/routes/test_visits_pull_smoke.py https://medkard.example --keep
 
   url (optional) defaults to "local", which resolves to http://localhost:{API_PORT},
                API_PORT read from .env (default 8000 if unset — see .env.example).
@@ -25,15 +24,15 @@ import asyncio
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent / "helpers"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "helpers"))
 
 load_dotenv(ROOT / ".env")
 
@@ -41,7 +40,7 @@ from api_keys import ApiKeyFixtures, issue_key  # noqa: E402
 from cards import CardFixtures, push_card  # noqa: E402
 from organizations import OrganizationFixtures  # noqa: E402
 
-_parser = argparse.ArgumentParser(description="Smoke-test GET /stats/storage against a running API")
+_parser = argparse.ArgumentParser(description="Smoke-test GET /visits/pull against a running API")
 _parser.add_argument(
     "url",
     nargs="?",
@@ -62,9 +61,9 @@ def _resolve_base_url(url_arg: str) -> str:
 
 BASE = _resolve_base_url(_args.url)
 TAG = uuid.uuid4().hex[:8]
-ORG_NAME = f"e2e-stats-{TAG}"
-KEY_LABEL = f"e2e-stats-{TAG}"
-CARD_GUID = f"e2e-stats-{TAG}-{uuid.uuid4()}"
+ORG_NAME = f"e2e-pull-{TAG}"
+KEY_LABEL = f"e2e-pull-{TAG}"
+CARD_GUID = f"e2e-pull-{TAG}-{uuid.uuid4()}"
 
 _PASS, _FAIL = "  \033[32mok\033[0m", "  \033[31mFAILED\033[0m"
 _failures: list[str] = []
@@ -89,46 +88,61 @@ def _mock_card() -> dict:
 async def run(client: httpx.AsyncClient, raw_key: str, card_fixtures: CardFixtures) -> None:
     guid = CARD_GUID.lower()
     today = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    yesterday_iso = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
 
-    print("\n1. Baseline storage stats for a freshly created org")
-    resp = await client.get(
-        f"{BASE.rstrip('/')}/stats/storage",
-        params={"org": ORG_NAME},
-        headers={"Authorization": f"Bearer {raw_key}"},
-    )
-    check("baseline stats accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
-    baseline = resp.json() if resp.status_code == 200 else {}
-    check("baseline done_cards_kb == 0", baseline.get("done_cards_kb") == 0, f"got {baseline}")
-    check("baseline push_log_kb == 0", baseline.get("push_log_kb") == 0, f"got {baseline}")
-    check("baseline total_kb == 0", baseline.get("total_kb") == 0, f"got {baseline}")
-
-    print("\n2. Push and stage one card")
+    print("\n1. Push and stage the card as done, dated today")
     resp = await push_card(client, BASE, ORG_NAME, raw_key, _mock_card())
     check("push accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
     await card_fixtures.stage_done_with_meta(guid, visit_date=today)
 
-    print("\n3. Storage stats now reflect the card")
+    print("\n2. pull?date=today returns an xlsx workbook")
     resp = await client.get(
-        f"{BASE.rstrip('/')}/stats/storage",
-        params={"org": ORG_NAME},
+        f"{BASE.rstrip('/')}/visits/pull",
+        params={"org": ORG_NAME, "date": today_iso},
         headers={"Authorization": f"Bearer {raw_key}"},
     )
-    check("stats accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
-    stats = resp.json() if resp.status_code == 200 else {}
-    check("done_cards_kb > 0", stats.get("done_cards_kb", 0) > 0, f"got {stats}")
+    check("pull today accepted (200)", resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}")
     check(
-        "total_kb == done_cards_kb + push_log_kb",
-        stats.get("total_kb") == stats.get("done_cards_kb", 0) + stats.get("push_log_kb", 0),
-        f"got {stats}",
+        "content-type is xlsx",
+        resp.headers.get("content-type", "") == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        f"got {resp.headers.get('content-type')}",
     )
-    check("organization field matches", stats.get("organization") == ORG_NAME, f"got {stats}")
+    disposition = resp.headers.get("content-disposition", "")
+    check(
+        "content-disposition names the report file",
+        f"report_{ORG_NAME}_{today_iso}.xlsx" in disposition,
+        f"got {disposition!r}",
+    )
+    check("body is non-empty", len(resp.content) > 0)
+
+    print("\n3. pull?date=yesterday (no cards, no doctor_code) -> 404")
+    resp = await client.get(
+        f"{BASE.rstrip('/')}/visits/pull",
+        params={"org": ORG_NAME, "date": yesterday_iso},
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    check("empty day without doctor_code -> 404", resp.status_code == 404, f"got {resp.status_code}: {resp.text[:200]}")
+
+    print("\n4. pull?date=yesterday&doctor_code=... (no cards, doctor_code given) -> 200 with empty-report xlsx")
+    resp = await client.get(
+        f"{BASE.rstrip('/')}/visits/pull",
+        params={"org": ORG_NAME, "date": yesterday_iso, "doctor_code": "e2e-doc-1"},
+        headers={"Authorization": f"Bearer {raw_key}"},
+    )
+    check(
+        "empty day with doctor_code -> 200, not 404",
+        resp.status_code == 200,
+        f"got {resp.status_code}: {resp.text[:200]}",
+    )
+    check("empty-report body is non-empty", len(resp.content) > 0)
 
 
 async def main() -> int:
     org_id: str | None = None
     key_id: str | None = None
 
-    print(f"Smoke test GET /stats/storage against {BASE}")
+    print(f"Smoke test GET /visits/pull against {BASE}")
     print(f"  org={ORG_NAME}  card_guid={CARD_GUID}")
 
     async with OrganizationFixtures() as org_fixtures, CardFixtures() as card_fixtures:

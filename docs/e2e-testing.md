@@ -6,19 +6,23 @@ tests — never mocks. That's what distinguishes them from `tests/` (pytest, `py
 typically mocked LLM calls) and from the older `scripts/smoke-*.sh`/`.py` scripts, which this suite
 extends the pattern of but does not replace.
 
-Two kinds of e2e script live here:
+Test scripts are grouped into subfolders by subject, one folder per topic:
 
-- **Route tests** (`e2e/tests/test_*_smoke.py`) — one script per pull-API route, run against a live
-  `uvicorn`/docker instance and the configured Postgres. Documented in full below.
-- **Audit tests** (`e2e/tests/audit/`) — fixture cards with a known defect run through the real
+- **`e2e/tests/routes/`** — one script per pull-API route, run against a live `uvicorn`/docker
+  instance and the configured Postgres. Documented in full below.
+- **`e2e/tests/audit/`** — fixture cards with a known defect run through the real
   `AuditPipeline`, real LLM calls included. This suite has its own methodology doc at
   `e2e/tests/audit/README.md` — read that instead of duplicating it here; it covers the two-stage
   run, why the full flag set is asserted rather than just presence of the expected flag, how to add
   a fixture, and the runner script (`e2e/run-diagnosis-graph-tests.sh`).
 
+Add a new subfolder only for a genuinely new test subject (route tests vs. audit-fixture tests are
+the two so far) — a new script within an existing subject goes next to its siblings, not into a new
+folder of its own.
+
 ## When to write a new route test script
 
-- A new pull-API route ships → add `e2e/tests/test_visits_<route>_smoke.py` (or
+- A new pull-API route ships → add `e2e/tests/routes/test_visits_<route>_smoke.py` (or
   `test_stats_<route>_smoke.py` for `/stats/*`).
 - New behavior inside an *existing* route (e.g. a new trigger, a new response field) → add a new
   script next to the route's existing one rather than folding the new scenario into it. Example:
@@ -47,7 +51,7 @@ resource type (there's been one per DB concern so far: organizations, keys, card
 
 ## Script pattern (route tests)
 
-Every route test copies this skeleton from `e2e/tests/test_push_log_smoke.py`:
+Every route test copies this skeleton from `e2e/tests/routes/test_push_log_smoke.py`:
 
 - `argparse` with a positional `url` (`nargs="?"`, `default="local"` — resolves to
   `http://localhost:{API_PORT}`, `API_PORT` read from `.env`, default `8000`) and `--keep` (skip
@@ -64,13 +68,13 @@ Every route test copies this skeleton from `e2e/tests/test_push_log_smoke.py`:
 ## Running the route tests
 
 ```bash
-python e2e/tests/test_visits_check_smoke.py [url] [--keep]
+python e2e/tests/routes/test_visits_check_smoke.py [url] [--keep]
 ```
 
 Run all route tests:
 
 ```bash
-for f in e2e/tests/test_*_smoke.py; do python3 "$f" || exit 1; done
+for f in e2e/tests/routes/test_*_smoke.py; do python3 "$f" || exit 1; done
 ```
 
 For running the audit suite, see `e2e/tests/audit/README.md`.

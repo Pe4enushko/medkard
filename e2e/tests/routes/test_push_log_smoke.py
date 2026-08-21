@@ -21,8 +21,8 @@ is passed.
 
 Run from the repo root against a running API:
 
-    python e2e/tests/test_push_log_smoke.py
-    python e2e/tests/test_push_log_smoke.py https://medkard.example --keep
+    python e2e/tests/routes/test_push_log_smoke.py
+    python e2e/tests/routes/test_push_log_smoke.py https://medkard.example --keep
 
   url (optional) defaults to "local", which resolves to http://localhost:{API_PORT},
                API_PORT read from .env (default 8000 if unset — see .env.example).
@@ -43,9 +43,9 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent / "helpers"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "helpers"))
 
 load_dotenv(ROOT / ".env")
 
