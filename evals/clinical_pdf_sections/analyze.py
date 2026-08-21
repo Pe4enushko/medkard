@@ -9,11 +9,16 @@ and Tabula because neither participates in recognizing a bibliography heading.
 from __future__ import annotations
 
 import argparse
+import csv
+import hashlib
+import json
 import re
+import statistics
 import sys
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import fitz
@@ -62,6 +67,8 @@ class SectionStat:
 @dataclass(frozen=True)
 class DocumentStat:
     filename: str
+    file_size: int
+    sha256: str
     legacy: tuple[SectionStat, ...]
     candidate: tuple[SectionStat, ...]
     literature_lines: tuple[str, ...]
@@ -98,6 +105,14 @@ def _extract_text(path: Path) -> str:
     return text
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def _section_stats(sections: list[tuple[str | None, str]]) -> tuple[SectionStat, ...]:
     return tuple(
         SectionStat(
@@ -114,6 +129,8 @@ def _analyze_one(path_text: str) -> DocumentStat:
     text = _extract_text(path)
     return DocumentStat(
         filename=path.name,
+        file_size=path.stat().st_size,
+        sha256=_sha256(path),
         legacy=_section_stats(_legacy_split(text)),
         candidate=_section_stats(_split_into_sections(text)),
         literature_lines=tuple(
@@ -154,6 +171,238 @@ def _is_appendix(section: SectionStat) -> bool:
     return bool(section.title and section.title.casefold().startswith("приложени"))
 
 
+def _compact_title(title: str | None) -> str:
+    return " ".join(title.split()) if title else "(без раздела)"
+
+
+def _section_kind(section: SectionStat) -> str:
+    if section.title is None:
+        return "unsectioned"
+    if _is_bibliography(section):
+        return "bibliography"
+    if _is_criteria(section):
+        return "criteria"
+    if _is_appendix(section):
+        return "appendix"
+    if re.match(r"\d+\.\d+(?:\.\d+)?\s+", section.title):
+        return "numbered"
+    return "other"
+
+
+_CANONICAL_PREFIXES = (
+    re.compile(r"^\d+(?:\.\d+){0,3}\.?\s+"),
+    re.compile(r"^[ivxlcdm]+[.)]?\s+", re.IGNORECASE),
+    re.compile(r"^таблица\s+\d+(?:\.\d+)*\s*[-–—.:]?\s*", re.IGNORECASE),
+    re.compile(
+        r"^приложение\s+[а-яa-z]\d*(?:\s*[-–—]\s*[а-яa-z0-9]+)?"
+        r"\s*[.:-]?\s*",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _canonical_title(title: str | None) -> str:
+    """Return an exploratory key; exact titles remain the authoritative baseline."""
+    value = _compact_title(title)
+    if title is None:
+        return value
+    for pattern in _CANONICAL_PREFIXES:
+        value = pattern.sub("", value, count=1)
+    value = re.sub(r"\s+", " ", value).strip(" .:;,-–—").casefold()
+    return value or _compact_title(title).casefold()
+
+
+def _load_manifest(path: Path) -> dict[str, dict[str, str]]:
+    with path.open(encoding="utf-8-sig", newline="") as source:
+        return {row["ID"]: row for row in csv.DictReader(source)}
+
+
+def _write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, object]]) -> None:
+    with path.open("w", encoding="utf-8", newline="") as target:
+        writer = csv.DictWriter(target, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _guideline_label(document_id: str, manifest_row: dict[str, str]) -> str:
+    name = manifest_row.get("Наименование", "").strip()
+    return f"{document_id} — {name}" if name else document_id
+
+
+def _summary_rows(
+    details: list[dict[str, object]], key_field: str
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for row in details:
+        grouped.setdefault(str(row[key_field]), []).append(row)
+
+    result: list[dict[str, object]] = []
+    for title, rows in grouped.items():
+        chunks = [int(row["chunks"]) for row in rows]
+        guideline_labels = sorted(
+            {
+                str(row["guideline_label"])
+                for row in rows
+            },
+            key=str.casefold,
+        )
+        kinds = sorted({str(row["section_kind"]) for row in rows})
+        result.append(
+            {
+                key_field: title,
+                "section_kinds": " | ".join(kinds),
+                "section_occurrences": len(rows),
+                "guideline_count": len(guideline_labels),
+                "median_chunks": statistics.median(chunks),
+                "mean_chunks": f"{statistics.fmean(chunks):.3f}",
+                "min_chunks": min(chunks),
+                "max_chunks": max(chunks),
+                "total_chunks": sum(chunks),
+                "guidelines": " | ".join(guideline_labels),
+            }
+        )
+    return sorted(
+        result,
+        key=lambda row: (
+            -int(row["guideline_count"]),
+            str(row[key_field]).casefold(),
+        ),
+    )
+
+
+def _write_baseline(
+    output_dir: Path,
+    stats: list[DocumentStat],
+    failures: list[tuple[str, str]],
+    manifest_path: Path,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = _load_manifest(manifest_path)
+
+    details: list[dict[str, object]] = []
+    corpus_rows: list[dict[str, object]] = []
+    for stat in sorted(stats, key=lambda item: item.filename.casefold()):
+        document_id = Path(stat.filename).stem
+        manifest_row = manifest.get(document_id, {})
+        label = _guideline_label(document_id, manifest_row)
+        corpus_rows.append(
+            {
+                "guideline_id": document_id,
+                "filename": stat.filename,
+                "guideline_name": manifest_row.get("Наименование", ""),
+                "icd10": manifest_row.get("МКБ-10", ""),
+                "age_category": manifest_row.get("Возрастная категория", ""),
+                "file_size_bytes": stat.file_size,
+                "sha256": stat.sha256,
+                "candidate_section_count": len(stat.candidate),
+                "candidate_chunk_count": sum(section.chunks for section in stat.candidate),
+            }
+        )
+        for section_order, section in enumerate(stat.candidate, start=1):
+            exact_title = _compact_title(section.title)
+            details.append(
+                {
+                    "guideline_id": document_id,
+                    "filename": stat.filename,
+                    "guideline_name": manifest_row.get("Наименование", ""),
+                    "guideline_label": label,
+                    "icd10": manifest_row.get("МКБ-10", ""),
+                    "age_category": manifest_row.get("Возрастная категория", ""),
+                    "section_order": section_order,
+                    "section_title": exact_title,
+                    "canonical_title": _canonical_title(section.title),
+                    "section_kind": _section_kind(section),
+                    "chunks": section.chunks,
+                    "chars": section.chars,
+                }
+            )
+
+    detail_fields = [
+        "guideline_id",
+        "filename",
+        "guideline_name",
+        "guideline_label",
+        "icd10",
+        "age_category",
+        "section_order",
+        "section_title",
+        "canonical_title",
+        "section_kind",
+        "chunks",
+        "chars",
+    ]
+    _write_csv(output_dir / "guideline-sections.csv", detail_fields, details)
+    corpus_fields = list(corpus_rows[0]) if corpus_rows else []
+    _write_csv(output_dir / "corpus.csv", corpus_fields, corpus_rows)
+
+    summary_fields = [
+        "section_title",
+        "section_kinds",
+        "section_occurrences",
+        "guideline_count",
+        "median_chunks",
+        "mean_chunks",
+        "min_chunks",
+        "max_chunks",
+        "total_chunks",
+        "guidelines",
+    ]
+    exact_rows = _summary_rows(details, "section_title")
+    _write_csv(output_dir / "sections-exact.csv", summary_fields, exact_rows)
+    canonical_fields = summary_fields.copy()
+    canonical_fields[0] = "canonical_title"
+    canonical_rows = _summary_rows(details, "canonical_title")
+    _write_csv(output_dir / "sections-canonical.csv", canonical_fields, canonical_rows)
+
+    fingerprint = hashlib.sha256()
+    for row in corpus_rows:
+        fingerprint.update(f"{row['filename']}\0{row['sha256']}\n".encode())
+    try:
+        manifest_label = str(manifest_path.relative_to(ROOT))
+    except ValueError:
+        manifest_label = str(manifest_path)
+    metadata = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "corpus_sha256": fingerprint.hexdigest(),
+        "documents_ok": len(stats),
+        "documents_failed": len(failures),
+        "section_occurrences": len(details),
+        "exact_section_titles": len(exact_rows),
+        "canonical_section_titles": len(canonical_rows),
+        "manifest": manifest_label,
+        "failures": [{"filename": name, "error": error} for name, error in failures],
+    }
+    (output_dir / "metadata.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    readme = (
+        "# Baseline разбивки клинических рекомендаций\n\n"
+        "Этот каталог — воспроизводимый снимок текстового section-parser на корпусе "
+        f"из **{len(stats)} PDF**. Корпус идентифицируется SHA-256 "
+        f"`{metadata['corpus_sha256']}`.\n\n"
+        "## Файлы\n\n"
+        "- `sections-exact.csv` — точный список заголовков после схлопывания "
+        "пробелов: медиана, среднее, диапазон и список КР. Это основной baseline.\n"
+        "- `sections-canonical.csv` — та же сводка после эвристического удаления "
+        "нумерации (`8.`, `8.3`, `XIII`, `Таблица N`, `Приложение АN`). "
+        "Она удобна для исследования, но не заменяет точную таблицу.\n"
+        "- `guideline-sections.csv` — длинная таблица «КР → секция»: порядок, "
+        "точное и каноническое название, тип, число чанков и символов.\n"
+        "- `corpus.csv` — состав корпуса, метаданные КР, размер и SHA-256 каждого PDF.\n"
+        "- `metadata.json` — дата генерации, fingerprint корпуса и контрольные количества строк.\n\n"
+        "Медиана и среднее считаются по **вхождениям секций**, а не по сумме всего "
+        "документа. `section_occurrences` явно показывает повторные одноимённые "
+        "таблицы внутри одной КР, `guideline_count` — число разных КР.\n\n"
+        "Это baseline текстового пути PyMuPDF + production text splitter. Поиск "
+        "таблиц и Tabula намеренно не запускаются; их вклад надо измерять отдельно. "
+        "Для сравнения нового парсера нужен тот же `corpus_sha256` и нулевой список "
+        "ошибок в `metadata.json`.\n"
+    )
+    (output_dir / "README.md").write_text(readme, encoding="utf-8")
+    print(f"baseline written to {output_dir}", file=sys.stderr)
+
+
 def _bucket(chunks: int) -> str:
     if chunks == 1:
         return "1"
@@ -180,6 +429,17 @@ def main() -> int:
     parser.add_argument("directory", type=Path)
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--top", type=int, default=20)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="write reproducible per-section baseline CSV files to this directory",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=ROOT / "resources" / "manifest.csv",
+        help="clinical guideline manifest used to resolve PDF IDs to readable names",
+    )
     args = parser.parse_args()
 
     paths = sorted(args.directory.glob("*.pdf"))
@@ -202,6 +462,9 @@ def main() -> int:
     candidate_sections = [section for stat in stats for section in stat.candidate]
     legacy_criteria = [section for section in legacy_sections if _is_criteria(section)]
     candidate_criteria = [section for section in candidate_sections if _is_criteria(section)]
+
+    if args.output_dir:
+        _write_baseline(args.output_dir, stats, failures, args.manifest)
 
     print(f"documents: total={len(paths)} ok={len(stats)} failed={len(failures)}")
     print(f"sections: legacy={len(legacy_sections)} candidate={len(candidate_sections)}")

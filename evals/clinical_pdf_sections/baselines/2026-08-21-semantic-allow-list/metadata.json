@@ -1,0 +1,11 @@
+{
+  "generated_at": "2026-08-21T16:56:30.768783+00:00",
+  "corpus_sha256": "e18b2d46fd0d5b21517c58d8af8a5a43eb411a6dc819c659220a68528ad71df2",
+  "documents_ok": 707,
+  "documents_failed": 0,
+  "section_occurrences": 18280,
+  "exact_section_titles": 5763,
+  "canonical_section_titles": 4791,
+  "manifest": "resources/manifest.csv",
+  "failures": []
+}
