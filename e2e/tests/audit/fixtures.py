@@ -19,6 +19,17 @@ apply to *all* visit types are the easy ones to trip by accident:
   ОТСУТСТВУЕТ_ИНФОРМАЦИЯ_О_СОПРОВОЖДАЮЩЕМ — children need a named legal representative
                                      mentioned in the exam narrative
 
+One rule is known to be noisy rather than trippable-by-omission: for
+primary/repeat visits, followup_needed_for_nontrivial_case
+(ОТСУТСТВУЕТ_КОНТРОЛЬ_ПРИ_АКТИВНОМ_ПРОЦЕССЕ) treats any diagnosis read as an
+active infectious process (J06.9 included) as in-scope regardless of how
+clearly a follow-up instruction is worded — confirmed empirically in
+test_audit_primary.py (~15 live calls, including one model output truncated
+mid chain-of-thought on this exact rule). A primary/repeat fixture built on
+an infectious-process ICD code should expect this rule to fire
+inconsistently and may need harness.Case(exact=False) rather than more
+fixture wording.
+
 Dates are fixed, never datetime.now(): fixtures are pure data, nothing is
 written to the database, and a stable date keeps runs reproducible and log
 lines greppable.
