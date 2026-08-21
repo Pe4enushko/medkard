@@ -46,6 +46,9 @@ python scripts/audit-file.py <path-to-visit-json>
 python scripts/mock-run-today.py
 ```
 
+E2E tests (standalone scripts against a live API/Postgres/LLM, not pytest) are documented in
+`docs/e2e-testing.md`.
+
 ## Architecture
 
 ```
