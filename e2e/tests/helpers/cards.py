@@ -122,6 +122,19 @@ class CardFixtures(BaseStorage):
                 {"guid": card_guid, "formal": fake_formal_result, "priem": json.dumps(priem_patch, ensure_ascii=False)},
             )
 
+    async def mark_ignored(self, card_guid: str) -> None:
+        """Flip an existing done_cards row to ignored=TRUE, status='done'.
+
+        Exists to test /visits/export's include_ignored toggle — no other
+        fixture path produces an ignored row (the real pipeline sets it via
+        audit/filters.py, which this e2e suite does not invoke).
+        """
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                "UPDATE done_cards SET status = 'done', ignored = TRUE WHERE card_guid = %(guid)s",
+                {"guid": card_guid},
+            )
+
     async def card_row(self, card_guid: str) -> dict | None:
         """Return the full done_cards row for a guid, or None if it doesn't exist."""
         async with self._pool.connection() as conn:
