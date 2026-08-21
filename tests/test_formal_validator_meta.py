@@ -24,6 +24,6 @@ def _import_log() -> str:
 def test_load_logs_revision_meta():
     """Модуль пишет revised_at, число правил и самую старую дату сверки при загрузке."""
     text = _import_log()
-    assert "revised_at=2026-08-19" in text
+    assert "revised_at=2026-08-21" in text
     assert "rules=42" in text
     assert "oldest verified_at=2026-08-19" in text

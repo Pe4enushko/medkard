@@ -166,7 +166,7 @@ async def _stage_one(cases: list[Case], report: _Report) -> None:
 
         age = visit["Пациент"]["AGE"]
         icd = [d["КодМКБ"] for d in visit["Диагнозы"]]
-        rules = validator.get_rules(got_types, age, icd)
+        rules = validator.get_rules(got_types, age, icd, visit)
         selected = [r["flag_code"] for r in rules]
         report.check(
             f"[{case.name}] правило {case.expect} попало в промпт ({len(rules)} правил)",

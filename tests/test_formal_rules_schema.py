@@ -78,6 +78,22 @@ def test_icd_prefixes_are_upper_nonempty_strings():
             assert p == p.upper().strip(), f"{r['rule_id']}: префикс {p!r} не в верхнем регистре"
 
 
+def test_service_prefilters_are_normalized_nonempty_strings():
+    for rule in _doc()["rules"]:
+        applies = rule["applies_to"]
+        prefixes = applies.get("service_code_prefixes")
+        if prefixes is not None:
+            assert isinstance(prefixes, list) and prefixes, f"{rule['rule_id']}: пустой service_code_prefixes"
+            for prefix in prefixes:
+                assert isinstance(prefix, str) and prefix.strip(), f"{rule['rule_id']}: пустой NMU-префикс"
+                assert prefix == prefix.upper().strip(), f"{rule['rule_id']}: NMU-префикс {prefix!r} не нормализован"
+
+        keywords = applies.get("service_name_keywords")
+        if keywords is not None:
+            assert isinstance(keywords, list) and keywords, f"{rule['rule_id']}: пустой service_name_keywords"
+            assert all(isinstance(k, str) and k.strip() for k in keywords)
+
+
 def test_rule_count_snapshot():
     assert len(_doc()["rules"]) == EXPECTED_RULE_COUNT
 

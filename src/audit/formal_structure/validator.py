@@ -8,12 +8,13 @@ Workflow::
     rules      = validator.get_rules(visit_type)          # applicable rule dicts
     findings   = await validator.validate(visit)          # [{flag, issue}, ...]
 
-The `validate` method combines the two steps above, renders the rules into
-the system prompt, and calls the LLM via LLM.validations.validate_visit.
+The `validate` method combines the two steps above and checks every selected
+rule in its own atomic LLM request via LLM.validations.validate_rule.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -22,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from LLM.chinese_detector import ChineseDetector
-from LLM.validations import validate_visit
+from LLM.validations import validate_rule
 from LLM.visit_classifier import VisitClassifier
 
 _chinese_detector = ChineseDetector()
@@ -209,11 +210,33 @@ class FormalValidator:
 
         return result
 
+    @staticmethod
+    def _service_metadata(visit: dict[str, Any] | None) -> tuple[list[str], list[str]]:
+        codes: list[str] = []
+        names: list[str] = []
+        for service in ((visit or {}).get("Услуги") or []):
+            if not isinstance(service, dict):
+                continue
+            name = str(service.get("Наименование") or "").strip()
+            if name:
+                names.append(name.casefold())
+            for raw in service.values():
+                if not raw:
+                    continue
+                for token in str(raw).split():
+                    match = NMU_RE.fullmatch(token.strip())
+                    if match:
+                        codes.append(
+                            match.group(0).upper().replace("В", "B").replace("А", "A")
+                        )
+        return codes, names
+
     def get_rules(
         self,
         visit_types: set[VisitType],
         patient_age: int | None,
         icd_codes: list[str] | None = None,
+        visit: dict[str, Any] | None = None,
     ) -> list[dict]:
         """Return rules applicable to the given visit types, age and ICD codes.
 
@@ -224,6 +247,10 @@ class FormalValidator:
         ICD matching: a rule carrying ``applies_to.icd_prefixes`` passes only if
         one of ``icd_codes`` starts with one of those prefixes.  Without codes
         such a rule never applies.
+
+        NMU matching: ``service_code_prefixes`` and ``service_name_keywords``
+        are deterministic prefilters evaluated from ``visit["Услуги"]`` before
+        a rule is sent to the LLM.
         """
         type_keys = {_VISIT_TYPE_RULE_KEY[vt] for vt in visit_types}
         age_group: str | None = None
@@ -231,6 +258,7 @@ class FormalValidator:
             age_group = "child" if patient_age < 18 else "adult"
 
         codes = [c.strip().upper() for c in (icd_codes or []) if c and c.strip()]
+        service_codes, service_names = self._service_metadata(visit)
 
         seen: set[str] = set()
         rules: list[dict] = []
@@ -245,6 +273,26 @@ class FormalValidator:
                     continue
             prefixes = applies.get("icd_prefixes") or []
             if prefixes and not any(c.startswith(p) for c in codes for p in prefixes):
+                continue
+            service_prefixes = [
+                str(prefix).strip().upper().replace("В", "B").replace("А", "A")
+                for prefix in (applies.get("service_code_prefixes") or [])
+            ]
+            if service_prefixes and not any(
+                code.startswith(prefix)
+                for code in service_codes
+                for prefix in service_prefixes
+            ):
+                continue
+            service_name_keywords = [
+                str(keyword).casefold()
+                for keyword in (applies.get("service_name_keywords") or [])
+            ]
+            if service_name_keywords and not any(
+                keyword in name
+                for name in service_names
+                for keyword in service_name_keywords
+            ):
                 continue
             fc = rule.get("flag_code", "")
             if fc not in seen:
@@ -273,10 +321,9 @@ class FormalValidator:
             lines.append(f"({flag}) {text}")
         return "\n".join(lines)
 
-    def _render_prompt(self, rules: list[dict]) -> str:
-        """Render the system prompt with the given rules injected."""
-        rules_text = self._format_rules(rules)
-        return _PROMPT_TEMPLATE.replace("{rules}", rules_text)
+    def _render_prompt(self) -> str:
+        """Return the common prefix used by every atomic rule request."""
+        return _PROMPT_TEMPLATE
 
     def _check_nmu_keyword_contradiction(self, visit: dict[str, Any]) -> dict[str, str] | None:
         """Return a NMU_CODE_CONTRADICTION finding if NMU code and service name disagree.
@@ -328,8 +375,8 @@ class FormalValidator:
 
         1. Determines all visit types via ``get_visit_types``.
         2. Filters ``rules.json`` to the rules applicable to that visit type.
-        3. Renders the system prompt with those rules.
-        4. Calls the LLM and returns structured findings.
+        3. Starts one atomic LLM request per selected rule in parallel.
+        4. Returns the combined structured findings in rule order.
 
         Args:
             visit: Raw visit dict (as parsed from the source JSON).
@@ -348,12 +395,30 @@ class FormalValidator:
             for d in (visit.get("Диагнозы") or [])
             if isinstance(d, dict)
         ]
-        rules = self.get_rules(visit_types, patient_age, icd_codes)
+        rules = self.get_rules(visit_types, patient_age, icd_codes, visit)
         logger.debug("[formal] applicable rules (%d): %s", len(rules), [r.get("flag_code") for r in rules])
 
-        system_prompt = self._render_prompt(rules)
-
-        findings, tokens = await validate_visit(system_prompt, visit)
+        system_prompt = self._render_prompt()
+        atomic_results = await asyncio.gather(
+            *(
+                validate_rule(
+                    system_prompt,
+                    visit,
+                    self._format_rules([rule]),
+                    flag_code=rule["flag_code"],
+                    rule_id=rule["rule_id"],
+                )
+                for rule in rules
+            )
+        )
+        findings = []
+        tokens = 0
+        for rule, (rule_findings, rule_tokens) in zip(rules, atomic_results, strict=True):
+            findings.extend(
+                {**finding, "source": rule.get("source", "")}
+                for finding in rule_findings
+            )
+            tokens += rule_tokens
         logger.info("[formal] LLM returned %d finding(s), tokens=%d: %s", len(findings), tokens, findings)
 
         for i, finding in enumerate(findings):
@@ -361,8 +426,6 @@ class FormalValidator:
                 repaired, repair_tokens = await _chinese_detector.repair_issue(finding["issue"])
                 findings[i] = {**finding, "issue": repaired}
                 tokens += repair_tokens
-
-        findings = _enrich_flags(findings)
 
         contradiction = self._check_nmu_keyword_contradiction(visit)
         if contradiction:

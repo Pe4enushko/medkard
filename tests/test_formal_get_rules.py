@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
@@ -167,3 +169,129 @@ def test_flag_source_lookup_covers_new_flags():
     assert v._FLAG_SOURCE["ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО"] in {"168n", "192n"}
     assert v._FLAG_SOURCE["ПРОФ_ВЗРОСЛЫЙ_НЕПОЛНЫЙ_ОБЪЁМ"] == "404n"
     assert v._FLAG_SOURCE["НАЗНАЧЕНИЕ_ПО_ТОРГОВОМУ_БЕЗ_МНН"] == "1094n"
+
+
+def _service_visit(code: str, name: str) -> dict:
+    return {"Услуги": [{"КодЕГИСЗ": code, "Наименование": name}]}
+
+
+def test_consent_rule_is_prefiltered_to_performed_intervention_services() -> None:
+    validator = FormalValidator()
+
+    ordinary_visit = validator.get_rules(
+        {VisitType.PRIMARY},
+        45,
+        ["J18.9"],
+        _service_visit("B01.047.001", "Приём врача-терапевта первичный"),
+    )
+    injection_visit = validator.get_rules(
+        {VisitType.LAB_RESEARCH_INTERVENTION},
+        45,
+        ["Z25.1"],
+        _service_visit("A11.02.002", "Внутримышечное введение лекарственного препарата"),
+    )
+
+    assert "consent_for_intervention_outside_list" not in {
+        rule["rule_id"] for rule in ordinary_visit
+    }
+    assert "consent_for_intervention_outside_list" in {
+        rule["rule_id"] for rule in injection_visit
+    }
+
+
+def test_a_code_rules_are_prefiltered_by_804n_service_type():
+    validator = FormalValidator()
+    visit_types = {VisitType.LAB_RESEARCH_INTERVENTION}
+
+    laboratory = _flags(
+        validator.get_rules(
+            visit_types,
+            45,
+            ["Z00.0"],
+            _service_visit("A09.05.023", "Исследование уровня глюкозы в крови"),
+        )
+    )
+    surgery = _flags(
+        validator.get_rules(
+            visit_types,
+            45,
+            ["S51.8"],
+            _service_visit("A16.01.004", "Хирургическая обработка раны"),
+        )
+    )
+
+    assert "ЛАБОРАТОРИЯ_НЕПОЛНЫЕ_ДАННЫЕ" in laboratory
+    assert "МАНИПУЛЯЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ" not in laboratory
+    assert "МАНИПУЛЯЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ" in surgery
+    assert "ЛАБОРАТОРИЯ_НЕПОЛНЫЕ_ДАННЫЕ" not in surgery
+
+
+@pytest.mark.parametrize(
+    ("code", "name", "expected"),
+    [
+        ("A04.16.001", "Ультразвуковое исследование органов брюшной полости", "УЗИ_НЕПОЛНЫЙ_ПРОТОКОЛ"),
+        ("A05.10.006", "Регистрация электрокардиограммы", "ФУНКЦИОНАЛЬНОЕ_ИССЛЕДОВАНИЕ_НЕПОЛНОЕ"),
+        ("A12.09.001", "Исследование неспровоцированных дыхательных объёмов", "ФУНКЦИОНАЛЬНОЕ_ИССЛЕДОВАНИЕ_НЕПОЛНОЕ"),
+        ("A06.09.007", "Рентгенография лёгких", "РЕНТГЕН_НЕПОЛНЫЙ_ПРОТОКОЛ"),
+    ],
+)
+def test_804n_research_type_selects_only_its_specific_rule(code, name, expected):
+    validator = FormalValidator()
+    selected = set(
+        _flags(
+            validator.get_rules(
+                {VisitType.LAB_RESEARCH_INTERVENTION},
+                45,
+                ["Z00.0"],
+                _service_visit(code, name),
+            )
+        )
+    )
+    research_flags = {
+        "ЛАБОРАТОРИЯ_НЕПОЛНЫЕ_ДАННЫЕ",
+        "УЗИ_НЕПОЛНЫЙ_ПРОТОКОЛ",
+        "РЕНТГЕН_НЕПОЛНЫЙ_ПРОТОКОЛ",
+        "ФУНКЦИОНАЛЬНОЕ_ИССЛЕДОВАНИЕ_НЕПОЛНОЕ",
+        "МАНИПУЛЯЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
+        "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
+    }
+
+    assert selected & research_flags == {expected}
+
+
+def test_injection_rule_uses_real_a11_code_and_service_name():
+    validator = FormalValidator()
+    visit_types = {VisitType.LAB_RESEARCH_INTERVENTION}
+
+    injection = _flags(
+        validator.get_rules(
+            visit_types,
+            45,
+            ["J18.9"],
+            _service_visit(
+                "A11.02.002",
+                "Внутримышечное введение лекарственных препаратов",
+            ),
+        )
+    )
+    sample_collection = _flags(
+        validator.get_rules(
+            visit_types,
+            45,
+            ["Z00.0"],
+            _service_visit("A11.05.001", "Взятие крови из пальца"),
+        )
+    )
+    obsolete_fake_code = _flags(
+        validator.get_rules(
+            visit_types,
+            45,
+            ["J18.9"],
+            _service_visit("A03.31.001", "Процедура введения препарата"),
+        )
+    )
+
+    assert "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ" in injection
+    assert "МАНИПУЛЯЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ" not in injection
+    assert "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ" not in sample_collection
+    assert "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ" not in obsolete_fake_code
