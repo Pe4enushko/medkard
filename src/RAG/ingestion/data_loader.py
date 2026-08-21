@@ -41,28 +41,92 @@ TABLE_ROW_CHUNK_SIZE: int = 8   # max rows per table chunk yielded to the pipeli
 TEXT_CHUNK_SIZE: int = 2000     # characters per text chunk
 TEXT_CHUNK_OVERLAP: int = 200   # character overlap between consecutive text chunks
 
-# Regex that matches numbered sections like "1.1 Title" or "1.1.1 Title"
-# (2 or 3 numbering levels), ignoring fake sections indicated by more than
-# 2 dots in a row in the title line (so we ignore trailing dots from ToC
-# entries like "Список литературы....5" but still match titles containing
-# just single dots, e.g. the "3.1.1" numbering itself).
-_SECTION_PATTERN: re.Pattern = re.compile(
-    r'^('
-    r'\d+\.\d+(?:\.\d+)?\s+'
-    r'(?=[^\n]*[A-Za-zА-Яа-я])'
-    r'(?![^\n]*\.{2,})'
-    r'.*?'
-    r')(?=^\d+\.\d+(?:\.\d+)?\s+|\Z)',
-    re.MULTILINE | re.DOTALL
-)
-_SECTION_TITLE_PATTERN: re.Pattern = re.compile(
-    r'^('
-    r'\d+\.\d+(?:\.\d+)?\s+'
+# Numbered section titles such as "1.1 Title" or "1.1.1 Title".  Dot leaders
+# are rejected so printed-ToC entries such as "3.1 Диагностика....12" do not
+# become document boundaries.
+_NUMBERED_SECTION_PREFIX = r'\d+\.\d+(?:\.\d+)?'
+_SECTION_TITLE_TEXT = (
     r'(?=[^\n]*[A-Za-zА-Яа-я])'
     r'(?![^\n]*\.{2,})'
     r'[^\n]+'
-    r')',
-    re.MULTILINE
+)
+_NUMBERED_SECTION_TITLE = (
+    _NUMBERED_SECTION_PREFIX
+    + r'(?:'
+    + r'[^\S\r\n]+'
+    + _SECTION_TITLE_TEXT
+    + r'|[^\S\r\n]*(?:\r?\n[^\S\r\n]*)+(?!'
+    + _NUMBERED_SECTION_PREFIX
+    + r'(?:[ \t]|\r?(?:\n|\Z)))'
+    + _SECTION_TITLE_TEXT
+    + r')'
+)
+
+# Clinical guidelines commonly end their numbered body with an unnumbered
+# bibliography.  Without treating it as a boundary, the last numbered section
+# absorbs the bibliography and every appendix that follows it.  Keep this an
+# explicit allow-list: arbitrary unnumbered lines are too ambiguous to promote
+# to section titles reliably.
+# TODO(clinical-pdf-tail): a bibliography boundary labels the tail but does not
+# classify or discard references, OCR debris, and unrecognized appendices after
+# it.  Keep the remaining corpus debt measured in
+# evals/clinical_pdf_sections/README.md.
+_BIBLIOGRAPHY_SECTION_TITLE = (
+    r'(?:(?:[IVXLCDM]+|\d+)\.[ \t]*)?'
+    r'(?:'
+    r'Список[ \t]+литературы'
+    r'|Список[ \t]+использованной[ \t]+литературы'
+    r'|Список[ \t]+использованных[ \t]+источников'
+    r'|Библиографический[ \t]+список'
+    r'|Литература'
+    r')[.:]?'
+)
+
+# Quality-criteria sections are semantically stable but structurally varied:
+# depending on the guideline template they can be unnumbered, use a one-level
+# Arabic/Roman number, or be introduced as a numbered table.  Matching the
+# stable phrase is safer than enabling arbitrary one-level headings, which
+# would turn numbered recommendations and bibliography entries into sections.
+_CRITERIA_SECTION_TITLE = (
+    r'(?:(?:'
+    r'(?:[IVXLCDM]+|\d+)[.-]'
+    r'|Таблица[ \t]+\d+(?:\.\d+)?[ \t]*(?:[.\-–—:][ \t]*)?'
+    r')[ \t]+)?'
+    r'Критерии[ \t]+оценки[ \t]+качества'
+    r'(?![^\n]*\.{2,})'
+    r'(?![^\n]*(?:\n[^\n]*){0,3}\.{2,})'
+    r'(?![^\n]*(?:приведен\w*|представлен\w*|указан\w*|приказ\w*))'
+    r'[^\n]*'
+)
+
+# Appendices follow the quality-criteria table in many guideline templates.
+# Only descriptive appendix headings are boundaries.  A bare cross-reference
+# such as "Приложение А3/5." is deliberately left as body text.
+_APPENDIX_CODE = r'[A-Za-zА-Яа-я0-9]+(?:[/][A-Za-zА-Яа-я0-9]+)*'
+_APPENDIX_SECTION_TITLE = (
+    r'Приложени[ея][ \t]+'
+    + _APPENDIX_CODE
+    + r'(?:[ \t]*-[ \t]*'
+    + _APPENDIX_CODE
+    + r')?'
+    + r'[.]?[ \t]+'
+    + r'(?=[^\n]*[A-Za-zА-Яа-я])'
+    + r'(?![^\n]*\.{2,})'
+    + r'[^\n]+'
+)
+
+_SECTION_TITLE_PATTERN: re.Pattern = re.compile(
+    r'^('
+    + _NUMBERED_SECTION_TITLE
+    + r'|[ \t]*(?:'
+    + _BIBLIOGRAPHY_SECTION_TITLE
+    + r'|'
+    + _CRITERIA_SECTION_TITLE
+    + r'|'
+    + _APPENDIX_SECTION_TITLE
+    + r')'
+    + r')[ \t]*$',
+    re.MULTILINE | re.IGNORECASE,
 )
 _PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
 PDFS_DIR: Path = _PROJECT_ROOT / "pdfs"
@@ -126,23 +190,35 @@ def _split_rows(rows: list[dict], chunk_size: int) -> list[list[dict]]:
 
 
 def _split_into_sections(text: str) -> list[tuple[str | None, str]]:
-    """Split *text* into numbered sections (e.g. 1.1, 2.3) using regex.
+    """Split *text* into numbered sections and explicit terminal sections.
 
     Returns a list of (section_title, section_text) pairs.  If no numbered
     sections are found the whole text is returned as a single entry with
     title ``None``.
     """
-    matches = _SECTION_PATTERN.findall(text)
-    if not matches:
+    matches = list(_SECTION_TITLE_PATTERN.finditer(text))
+    first_numbered = next(
+        (
+            index
+            for index, match in enumerate(matches)
+            if re.match(r'\d+\.\d+(?:\.\d+)?\s+', match.group(1))
+        ),
+        None,
+    )
+    if first_numbered is None:
         return [(None, text)]
 
+    # Preserve the historical behaviour of dropping front matter before the
+    # first numbered content section.  An isolated semantic heading in an
+    # otherwise unnumbered document must not discard everything before it.
+    matches = matches[first_numbered:]
     result: list[tuple[str | None, str]] = []
-    for section_text in matches:
-        section_text = section_text.strip()
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        section_text = text[match.start() : end].strip()
         if not section_text:
             continue
-        m = _SECTION_TITLE_PATTERN.match(section_text)
-        title: str | None = m.group(1).strip() if m else None
+        title = match.group(1).strip()
         result.append((title, section_text))
     return result
 

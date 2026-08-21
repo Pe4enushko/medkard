@@ -1,5 +1,9 @@
 # Эвалы поиска по реестру лекарств
 
+Эвал границ разделов клинических PDF находится отдельно в
+[`clinical_pdf_sections/README.md`](clinical_pdf_sections/README.md). Он не
+относится к поиску ГРЛС и не использует БД.
+
 ## Зачем
 
 Спека engine `docs/superpowers/specs/2026-08-20-grls-integration-design.md`
