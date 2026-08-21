@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Active audit dimensions:
 1. **Formal structure** (`src/audit/formal_structure/`) — presence and completeness of required sections, per visit type and patient age
-2. **Diagnosis check** (`src/audit/diagnosis/`) — clinical-guideline compliance via three parallel checker agents (anamnesis / inspection / treatment)
+2. **Diagnosis check** (`src/LLM/graphs/diagnosis.py`) — deterministic clinical-guideline graph with four aspects (anamnesis / inspection / treatment / criteria)
 
 Core technology: LLM-based analysis (OpenAI-compatible API) combined with RAG — chunk contextual text (section + body) is embedded at ingest and matched against the query embedding, with a BM25 + vector RRF hybrid.
 
@@ -42,6 +42,9 @@ python scripts/audit-one-c-period.py Alenka [--days N] [--date DD.MM.YYYY] [--ig
 # Audit a single local JSON file
 python scripts/audit-file.py <path-to-visit-json>
 
+# Re-audit cards frozen with broken = TRUE (offline: reads card_data from DB)
+python scripts/fix-broken.py ORG|--all [-y] [--dry-run] [--num-batches N]
+
 # Replay today's cached 1C data (for development)
 python scripts/mock-run-today.py
 ```
@@ -56,12 +59,13 @@ src/
 │   ├── excel_formatter.py   # ExcelFormatter: DB → Excel export
 │   ├── formal_structure/    # FormalStructureValidator: rules.json-driven LLM check
 │   └── diagnosis/
-│       ├── validator.py     # DiagnosisValidator: 3 parallel LLM checker agents
+│       ├── validator.py     # DiagnosisValidator: guideline lookup + graph orchestration
 │       └── clinic_recs.py   # ClinicRecs: ICD → guideline file_id lookup
 ├── LLM/
 │   ├── base.py              # Shared OpenAI client + MODEL constant
-│   ├── rag_agent.py         # create_checker_agent() — LangChain ReAct agent
-│   ├── tools.py             # Per-file-id RAG retrieval tools for checker agents
+│   ├── graphs/              # Deterministic diagnosis LangGraph, state and nodes
+│   ├── rag_agent.py         # create_checker_agent() — retained for ICD ReAct
+│   ├── tools.py             # Guideline structure/read tools retained for ICD
 │   ├── visit_classifier.py  # VisitClassifier: primary / repeat / prophylactic
 │   ├── icd_prefix_picker.py # ICD prefix matching for guideline lookup
 │   ├── decider.py           # LLM-based binary decision helper
@@ -96,7 +100,12 @@ src/
 1C JSON → parse visits → deduplicate via `done_cards_storage` → concurrent audit with `asyncio.Semaphore` → for each visit: `FormalStructureValidator.validate()` + `DiagnosisValidator.validate_diagnosis()` per ICD code → persist `Result` to DB → `ExcelFormatter.export_period()` → optional FTP upload.
 
 **Diagnosis checker** (per ICD code):
-`ClinicRecs.pick_recs()` → guideline `file_id` → three parallel LangChain ReAct agents (anamnesis / inspection / treatment), each equipped with file-scoped RAG retrieval tools from `LLM/tools.py` → issues parsed, Chinese-character hallucinations repaired by `ChineseDetector`.
+`ClinicRecs.pick_recs()` → guideline `file_id` → acyclic LangGraph: generate
+questions + extract/lookup drugs + retrieve criteria → broad retrieval and
+reranking → four parallel judges without tools → source references resolved
+against numbered chunks in code → Chinese-character hallucinations repaired by
+`ChineseDetector`. Node failures are recorded in `errors` and degrade only the
+affected branch.
 
 ## Key Design Notes
 

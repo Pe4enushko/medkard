@@ -1,98 +1,40 @@
-"""
-DiagnosisValidator — clinical-guideline checker for a single diagnosis.
-
-Workflow::
-    validator = DiagnosisValidator(visit)
-    result    = await validator.validate_diagnosis(diagnosis)
-    # DiagnosisAuditResult(anamnesis_issues, inspection_issues, treatment_issues, ...)
-
-Responsibilities (narrow):
-- Look up the relevant guideline via ClinicRecs.
-- Run the three checker agents (anamnesis / inspection / treatment) in parallel.
-- Return a DiagnosisAuditResult.
-
-Formal structure checking and Excel logging are handled by audit.pipeline.
-"""
+"""Clinical-guideline audit for one diagnosis through a deterministic graph."""
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import re
-from dataclasses import dataclass
-from pathlib import Path
+from datetime import date, datetime
 from typing import Any
+
+from audit.diagnosis.clinic_recs import ClinicRecs
+from audit.graph_trace import (
+    current_correlation_id,
+    new_correlation_id,
+    trace_context,
+)
+from audit.graph_trace import (
+    emit as trace_emit,
+)
+from audit.models import DiagnosisAuditResult
+from storage.models.result import (
+    DiagnosisIssue,
+    GuidelineSource,
+    GuidelineSourceSection,
+    IssueSource,
+)
 
 logger = logging.getLogger(__name__)
 
-from LLM.chinese_detector import ChineseDetector
-from LLM.client import LLMClient
-from LLM.tools import (
-    get_anamnesis_tools_for,
-    get_inspection_tools_for,
-    get_treatment_tools_for,
-)
-from audit.diagnosis.schemas import CheckerIssue, CheckerOutput
-
-_chinese_detector = ChineseDetector()
-_client = LLMClient()
-from audit.diagnosis.clinic_recs import ClinicRecs
-from audit.models import DiagnosisAuditResult
-from storage.models.result import DiagnosisIssue, IssueSource
-
-# ── Checker prompts ───────────────────────────────────────────────────────────
-_PROMPTS_DIR = Path(__file__).parent.parent.parent / "LLM" / "prompts"
+_compiled_graph = None
 
 
-def _load_prompt(name: str) -> str:
-    return (_PROMPTS_DIR / name).read_text(encoding="utf-8")
+def _get_graph():
+    global _compiled_graph
+    if _compiled_graph is None:
+        from LLM.graphs.diagnosis import build_diagnosis_graph
 
-
-_ANAMNESIS_PROMPT: str = _load_prompt("anamnesis_checker.txt")
-_INSPECTION_PROMPT: str = _load_prompt("inspection_checker.txt")
-_TREATMENT_PROMPT: str = _load_prompt("treatment_checker.txt")
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@dataclass
-class _CheckerRun:
-    issues: list[DiagnosisIssue]
-
-
-def _issue_from_schema(item: CheckerIssue) -> DiagnosisIssue | None:
-    if not item.issue:
-        return None
-
-    sources = [
-        IssueSource(doc_title=s.doc_title, section=s.section, cite=s.cite)
-        for s in item.sources
-    ]
-    return DiagnosisIssue(issue=item.issue, sources=sources)
-
-
-def _load_checker_json(output: str) -> Any | None:
-    text = output.strip()
-    candidates = [text]
-
-    for match in re.finditer(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL):
-        candidates.insert(0, match.group(1).strip())
-
-    for marker in ("{", "["):
-        idx = text.find(marker)
-        if idx >= 0:
-            candidates.append(text[idx:].strip())
-
-    decoder = json.JSONDecoder()
-    for candidate in candidates:
-        if not candidate:
-            continue
-        try:
-            parsed, _ = decoder.raw_decode(candidate)
-            return parsed
-        except json.JSONDecodeError:
-            continue
-    return None
+        _compiled_graph = build_diagnosis_graph()
+    return _compiled_graph
 
 
 def _parse_inspection_data(raw_visit: dict[str, Any]) -> str:
@@ -118,11 +60,9 @@ def _has_content(value: Any) -> bool:
 
 def _format_visit_value(value: Any, indent: int = 0) -> str:
     prefix = " " * indent
-
     if isinstance(value, dict):
         if not value:
             return f"{prefix}—"
-
         lines: list[str] = []
         for key, item in value.items():
             if isinstance(item, (dict, list)):
@@ -131,25 +71,22 @@ def _format_visit_value(value: Any, indent: int = 0) -> str:
             else:
                 lines.append(f"{prefix}{key}: {item if item is not None else '—'}")
         return "\n".join(lines)
-
     if isinstance(value, list):
         if not value:
             return f"{prefix}—"
-
-        lines: list[str] = []
-        for idx, item in enumerate(value, start=1):
+        lines = []
+        for index, item in enumerate(value, start=1):
             if isinstance(item, (dict, list)):
-                lines.append(f"{prefix}{idx}.")
+                lines.append(f"{prefix}{index}.")
                 lines.append(_format_visit_value(item, indent + 2))
             else:
-                lines.append(f"{prefix}{idx}. {item if item is not None else '—'}")
+                lines.append(f"{prefix}{index}. {item if item is not None else '—'}")
         return "\n".join(lines)
-
     return f"{prefix}{value if value is not None else '—'}"
 
 
 def _format_visit_context(raw_visit: dict[str, Any]) -> str:
-    """Render all clinically relevant visit fields for guideline checkers."""
+    """Render all clinically relevant visit fields for graph nodes."""
     excluded = {"Пациент", "Диагнозы", "Прием", "Врач"}
     preferred = [
         "Жалобы",
@@ -161,11 +98,7 @@ def _format_visit_context(raw_visit: dict[str, Any]) -> str:
         "ДанныеОсмотра",
         "Услуги",
     ]
-
-    keys: list[str] = []
-    for key in preferred:
-        if key in raw_visit:
-            keys.append(key)
+    keys = [key for key in preferred if key in raw_visit]
     keys.extend(key for key in raw_visit if key not in excluded and key not in keys)
 
     parts: list[str] = []
@@ -173,197 +106,215 @@ def _format_visit_context(raw_visit: dict[str, Any]) -> str:
         value = raw_visit.get(key)
         if not _has_content(value):
             continue
-
         if key == "ДанныеОсмотра" and isinstance(value, list):
             rendered = _parse_inspection_data(raw_visit) or _format_visit_value(value)
         else:
             rendered = _format_visit_value(value)
         parts.append(f"## {key}\n{rendered}")
-
     return "\n\n".join(parts) if parts else "—"
 
 
 def _format_diagnosis(diagnosis: dict[str, Any]) -> str:
-    code = diagnosis.get("КодМКБ", "—")
-    name = diagnosis.get("НаименованиеМКБ", "—")
-    detail = diagnosis.get("Детализация", "")
-    first = diagnosis.get("ВыявленВпервые")
-
-    lines = [f"Код МКБ: {code}", f"Наименование МКБ: {name}"]
-    if detail:
-        lines.append(f"Детализация: {detail}")
-    if first is not None:
-        lines.append(f"Выявлен впервые: {'да' if first else 'нет'}")
+    lines = [
+        f"Код МКБ: {diagnosis.get('КодМКБ', '—')}",
+        f"Наименование МКБ: {diagnosis.get('НаименованиеМКБ', '—')}",
+    ]
+    if diagnosis.get("Детализация"):
+        lines.append(f"Детализация: {diagnosis['Детализация']}")
+    if diagnosis.get("ВыявленВпервые") is not None:
+        lines.append(
+            f"Выявлен впервые: {'да' if diagnosis['ВыявленВпервые'] else 'нет'}"
+        )
     return "\n".join(lines)
 
 
-def _parse_issues(output: str | CheckerOutput) -> list[DiagnosisIssue]:
-    """Parse a checker agent's JSON output into a list of Issue objects."""
-    if isinstance(output, CheckerOutput):
-        return [
-            issue
-            for item in output.issues
-            if (issue := _issue_from_schema(item)) is not None
-        ]
+def _visit_date(raw: object) -> date | None:
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    value = raw.strip()
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        pass
+    try:
+        day, month, year = (int(part) for part in value.split("."))
+        return date(year, month, day)
+    except (TypeError, ValueError):
+        return None
 
-    raw = _load_checker_json(output)
-    if raw is None:
-        return []
 
-    if isinstance(raw, dict):
-        try:
-            parsed = CheckerOutput.model_validate(raw)
-        except Exception:
-            return []
-        return [
-            issue
-            for item in parsed.issues
-            if (issue := _issue_from_schema(item)) is not None
-        ]
-
-    if not isinstance(raw, list):
-        return []
-
-    issues: list[DiagnosisIssue] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        issue_text = item.get("issue", "")
-        if not issue_text:
-            continue
-        sources = [
+def _issue_from_graph(raw: dict[str, Any]) -> DiagnosisIssue:
+    return DiagnosisIssue(
+        issue=raw["issue"],
+        aspect=raw.get("aspect"),
+        sources=[
             IssueSource(
-                doc_title=s.get("doc_title", ""),
-                section=s.get("section"),
-                cite=s.get("cite"),
+                doc_title=source.get("doc_title", ""),
+                section=source.get("section"),
+                cite=source.get("cite"),
+                chunk_id=source.get("chunk_id"),
+                chunk_index=source.get("chunk_index"),
             )
-            for s in item.get("sources", [])
-            if isinstance(s, dict)
-        ]
-        issues.append(DiagnosisIssue(issue=issue_text, sources=sources))
-    return issues
-
-
-async def _run_checker(
-    system_prompt: str,
-    tools: list,
-    human_message: str,
-    checker_label: str = "checker",
-    metadata: dict[str, Any] | None = None,
-) -> tuple[_CheckerRun, int]:
-    tool_names = [t.name for t in tools]
-    logger.debug("[checker:%s] START — tools=%s", checker_label, tool_names)
-    raw_answer, tokens = await _client.call_agent(
-        system_prompt,
-        tools,
-        human_message,
-        response_format=CheckerOutput,
-        metadata={"checker": checker_label, **(metadata or {})},
+            for source in raw.get("sources", [])
+        ],
     )
-    logger.info("🤖 [checker:%s] raw LLM answer:\n%s", checker_label, raw_answer)
-    issues = _parse_issues(raw_answer)
-    for i, issue in enumerate(issues):
-        if _chinese_detector.check_str(issue.issue):
-            repaired, repair_tokens = await _chinese_detector.repair_issue(issue.issue)
-            issues[i] = DiagnosisIssue(issue=repaired, sources=issue.sources)
-            tokens += repair_tokens
-    logger.debug("[checker:%s] parsed %d issue(s), tokens=%d", checker_label, len(issues), tokens)
-    return _CheckerRun(issues=issues), tokens
+
+
+def _guideline_source_from_graph(raw: dict[str, Any]) -> GuidelineSource:
+    return GuidelineSource(
+        file_id=raw.get("file_id", ""),
+        doc_title=raw.get("doc_title", ""),
+        sections=[
+            GuidelineSourceSection(
+                section=section.get("section"),
+                chunk_indices=list(section.get("chunk_indices") or []),
+                cited=bool(section.get("cited", False)),
+            )
+            for section in raw.get("sections", [])
+        ],
+    )
 
 
 class DiagnosisValidator:
-    """Checks a single diagnosis against its clinical guideline via three agents.
-
-    Args:
-        visit: Raw visit dict (as parsed from the source JSON).
-    """
-
     def __init__(self, visit: dict[str, Any]) -> None:
-        # TODO: refactor to use parsers.json_parser.AppointmentParser.parse() instead of direct key access
         self._visit = visit
         self._clinic_recs = ClinicRecs()
+        visit_meta = visit.get("Прием") or {}
+        self._card_guid = visit_meta.get("GUID") or None
+        self._correlation_id = current_correlation_id() or new_correlation_id()
 
     async def validate_diagnosis(
         self,
         diagnosis: dict[str, Any],
     ) -> tuple[DiagnosisAuditResult, int]:
-        """Run anamnesis / inspection / treatment checker agents for *diagnosis*.
+        with trace_context(self._correlation_id, self._card_guid):
+            return await self._validate_diagnosis(diagnosis)
 
-        Args:
-            diagnosis: A single entry from the visit's «Диагнозы» list.
-
-        Returns:
-            (DiagnosisAuditResult, total_tokens) where total_tokens covers
-            guideline lookup and all three checker agents.
-        """
-        patient: dict = self._visit.get("Пациент", {})
+    async def _validate_diagnosis(
+        self,
+        diagnosis: dict[str, Any],
+    ) -> tuple[DiagnosisAuditResult, int]:
+        patient = self._visit.get("Пациент") or {}
         dx_code = diagnosis.get("КодМКБ", "?")
-        card_guid = (self._visit.get("Прием") or {}).get("GUID")
-        logger.info("[diagnosis] validate_diagnosis START — dx=%s", dx_code)
-
-        file_id, clinic_tokens = await self._clinic_recs.pick_recs(patient, diagnosis)
-        logger.info("[diagnosis] guideline file_id picked: %s", file_id)
-
-        anamnesis_issues: list[DiagnosisIssue] = []
-        inspection_issues: list[DiagnosisIssue] = []
-        treatment_issues: list[DiagnosisIssue] = []
-        checker_tokens = 0
-
-        if file_id:
-            patient_info = "\n".join(f"{k}: {v}" for k, v in patient.items() if v is not None)
-            human_message = (
-                "## Пациент\n"
-                f"{patient_info}\n\n"
-                "## Диагноз\n"
-                f"{_format_diagnosis(diagnosis)}\n\n"
-                "## Клинический контекст записи\n"
-                f"{_format_visit_context(self._visit)}"
+        trace_emit(
+            "diagnosis.guideline_selection.started",
+            dx_code=dx_code,
+            diagnosis=diagnosis,
+            patient=patient,
+        )
+        try:
+            file_id, clinic_tokens = await self._clinic_recs.pick_recs(
+                patient, diagnosis
             )
-            logger.info("📨 [diagnosis] checker user prompt for dx=%s:\n%s", dx_code, human_message)
-            logger.info("[diagnosis] launching anamnesis / inspection / treatment checkers in parallel")
+        except Exception as exc:
+            trace_emit(
+                "diagnosis.guideline_selection.failed",
+                dx_code=dx_code,
+                exception=exc,
+            )
+            raise
+        trace_emit(
+            "diagnosis.guideline_selection.completed",
+            dx_code=dx_code,
+            file_id=file_id,
+            tokens=clinic_tokens,
+        )
+        if not file_id:
+            result = DiagnosisAuditResult(guideline_file_id=None, icd_code=dx_code)
+            trace_emit(
+                "diagnosis.completed",
+                dx_code=dx_code,
+                output=result.to_dict(),
+                tokens=clinic_tokens,
+                graph_ran=False,
+            )
+            return result, clinic_tokens
 
-            (anamnesis_run, a_tokens), (inspection_run, i_tokens), (treatment_run, t_tokens) = await asyncio.gather(
-                _run_checker(
-                    _ANAMNESIS_PROMPT,
-                    get_anamnesis_tools_for(file_id),
-                    human_message,
-                    checker_label="anamnesis",
-                    metadata={"card_guid": card_guid, "dx_code": dx_code},
-                ),
-                _run_checker(
-                    _INSPECTION_PROMPT,
-                    get_inspection_tools_for(file_id),
-                    human_message,
-                    checker_label="inspection",
-                    metadata={"card_guid": card_guid, "dx_code": dx_code},
-                ),
-                _run_checker(
-                    _TREATMENT_PROMPT,
-                    get_treatment_tools_for(file_id),
-                    human_message,
-                    checker_label="treatment",
-                    metadata={"card_guid": card_guid, "dx_code": dx_code},
-                ),
-            )
-            anamnesis_issues = anamnesis_run.issues
-            inspection_issues = inspection_run.issues
-            treatment_issues = treatment_run.issues
-            checker_tokens = a_tokens + i_tokens + t_tokens
-            logger.info(
-                "[diagnosis] checkers done — anamnesis=%d inspection=%d treatment=%d tokens=%d",
-                len(anamnesis_issues), len(inspection_issues), len(treatment_issues), checker_tokens,
-            )
-        else:
-            logger.warning(
-                "[diagnosis] dx=%s — Для такого МКБ кода нет прямых клинических рекоммендаций",
-                dx_code,
-            )
+        from RAG.retrieval.searches import get_sections_for_file
+        from storage.guidelines_storage import GuidelinesStorage
 
-        total_tokens = clinic_tokens + checker_tokens
-        return DiagnosisAuditResult(
-            anamnesis_issues=anamnesis_issues,
-            inspection_issues=inspection_issues,
-            treatment_issues=treatment_issues,
+        async with GuidelinesStorage() as storage:
+            guideline = await storage.get(file_id)
+        doc_title = guideline.name if guideline and guideline.name else file_id
+        toc = await get_sections_for_file(file_id)
+        patient_block = (
+            "\n".join(
+                f"{key}: {value}" for key, value in patient.items() if value is not None
+            )
+            or "—"
+        )
+        visit_meta = self._visit.get("Прием") or {}
+        initial_state = {
+            "visit_context": _format_visit_context(self._visit),
+            "patient_block": patient_block,
+            "diagnosis_block": _format_diagnosis(diagnosis),
+            "visit_date": _visit_date(visit_meta.get("DATE")),
+            "file_id": file_id,
+            "doc_title": doc_title,
+            "toc": toc,
+            "card_guid": visit_meta.get("GUID"),
+            "correlation_id": self._correlation_id,
+            "dx_code": dx_code,
+            "pools": {},
+            "issues": {},
+            "errors": [],
+            "tokens": 0,
+        }
+        trace_emit(
+            "diagnosis.graph.started",
+            dx_code=dx_code,
+            file_id=file_id,
+            doc_title=doc_title,
+            state=initial_state,
+        )
+        try:
+            graph_result = await _get_graph().ainvoke(initial_state)
+        except Exception as exc:
+            trace_emit(
+                "diagnosis.graph.failed",
+                dx_code=dx_code,
+                file_id=file_id,
+                exception=exc,
+            )
+            raise
+        trace_emit(
+            "diagnosis.graph.completed",
+            dx_code=dx_code,
+            file_id=file_id,
+            state=graph_result,
+        )
+        issues = graph_result.get("issues", {})
+        result = DiagnosisAuditResult(
+            anamnesis_issues=[
+                _issue_from_graph(item) for item in issues.get("anamnesis", [])
+            ],
+            inspection_issues=[
+                _issue_from_graph(item) for item in issues.get("inspection", [])
+            ],
+            treatment_issues=[
+                _issue_from_graph(item) for item in issues.get("treatment", [])
+            ],
+            criteria_issues=[
+                _issue_from_graph(item) for item in issues.get("criteria", [])
+            ],
             guideline_file_id=file_id,
             icd_code=dx_code,
-        ), total_tokens
+            guideline_sources=[
+                _guideline_source_from_graph(source)
+                for source in graph_result.get("sources", [])
+            ],
+            errors=list(graph_result.get("errors", [])),
+        )
+        total_tokens = clinic_tokens + int(graph_result.get("tokens", 0))
+        trace_emit(
+            "diagnosis.completed",
+            dx_code=dx_code,
+            output=result.to_dict(),
+            tokens=total_tokens,
+            graph_ran=True,
+        )
+        return result, total_tokens

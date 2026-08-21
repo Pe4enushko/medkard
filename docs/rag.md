@@ -77,7 +77,7 @@ Result dict shape:
 }
 ```
 
-### `_vector_search_filtered(embedding, file_id, limit, section_filter, col)`
+### `_vector_search_filtered(embedding, file_id, limit, section_filter)`
 
 Internal — same cosine search but adds `file_id = $2` and optional `section` LIKE filter. Used by `searches.py`.
 
@@ -85,37 +85,26 @@ Internal — same cosine search but adds `file_id = $2` and optional `section` L
 
 ## Targeted searches — `RAG/retrieval/searches.py`
 
-All four functions wrap `_hybrid_filtered`, which calls `_vector_search_filtered` (scoped to a single document) and then applies BM25 + RRF. Returns `TARGETED_TOP_K=4` results.
+`search_in_guideline(query, file_id, candidates=…, top_k=…)` используется
+графом аудита диагноза. Он выполняет поиск по всему документу без фильтра по
+названию раздела, объединяет vector/BM25 через RRF и применяет реранкер.
+Результаты нескольких вопросов дедуплицируются и ограничиваются уже в узле
+графа. `get_section_chunks_by_pattern` отдельно читает все части таблицы
+критериев качества в порядке страницы, таблицы и чанка. Узел графа
+реконструирует из JSON-батчей одну Markdown-таблицу без ограничения количества
+чанков.
 
-| Function | Section filter | Used by |
-|---|---|---|
-| `search_by_file_id(file_id, query)` | none | `SearchGuidelineTool` |
-| `search_anamnesis(file_id, query)` | section LIKE `%жалоб%` | `SearchAnamnesisTool` |
-| `search_inspection(file_id, query)` | section LIKE `%исследов%` | `SearchInspectionTool` |
-| `search_treatment(file_id, query)` | section LIKE `%лечен%` | `SearchTreatmentTool` |
+Старые секционные функции `search_anamnesis` / `search_inspection` /
+`search_treatment` удалены вместе с ReAct-инструментами диагноз-контура.
 
 ---
 
 ## LangChain tools — `LLM/tools.py`
 
-Wraps the search functions above as `BaseTool` subclasses with `file_id` baked in at construction time. Each tool's `_arun(query)` calls the corresponding search function and formats results with `_format_results`.
-
-| Tool class | Calls |
-|---|---|
-| `SearchGuidelineTool` | `search_by_file_id` |
-| `SearchAnamnesisTool` | `search_anamnesis` |
-| `SearchInspectionTool` | `search_inspection` |
-| `SearchTreatmentTool` | `search_treatment` |
-
-### Factory functions
-
-```python
-get_anamnesis_tools_for(file_id)   # [SearchAnamnesisTool, SearchGuidelineTool]
-get_inspection_tools_for(file_id)  # [SearchInspectionTool, SearchGuidelineTool]
-get_treatment_tools_for(file_id)   # [SearchTreatmentTool, SearchGuidelineTool]
-```
-
-Each checker agent receives its domain-specific tool plus the general `SearchGuidelineTool` as a fallback.
+Диагноз-контур больше не использует LangChain tools и ReAct. В `LLM/tools.py`
+остаются только инструменты ICD-чекера для чтения структуры и разделов КР.
+`GetGuidelineStructureTool` и `ReadGuidelineSectionTool` по-прежнему нужны
+ICD-ReAct-чекеру; его перенос на граф в эту работу не входит.
 
 ---
 

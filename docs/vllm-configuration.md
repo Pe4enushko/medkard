@@ -64,8 +64,9 @@
 Текущий `8010` нельзя использовать для rerank: на нём загружена generative Qwen-модель, а `/rerank` отсутствует. vLLM поддерживает Cohere/Jina-compatible rerank API для score/pooling моделей; нужен отдельный процесс, например:
 
 ```bash
-vllm serve BAAI/bge-reranker-v2-m3 \
+vllm serve Qwen/Qwen3-Reranker-0.6B \
   --runner pooling \
+  --hf-overrides '{"architectures":["Qwen3ForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true}' \
   --host 0.0.0.0 \
   --port 8011
 ```
@@ -74,11 +75,17 @@ vllm serve BAAI/bge-reranker-v2-m3 \
 
 ```text
 RERANK_BASE_URL=http://192.168.1.80:8011
-RERANK_MODEL=BAAI/bge-reranker-v2-m3
-RERANK_CANDIDATE_LIMIT=20
+RERANK_MODEL=Qwen/Qwen3-Reranker-0.6B
+RERANK_CANDIDATE_LIMIT=40
 RERANK_TIMEOUT_SECONDS=10
+RERANK_QUERY_TEMPLATE=<Instruct>: {instruction}\n<Query>: {query}
+RERANK_DOC_TEMPLATE=<Document>: {doc}
+RERANK_INSTRUCTION=Оцени, отвечает ли фрагмент клинических рекомендаций на клинический вопрос
 ```
 
-Приложение сначала получает ограниченный candidate set через HNSW + BM25 + RRF, затем отправляет до 20 chunks на `/rerank` и возвращает только `top_k`. При недоступности reranker автоматически остаётся RRF-порядок.
+Приложение сначала получает ограниченный candidate set через HNSW + BM25 +
+RRF, затем отправляет до 40 chunks на `/rerank` и возвращает только `top_k`.
+При недоступности reranker автоматически остаётся RRF-порядок. Для
+bge-подобных моделей шаблоны query/document следует оставить пустыми.
 
 Документация vLLM: [scoring usages](https://docs.vllm.ai/en/latest/models/pooling_models/scoring/) и [v0.20 score examples](https://docs.vllm.ai/en/v0.20.2/examples/pooling/score/).

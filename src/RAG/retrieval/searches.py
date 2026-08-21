@@ -1,32 +1,13 @@
-"""
-searches.py — targeted hybrid search helpers filtered by file_id and section.
-
-All public functions return raw Doc-like dicts (same shape as hybrid_search).
-Use Doc._format_chunk() to render them for LLM prompts.
-
-Public API
-----------
-search_by_file_id(file_id, query)
-    Hybrid search restricted to a single clinical-guideline document.
-
-search_anamnesis(file_id, query)
-    Anamnesis / complaints chunks (section contains «анамнез» or «жалоб»).
-
-search_inspection(file_id, query)
-    Investigations / lab-results chunks (section contains «исследов»).
-
-search_treatment(file_id, query)
-    Treatment chunks (section contains «лечен»).
-"""
+"""Guideline retrieval used by diagnosis graph and ICD checker."""
 
 from __future__ import annotations
 
 import json
 import logging
 
+from audit.graph_trace import emit as trace_emit
 from RAG.retrieval.embeddings import embed
 from RAG.retrieval.vector_store import (
-    CANDIDATES_FACTOR,
     RRF_K,
     _bm25_rank,
     _rrf,
@@ -35,62 +16,6 @@ from RAG.retrieval.vector_store import (
 )
 
 logger = logging.getLogger(__name__)
-
-TARGETED_TOP_K = 4
-
-
-# ── Internal helpers ──────────────────────────────────────────────────────────
-
-async def _hybrid_filtered(
-    query: str,
-    file_id: str,
-    section_filter: str | None = None,
-) -> list[dict]:
-    """Core hybrid search (vector + BM25 + RRF) with file_id and optional section filter."""
-    logger.info(
-        "[retrieval] hybrid_filtered START file_id=%s section_filter=%s top_k=%d query=%r",
-        file_id,
-        section_filter,
-        TARGETED_TOP_K,
-        query,
-    )
-    embedding = await embed(query)
-    n_candidates = TARGETED_TOP_K * CANDIDATES_FACTOR
-
-    candidates = await _vector_search_filtered(
-        embedding, file_id, n_candidates, section_filter
-    )
-    if not candidates:
-        logger.info(
-            "[retrieval] hybrid_filtered returned no candidates file_id=%s section_filter=%s query=%r",
-            file_id,
-            section_filter,
-            query,
-        )
-        return []
-
-    vector_ranking = [c["id"] for c in candidates]
-    bm25_ranking = _bm25_rank(query, candidates)
-    rrf_scores = _rrf([vector_ranking, bm25_ranking], k=RRF_K)
-
-    by_id = {c["id"]: c for c in candidates}
-    ranked = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-
-    results = []
-    for doc_id, score in ranked:
-        row = dict(by_id[doc_id])
-        row.pop("distance", None)
-        row["rrf_score"] = score
-        results.append(row)
-
-    results = await rerank_results(query, results, TARGETED_TOP_K)
-    _log_retrieved_chunks(
-        query=query,
-        file_id=file_id,
-        section_filter=section_filter,
-        results=results,
-    )
-    return results
 
 
 def _log_retrieved_chunks(
@@ -142,59 +67,64 @@ def _metadata_dict(raw_metadata: object) -> dict:
 
 # ── Public functions ──────────────────────────────────────────────────────────
 
-async def search_by_file_id(
-    file_id: str,
+
+async def search_in_guideline(
     query: str,
-) -> list[dict]:
-    """Hybrid search restricted to a single document (by file_id).
-
-    Args:
-        file_id: ID of the clinical guideline document to search within.
-        query:   Natural-language search query.
-
-    Returns:
-        List of result dicts with keys: id, chunk, metadata, rrf_score.
-    """
-    return await _hybrid_filtered(query, file_id)
-
-
-async def search_anamnesis(
     file_id: str,
-    query: str,
+    *,
+    candidates: int,
+    top_k: int,
 ) -> list[dict]:
-    """Search anamnesis and complaints sections within a document.
+    """Retrieve and rerank chunks from one guideline without a section filter."""
+    trace_emit(
+        "retrieval.search.started",
+        retrieval="search_in_guideline",
+        query=query,
+        file_id=file_id,
+        candidates=candidates,
+        top_k=top_k,
+    )
+    embedding = await embed(query)
+    rows = await _vector_search_filtered(embedding, file_id, candidates)
+    if not rows:
+        trace_emit(
+            "retrieval.search.completed",
+            retrieval="search_in_guideline",
+            query=query,
+            file_id=file_id,
+            chunks=[],
+        )
+        return []
 
-    Filters chunks whose section title (case-insensitive) contains «жалоб».
+    vector_ranking = [row["id"] for row in rows]
+    bm25_ranking = _bm25_rank(query, rows)
+    rrf_scores = _rrf([vector_ranking, bm25_ranking], k=RRF_K)
+    by_id = {row["id"]: row for row in rows}
 
-    Returns raw result dicts (no formatting).
-    """
-    return await _hybrid_filtered(query, file_id, section_filter="жалоб")
+    ranked: list[dict] = []
+    for doc_id, score in sorted(
+        rrf_scores.items(), key=lambda item: item[1], reverse=True
+    ):
+        row = dict(by_id[doc_id])
+        row.pop("distance", None)
+        row["rrf_score"] = score
+        ranked.append(row)
 
-
-async def search_inspection(
-    file_id: str,
-    query: str,
-) -> list[dict]:
-    """Search investigation / diagnostic criteria sections within a document.
-
-    Filters chunks whose section title (case-insensitive) contains «исследов».
-
-    Returns raw result dicts (no formatting).
-    """
-    return await _hybrid_filtered(query, file_id, section_filter="исследов")
-
-
-async def search_treatment(
-    file_id: str,
-    query: str,
-) -> list[dict]:
-    """Search treatment sections within a document.
-
-    Filters chunks whose section title (case-insensitive) contains «лечен».
-
-    Returns raw result dicts (no formatting).
-    """
-    return await _hybrid_filtered(query, file_id, section_filter="лечен")
+    results = await rerank_results(query, ranked, top_k)
+    _log_retrieved_chunks(
+        query=query,
+        file_id=file_id,
+        section_filter=None,
+        results=results,
+    )
+    trace_emit(
+        "retrieval.search.completed",
+        retrieval="search_in_guideline",
+        query=query,
+        file_id=file_id,
+        chunks=results,
+    )
+    return results
 
 
 async def get_sections_for_file(file_id: str) -> list[str]:
@@ -204,6 +134,7 @@ async def get_sections_for_file(file_id: str) -> list[str]:
     deciding which sections to read.
     """
     from RAG.retrieval.vector_store import _get_pool
+
     pool = await _get_pool()
     rows = await pool.fetch(
         """
@@ -217,7 +148,14 @@ async def get_sections_for_file(file_id: str) -> list[str]:
         """,
         file_id,
     )
-    return [r["section"] for r in rows if r["section"]]
+    sections = [r["section"] for r in rows if r["section"]]
+    trace_emit(
+        "retrieval.structure.completed",
+        retrieval="get_sections_for_file",
+        file_id=file_id,
+        sections=sections,
+    )
+    return sections
 
 
 async def get_section_chunks(file_id: str, section: str) -> list[dict]:
@@ -227,6 +165,7 @@ async def get_section_chunks(file_id: str, section: str) -> list[dict]:
     (e.g. sections 1.1, 1.2 — definition and classification).
     """
     from RAG.retrieval.vector_store import _get_pool
+
     pool = await _get_pool()
     rows = await pool.fetch(
         """
@@ -239,4 +178,46 @@ async def get_section_chunks(file_id: str, section: str) -> list[dict]:
         file_id,
         section,
     )
-    return [dict(r) for r in rows]
+    chunks = [dict(r) for r in rows]
+    trace_emit(
+        "retrieval.section.completed",
+        retrieval="get_section_chunks",
+        file_id=file_id,
+        section=section,
+        chunks=chunks,
+    )
+    return chunks
+
+
+async def get_section_chunks_by_pattern(
+    file_id: str,
+    pattern: str,
+) -> list[dict]:
+    """Return every chunk whose section matches a pattern, in document order."""
+    from RAG.retrieval.vector_store import _get_pool
+
+    pool = await _get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id::text, file_id, chunk, metadata
+        FROM docs
+        WHERE file_id = $1
+          AND metadata->>'section' ILIKE $2
+        ORDER BY
+          COALESCE((metadata->>'page')::INT, -1) ASC,
+          COALESCE((metadata->>'table_index')::INT, -1) ASC,
+          COALESCE((metadata->>'chunk_index')::INT, -1) ASC,
+          id ASC
+        """,
+        file_id,
+        pattern,
+    )
+    chunks = [dict(row) for row in rows]
+    trace_emit(
+        "retrieval.section.completed",
+        retrieval="get_section_chunks_by_pattern",
+        file_id=file_id,
+        pattern=pattern,
+        chunks=chunks,
+    )
+    return chunks

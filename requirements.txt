@@ -4,10 +4,10 @@ instructor
 pydantic
 
 # LangChain (RAG agent)
-langchain
-langgraph
-langchain-openai
-langchain-core
+langchain==1.3.16
+langgraph==1.2.11
+langchain-openai==1.6.0
+langchain-core==1.6.0
 
 # Sentence-transformers (optional: only needed when EMBEDDING_PROVIDER=st)
 sentence-transformers

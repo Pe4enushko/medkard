@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
+from typing import Any
 
 from .base import BaseStorage
 from .models.result import DiagnosisResult, FormalStructureResult, IcdCodingIssue
@@ -41,13 +42,36 @@ def _diag_json(diagnosis: list[DiagnosisResult]) -> str:
                 "issues": [
                     {
                         "issue": iss.issue,
+                        **({"aspect": iss.aspect} if iss.aspect is not None else {}),
                         "sources": [
-                            {"doc_title": s.doc_title, "section": s.section, "cite": s.cite}
+                            {
+                                "doc_title": s.doc_title,
+                                "section": s.section,
+                                "cite": s.cite,
+                                "chunk_id": s.chunk_id,
+                                "chunk_index": s.chunk_index,
+                            }
                             for s in iss.sources
                         ],
                     }
                     for iss in dr.issues
                 ],
+                "guideline_sources": [
+                    {
+                        "file_id": source.file_id,
+                        "doc_title": source.doc_title,
+                        "sections": [
+                            {
+                                "section": section.section,
+                                "chunk_indices": section.chunk_indices,
+                                "cited": section.cited,
+                            }
+                            for section in source.sections
+                        ],
+                    }
+                    for source in dr.guideline_sources
+                ],
+                "errors": dr.errors,
             }
             for dr in diagnosis
         ],
@@ -369,6 +393,58 @@ class DoneCardsStorage(BaseStorage):
             rows = await cur.fetchall()
         logger.info("💾 done_cards loaded %d pending card(s) for org_id=%s", len(rows), organization_id)
         return rows
+
+    async def get_broken(self, organization_id: str | None = None) -> list[dict]:
+        """Return replayable broken rows, optionally scoped to one organization.
+
+        Unlike ``get_pending`` and ``get_done_guids``, ``None`` means every
+        organization. Rows without card data cannot be replayed, and rows
+        without a GUID cannot be matched back after replay, so both are skipped.
+        """
+        query = (
+            "SELECT card_guid, card_data, organization_id::text AS organization_id "
+            "FROM done_cards "
+            "WHERE broken = TRUE "
+            "AND card_data IS NOT NULL "
+            "AND card_guid IS NOT NULL"
+        )
+        params: dict[str, Any] = {}
+        if organization_id is not None:
+            query += " AND organization_id = %(org_id)s::uuid"
+            params["org_id"] = organization_id
+
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(query, params)
+            rows = await cur.fetchall()
+
+        logger.info(
+            "💾 done_cards loaded %d broken card(s) for org_id=%s",
+            len(rows),
+            organization_id if organization_id is not None else "<all>",
+        )
+        return [dict(row) for row in rows]
+
+    async def get_states_for_guids(self, guids: set[str]) -> dict[str, dict]:
+        """Return broken/ignored flags and stacktraces for existing GUIDs."""
+        if not guids:
+            return {}
+
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT card_guid, broken, ignored, stacktrace FROM done_cards "
+                "WHERE card_guid = ANY(%(guids)s)",
+                {"guids": list(guids)},
+            )
+            rows = await cur.fetchall()
+
+        return {
+            row["card_guid"]: {
+                "broken": bool(row["broken"]),
+                "ignored": bool(row["ignored"]),
+                "stacktrace": row["stacktrace"],
+            }
+            for row in rows
+        }
 
     async def get_done_guids(self, organization_id: str | None = None) -> set[str]:
         """Return non-null card GUIDs with a terminal (done) status for an organization.

@@ -27,8 +27,9 @@ from natasha import Doc, Segmenter
 from pgvector.asyncpg import register_vector
 from rank_bm25 import BM25Okapi
 
-from RAG.retrieval.embeddings import EMBEDDING_DIM, EMBEDDING_MODEL, embed  # noqa: F401
+from audit.graph_trace import emit as trace_emit
 from LLM.observability import emit
+from RAG.retrieval.embeddings import EMBEDDING_DIM, EMBEDDING_MODEL, embed  # noqa: F401
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -41,19 +42,27 @@ CANDIDATES_FACTOR: int = 6
 RRF_K: int = 50
 RERANK_BASE_URL: str = os.environ.get("RERANK_BASE_URL", "").rstrip("/")
 RERANK_MODEL: str = os.environ.get("RERANK_MODEL", "")
-RERANK_CANDIDATE_LIMIT: int = int(os.environ.get("RERANK_CANDIDATE_LIMIT", "20"))
+RERANK_CANDIDATE_LIMIT: int = int(os.environ.get("RERANK_CANDIDATE_LIMIT", "40"))
 RERANK_TIMEOUT_SECONDS: float = float(os.environ.get("RERANK_TIMEOUT_SECONDS", "10"))
+RERANK_QUERY_TEMPLATE: str = os.environ.get(
+    "RERANK_QUERY_TEMPLATE",
+    "<Instruct>: {instruction}\n<Query>: {query}",
+).replace("\\n", "\n")
+RERANK_DOC_TEMPLATE: str = os.environ.get("RERANK_DOC_TEMPLATE", "<Document>: {doc}")
+RERANK_INSTRUCTION: str = os.environ.get(
+    "RERANK_INSTRUCTION",
+    "Оцени, отвечает ли фрагмент клинических рекомендаций на клинический вопрос",
+)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SELECT_COLS = """
     id::text,
+    file_id,
     chunk,
     metadata
 """
 
-_EXCLUDED_CHUNK_PHRASES = (
-    "Список литературы",
-)
+_EXCLUDED_CHUNK_PHRASES = ("Список литературы",)
 
 _pool: asyncpg.Pool | None = None
 _segmenter: Segmenter = Segmenter()
@@ -61,17 +70,18 @@ _segmenter: Segmenter = Segmenter()
 
 # ── Connection ────────────────────────────────────────────────────────────────
 
+
 def _dsn() -> str:
     """Build a properly URL-encoded DSN from individual .env variables.
 
     Storing the password as a plain string in POSTGRES_PASSWORD and encoding
     it here means special characters (@, :, /, ?, #, etc.) never break the URL.
     """
-    user     = os.environ["POSTGRES_USER"]
+    user = os.environ["POSTGRES_USER"]
     password = quote_plus(os.environ["POSTGRES_PASSWORD"])
-    host     = os.environ["POSTGRES_HOST"]
-    port     = os.environ.get("POSTGRES_PORT", "5432")
-    db       = os.environ["POSTGRES_DB"]
+    host = os.environ["POSTGRES_HOST"]
+    port = os.environ.get("POSTGRES_PORT", "5432")
+    db = os.environ["POSTGRES_DB"]
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
@@ -83,7 +93,9 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
 async def _get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(_dsn(), init=_init_conn, min_size=2, max_size=5)
+        _pool = await asyncpg.create_pool(
+            _dsn(), init=_init_conn, min_size=2, max_size=5
+        )
     return _pool
 
 
@@ -97,18 +109,18 @@ async def close_pool() -> None:
 
 # ── Vector search ─────────────────────────────────────────────────────────────
 
+
 def _chunk_text_exclusion_clauses() -> list[str]:
-    return [
-        f"chunk NOT LIKE '%{phrase}%'"
-        for phrase in _EXCLUDED_CHUNK_PHRASES
-    ]
+    return [f"chunk NOT LIKE '%{phrase}%'" for phrase in _EXCLUDED_CHUNK_PHRASES]
 
 
 async def _vector_search(embedding: list[float], limit: int) -> list[dict]:
     """Fetch rows closest to *embedding* in the embedding column (cosine distance)."""
     pool = await _get_pool()
     vec = np.array(embedding, dtype=np.float32)
-    where_sql = " AND ".join(["embedding IS NOT NULL", *_chunk_text_exclusion_clauses()])
+    where_sql = " AND ".join(
+        ["embedding IS NOT NULL", *_chunk_text_exclusion_clauses()]
+    )
     rows = await pool.fetch(
         f"""
         SELECT {_SELECT_COLS},
@@ -226,6 +238,7 @@ async def _vector_search_filtered(
 
 # ── Hybrid search internals ───────────────────────────────────────────────────
 
+
 def _tokenize(text: str) -> list[str]:
     """Natasha-based tokenisation for Russian medical text."""
     doc = Doc(text.lower())
@@ -296,19 +309,34 @@ def _log_hybrid_chunks(
     logger.info("%s", "\n".join(lines))
 
 
-async def rerank_results(query_text: str, results: list[dict], top_k: int) -> list[dict]:
+async def rerank_results(
+    query_text: str, results: list[dict], top_k: int
+) -> list[dict]:
     """Optionally rerank a bounded candidate set through a vLLM `/rerank` API."""
     if not RERANK_BASE_URL or not RERANK_MODEL or not results:
         return results[:top_k]
 
-    candidates = results[:max(top_k, min(RERANK_CANDIDATE_LIMIT, len(results)))]
-    payload = {
-        "model": RERANK_MODEL,
-        "query": query_text,
-        "documents": [str(row.get("chunk") or "") for row in candidates],
-        "top_n": min(top_k, len(candidates)),
-    }
+    candidates = results[: max(top_k, min(RERANK_CANDIDATE_LIMIT, len(results)))]
     try:
+        rendered_query = (
+            RERANK_QUERY_TEMPLATE.format(
+                instruction=RERANK_INSTRUCTION, query=query_text
+            )
+            if RERANK_QUERY_TEMPLATE
+            else query_text
+        )
+        rendered_documents = [
+            RERANK_DOC_TEMPLATE.format(doc=str(row.get("chunk") or ""))
+            if RERANK_DOC_TEMPLATE
+            else str(row.get("chunk") or "")
+            for row in candidates
+        ]
+        payload = {
+            "model": RERANK_MODEL,
+            "query": rendered_query,
+            "documents": rendered_documents,
+            "top_n": min(top_k, len(candidates)),
+        }
         async with httpx.AsyncClient(timeout=RERANK_TIMEOUT_SECONDS) as client:
             response = await client.post(f"{RERANK_BASE_URL}/rerank", json=payload)
             response.raise_for_status()
@@ -336,13 +364,21 @@ async def rerank_results(query_text: str, results: list[dict], top_k: int) -> li
                 returned_count=len(reranked),
             )
             return reranked[:top_k]
-    except (httpx.HTTPError, ValueError, TypeError) as exc:
-        logger.warning("[retrieval] rerank unavailable, using RRF order: %s", str(exc)[:200])
-        emit("retrieval_rerank_error", model=RERANK_MODEL, exception_type=type(exc).__name__, exception=str(exc)[:200])
+    except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
+        logger.warning(
+            "[retrieval] rerank unavailable, using RRF order: %s", str(exc)[:200]
+        )
+        emit(
+            "retrieval_rerank_error",
+            model=RERANK_MODEL,
+            exception_type=type(exc).__name__,
+            exception=str(exc)[:200],
+        )
     return results[:top_k]
 
 
 # ── Public hybrid search ──────────────────────────────────────────────────────
+
 
 async def hybrid_search(
     query_text: str,
@@ -376,6 +412,14 @@ async def hybrid_search(
             top_k,
             query_text,
         )
+        trace_emit(
+            "retrieval.search.completed",
+            retrieval="hybrid_search",
+            query=query_text,
+            top_k=top_k,
+            candidates=[],
+            chunks=[],
+        )
         return []
 
     # Rank by vector similarity (already ordered distance ASC = similarity DESC)
@@ -403,5 +447,13 @@ async def hybrid_search(
         query_text=query_text,
         top_k=top_k,
         results=results,
+    )
+    trace_emit(
+        "retrieval.search.completed",
+        retrieval="hybrid_search",
+        query=query_text,
+        top_k=top_k,
+        candidates=candidates,
+        chunks=results,
     )
     return results

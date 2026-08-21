@@ -18,19 +18,19 @@ Usage::
 
 from __future__ import annotations
 
-import os
 import hashlib
 import json
+import os
 from typing import Any
 
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage
+from langchain_core.tools import StructuredTool, tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from RAG.retrieval.embeddings import embed
 from RAG.retrieval.vector_store import hybrid_search
-from langchain_core.tools import StructuredTool, tool
 
 load_dotenv()
 
@@ -38,7 +38,9 @@ load_dotenv()
 MODEL: str = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 RAG_TOP_K: int = int(os.environ.get("RAG_AGENT_TOP_K", "5"))
 AGENT_TEMPERATURE: float = float(os.environ.get("LLM_AGENT_TEMPERATURE", "0.2"))
-AGENT_MAX_OUTPUT_TOKENS: int = int(os.environ.get("LLM_AGENT_MAX_OUTPUT_TOKENS", "2048"))
+AGENT_MAX_OUTPUT_TOKENS: int = int(
+    os.environ.get("LLM_AGENT_MAX_OUTPUT_TOKENS", "2048")
+)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -93,15 +95,32 @@ class ToolCallGuard:
     def wrap(self, tools: list) -> list:
         wrapped = []
         for original in tools:
+
             async def guarded(*, _original=original, **kwargs: Any) -> str:
-                args_text = json.dumps(kwargs, ensure_ascii=False, sort_keys=True, default=str)
+                args_text = json.dumps(
+                    kwargs, ensure_ascii=False, sort_keys=True, default=str
+                )
                 args_hash = hashlib.sha256(args_text.encode("utf-8")).hexdigest()[:16]
                 key = f"{_original.name}:{args_hash}"
                 if key in self.seen:
-                    self.events.append({"tool": _original.name, "args_hash": args_hash, "duplicate": True})
+                    self.events.append(
+                        {
+                            "tool": _original.name,
+                            "args_hash": args_hash,
+                            "input": kwargs,
+                            "duplicate": True,
+                        }
+                    )
                     return "Остановка: этот инструмент с такими аргументами уже вызывался. Перейди к итоговому ответу."
                 if self.calls >= self.max_calls:
-                    self.events.append({"tool": _original.name, "args_hash": args_hash, "budget_exhausted": True})
+                    self.events.append(
+                        {
+                            "tool": _original.name,
+                            "args_hash": args_hash,
+                            "input": kwargs,
+                            "budget_exhausted": True,
+                        }
+                    )
                     return "Остановка: исчерпан лимит вызовов инструментов. Верни итоговый ответ с имеющимися данными."
 
                 self.seen.add(key)
@@ -109,15 +128,22 @@ class ToolCallGuard:
                 result = await _original.ainvoke(kwargs)
                 result_text = str(result)
                 truncated = len(result_text) > self.max_result_chars
-                self.events.append({
-                    "tool": _original.name,
-                    "args_hash": args_hash,
-                    "input_chars": len(args_text),
-                    "output_chars": len(result_text),
-                    "truncated": truncated,
-                })
+                self.events.append(
+                    {
+                        "tool": _original.name,
+                        "args_hash": args_hash,
+                        "input": kwargs,
+                        "output": result_text,
+                        "input_chars": len(args_text),
+                        "output_chars": len(result_text),
+                        "truncated": truncated,
+                    }
+                )
                 if truncated:
-                    result_text = result_text[:self.max_result_chars] + "\n[tool-result truncated]"
+                    result_text = (
+                        result_text[: self.max_result_chars]
+                        + "\n[tool-result truncated]"
+                    )
                 return result_text
 
             wrapped.append(
@@ -160,11 +186,11 @@ def create_checker_agent(
         extra_body=build_vllm_extra_body(base_url) or None,
     )
 
-    kwargs: dict[str, Any] = dict(
-        model=llm,
-        tools=tool_guard.wrap(tools) if tool_guard is not None else tools,
-        prompt=system_prompt,
-    )
+    kwargs: dict[str, Any] = {
+        "model": llm,
+        "tools": tool_guard.wrap(tools) if tool_guard is not None else tools,
+        "prompt": system_prompt,
+    }
     if response_format is not None:
         kwargs["response_format"] = response_format
 

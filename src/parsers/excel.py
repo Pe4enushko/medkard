@@ -10,6 +10,8 @@ Column layout (left to right):
   F  Диагнозы        — Диагнозы list
   G  formal_structure
   H  diagnosis
+  I  Источники КР
+  J  Проверка кодирования МКБ
 
 Legacy column layout (left to right):
   A  Данные карты    — full visit dump
@@ -30,9 +32,9 @@ Usage::
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
 import io
 import logging
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +55,7 @@ _HEADERS = [
     "Диагнозы",
     "Проверка по приказам МЗ",
     "Проверка по клин.рекоммендациям",
+    "Источники КР",
     "Проверка кодирования МКБ",
 ]
 _COLUMN_WIDTHS = {
@@ -64,7 +67,8 @@ _COLUMN_WIDTHS = {
     "F": 60,
     "G": 80,
     "H": 100,
-    "I": 100,
+    "I": 80,
+    "J": 100,
 }
 _AUTOFILTER_RANGE = "A1:B1"
 
@@ -154,6 +158,21 @@ def _card_data_text(visit: dict[str, Any]) -> str:
     return "\n\n".join(parts) if parts else "—"
 
 
+def _guideline_sources_text(diagnosis: Any) -> str:
+    if not isinstance(diagnosis, list):
+        return "—"
+    lines: list[str] = []
+    for result in diagnosis:
+        sources = getattr(result, "guideline_sources", None) or []
+        for source in sources:
+            sections = "; ".join(
+                f"{section.section or 'раздел не указан'}{' (цит.)' if section.cited else ''}"
+                for section in source.sections
+            )
+            lines.append(f"[{getattr(result, 'icd_code', '—')}] {source.doc_title}: {sections}")
+    return "\n".join(lines) if lines else "—"
+
+
 def _build_row(
     visit: dict[str, Any],
     formal: FormalStructureResult,
@@ -180,6 +199,7 @@ def _build_row(
         _pretty(visit.get("Диагнозы") or []),
         _pretty(formal),
         _pretty(diagnosis),
+        _guideline_sources_text(diagnosis),
         _pretty(icd_check or []),
     ]
 

@@ -111,25 +111,21 @@ queries, completion = await client.chat.completions.create_with_completion(
 
 ---
 
-## rag_agent.py — checker agents (`agent.ainvoke`)
+## Граф аудита диагноза — structured calls
 
-**File:** `LLM/rag_agent.py`, called from `audit/diagnosis/validator.py`  
-**Called from:** `_run_checker()` — three times per diagnosis (anamnesis, inspection, treatment) in parallel.  
-**Client:** LangChain `ChatOpenAI` via `create_react_agent` (LangGraph ReAct agent)
-**Call:**
+`LLM/graphs/diagnosis_nodes.py` вызывает `LLMClient.call` без tools:
 
-```python
-result = await agent.ainvoke(
-    {"messages": [("user", human_message)]},
-    config={"recursion_limit": AGENT_MAX_STEPS},
-)
-```
+- `generate_questions` → `QuestionSet`;
+- `extract_drugs` → `DrugList`;
+- `judge_anamnesis`, `judge_inspection`, `judge_treatment`, `judge_criteria`
+  → `JudgeOutput` с числовыми `chunk_refs`.
 
-**Input:** system prompt from one of `anamnesis_checker.txt`, `inspection_checker.txt`, `treatment_checker.txt` + a combined user message containing patient info, diagnosis, and examination data.  
-**Output:** `result["structured_response"]` when native JSON schema succeeds; raw content is only a fallback.
-**Structured output:** `create_react_agent(response_format=...)` uses native provider JSON schema. For the current Qwen/vLLM endpoint, `chat_template_kwargs.enable_thinking=false` is also sent; legacy `guided_json` is not the primary mode.
-**Safeguards:** `ToolCallGuard` limits duplicate calls, total tool calls, and tool-result size. A single `GraphRecursionError` retry switches to compact limits.
-**Telemetry:** events are written to `logs/llm_observability.jsonl`; see [docs/llm-observability.md](llm-observability.md) and [docs/vllm-configuration.md](vllm-configuration.md).
+Все ответы дополнительно проходят `model_validate_json` в узле. Обрезанный или
+несоответствующий схеме ответ деградирует только соответствующую ветвь и
+попадает в `errors`. Токены не теряются даже при ошибке парсинга.
+
+`rag_agent.py` и `LLMClient.call_agent` остаются для ICD-чекера, который не
+входит в граф аудита диагноза.
 
 ---
 

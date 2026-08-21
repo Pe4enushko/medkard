@@ -7,8 +7,9 @@ pdfs/
 # Reference list CSVs (large files — seed via scripts/seed-reference-lists.sh)
 Dietary supplements.csv
 
-# Logs
-logs/
+# Logs (runtime payloads are ignored; operational documentation is tracked)
+**/logs/*
+!logs/README.md
 
 # Python
 __pycache__/
