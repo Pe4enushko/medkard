@@ -58,7 +58,7 @@ JSON-данные без схема-библиотек, стандартная �
 | `src/audit/formal_structure/validator.py` | Загрузка `["rules"]` + лог; `icd_prefixes` в `get_rules`; фикс чтения диагнозов для Z11.1; фикс `NMU_RE` для A-кодов |
 | `docs/formal-rules-sources.md` | Новый: реестр НПА (Приложение Б спеки) |
 | `docs/formal_validator.md` | Обновить разделы «Rule filtering» и формат правил |
-| `docs/revision-log.md` | Запись о применённой ревизии в раздел «Нормативка» |
+| `docs/formal-rules-revision-log.md` | Запись о применённой ревизии в раздел «Нормативка» |
 | `tests/test_formal_rules_schema.py` | Новый: инварианты файла правил (без БД/LLM) |
 | `tests/test_formal_get_rules.py` | Новый: фильтрация по типу/возрасту/МКБ, рендер промпта |
 | `tests/test_formal_validator_meta.py` | Новый: лог загрузки с `revised_at` |
@@ -1947,7 +1947,7 @@ Expected: FAIL — `FileNotFoundError` (документа ещё нет).
 Справочник к `src/audit/formal_structure/rules.json`: на какие нормативные
 правовые акты опираются правила, в какой редакции они действуют и когда
 сверялись. Обновляется при каждой ревизии правил; запись о ревизии — в
-`docs/revision-log.md`, раздел «Нормативка».
+`docs/formal-rules-revision-log.md`, раздел «Нормативка».
 
 Дата последней ревизии: **2026-08-19** (поле `revised_at` в `rules.json`).
 
@@ -2047,7 +2047,7 @@ git commit -m "docs(formal): реестр НПА — редакции, свер�
 
 **Files:**
 - Modify: `docs/formal_validator.md`
-- Modify: `docs/revision-log.md`
+- Modify: `docs/formal-rules-revision-log.md`
 - Modify: `docs/README.md` (индекс — добавить новый документ)
 
 **Interfaces:**
@@ -2109,7 +2109,7 @@ The regulations themselves — editions, validity periods, planned replacements
 and open verification tails — are listed in `docs/formal-rules-sources.md`.
 ```
 
-- [ ] **Step 3: Дописать запись в `docs/revision-log.md`**
+- [ ] **Step 3: Дописать запись в `docs/formal-rules-revision-log.md`**
 
 В разделе «Нормативка» заменить последнюю строку таблицы (`| — | Дата
 применения ревизии — дописать при выкатке …`) на:
@@ -2132,7 +2132,7 @@ Expected: PASS всё.
 - [ ] **Step 6: Коммит**
 
 ```bash
-git add docs/formal_validator.md docs/revision-log.md docs/README.md
+git add docs/formal_validator.md docs/formal-rules-revision-log.md docs/README.md
 git commit -m "docs(formal): формат rules.json, фильтр по МКБ, запись в журнал ревизий"
 ```
 
@@ -2186,7 +2186,7 @@ python scripts/audit-file.py --file <тот-же-файл>.json --excel after.xl
 
 - [ ] **Step 5: Дописать факт прогона в журнал**
 
-После зелёного гейта — в `docs/revision-log.md` к записи 2026-08-19 добавить
+После зелёного гейта — в `docs/formal-rules-revision-log.md` к записи 2026-08-19 добавить
 ссылку на коммит ветки, и закоммитить.
 
 ---
