@@ -431,7 +431,7 @@ JSONL-дампа; `exporter.py` строит план по хешу; запус�
   откуда брать выгрузку; команда импорта; версия реестра.
 - `docs/architecture.md`, `docs/rag.md` (упоминание `search_medicine`),
   `README.md`/`CLAUDE.md` (команды).
-- `docs/revision-log.md` → раздел «Лекарства (ГРЛС)»: запись о первом импорте
+- `docs/grls-revision-log.md` → раздел «Лекарства (ГРЛС)»: запись о первом импорте
   (`registry_date`, счётчики) — часть DoD.
 
 ## 10. Границы

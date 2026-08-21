@@ -41,7 +41,7 @@
 | `src/LLM/prompts/treatment_checker.txt` | ЕСКЛП → ГРЛС; правила трактовки статусов |
 | `tests/grls_fixtures.py` | билдер мини-xlsx по структуре выгрузки для тестов |
 | `tests/test_migration_027.py`, `test_grls_normalize.py`, `test_grls_status.py`, `test_grls_parser.py`, `test_grls_dump.py`, `test_grls_storage.py` (стенд), `test_import_grls_script.py`, `test_grls_format.py`, `test_search_medicine_tool.py` | тесты |
-| `docs/grls.md`, `docs/revision-log.md`, `CLAUDE.md`, `.gitignore`, `scripts/seed-reference-lists.sh` | доки/хозяйство |
+| `docs/grls.md`, `docs/grls-revision-log.md`, `CLAUDE.md`, `.gitignore`, `scripts/seed-reference-lists.sh` | доки/хозяйство |
 
 Удаляются: `src/storage/drugs_storage.py`, `src/storage/models/drug.py`, `resources/Drugs list.csv`, drugs-часть `scripts/seed-reference-lists.sh`.
 
@@ -1826,7 +1826,7 @@ Expected: 3 passed.
 - [ ] **Step 5: Dry-run на реальном архиве**
 
 Run: `python scripts/import-grls.py /home/savoy/projects/grls2026-08-17-1.zip --dry-run`
-Expected: `registry_date: 2026-08-17`, 7 статусов со счётчиками ≈ спека §2, `skipped files: ['grls2026-08-17-1-Изменённый.xlsx']` (имя декодировано из cp437), `dry-run: database not touched`. Записать реальные счётчики — они пойдут в `docs/revision-log.md` (Task 10).
+Expected: `registry_date: 2026-08-17`, 7 статусов со счётчиками ≈ спека §2, `skipped files: ['grls2026-08-17-1-Изменённый.xlsx']` (имя декодировано из cp437), `dry-run: database not touched`. Записать реальные счётчики — они пойдут в `docs/grls-revision-log.md` (Task 10).
 
 - [ ] **Step 6: Коммит**
 
@@ -2283,7 +2283,7 @@ git commit -m "feat(grls): search_medicine on GRLS with certificate status; drop
 
 **Files:**
 - Create: `docs/grls.md`
-- Modify: `docs/revision-log.md`, `CLAUDE.md` (строка дерева `drugs_storage.py`), `.gitignore`, `docs/rag.md` (если упоминает `search_medicine`/ЕСКЛП — `grep -n "search_medicine\|ЕСКЛП" docs/*.md`)
+- Modify: `docs/grls-revision-log.md`, `CLAUDE.md` (строка дерева `drugs_storage.py`), `.gitignore`, `docs/rag.md` (если упоминает `search_medicine`/ЕСКЛП — `grep -n "search_medicine\|ЕСКЛП" docs/*.md`)
 
 - [ ] **Step 1: `docs/grls.md`**
 
@@ -2341,7 +2341,7 @@ trgm ≥ 0.6) → торговое название (trgm ≥ 0.85) → БАД. 
 
 - [ ] **Step 2: Журнал, CLAUDE.md, .gitignore**
 
-`docs/revision-log.md`, раздел «Лекарства (ГРЛС)»: строку «— | Первый импорт ГРЛС на стенде — дописать…» заменить на реальную запись **после** стендового импорта (Step 4): дата, `registry_date`, счётчики из `grls_imports.status_counts`, команда, коммит.
+`docs/grls-revision-log.md`, раздел «Лекарства (ГРЛС)»: строку «— | Первый импорт ГРЛС на стенде — дописать…» заменить на реальную запись **после** стендового импорта (Step 4): дата, `registry_date`, счётчики из `grls_imports.status_counts`, команда, коммит.
 
 `CLAUDE.md`: строку `│   ├── drugs_storage.py     # Drug reference data` заменить на `│   ├── grls_storage.py      # GRLS registry (drug certificates + statuses), see docs/grls.md`; в разделе про скрипты (если есть перечень) добавить `scripts/import-grls.py`.
 
@@ -2352,7 +2352,7 @@ trgm ≥ 0.6) → торговое название (trgm ≥ 0.85) → БАД. 
 - [ ] **Step 3: Коммит доков**
 
 ```bash
-git add docs/grls.md docs/revision-log.md CLAUDE.md .gitignore docs/rag.md docs/diagnosis_validator.md README.md
+git add docs/grls.md docs/grls-revision-log.md CLAUDE.md .gitignore docs/rag.md docs/diagnosis_validator.md README.md
 git commit -m "docs(grls): docs/grls.md, revision log, CLAUDE.md tree, ignore archives"
 ```
 
@@ -2363,7 +2363,7 @@ git commit -m "docs(grls): docs/grls.md, revision log, CLAUDE.md tree, ignore ar
 3. `pytest tests/test_grls_storage.py -q` (подменяет содержимое таблицы! после него — **повторить импорт** п.2).
 4. `search_medicine` на 5 препаратах из реальных карт (в т.ч. с истёкшим РУ, с `®`/кавычками, одно МНН, у которого есть субстанция, например «амоксициллин») — статус есть, субстанций в выдаче нет; treatment-чекер прогнан на 3–5 кешированных картах (`scripts/audit-file.py` или как принято на стенде) — карты не broken, замечания про РУ появляются только у истёкших/аннулированных.
 5. `EXPLAIN` для `search_by_trade_name` — используется `grls_registry_trade_name_trgm_idx` (Bitmap Index Scan); если Seq Scan — проверить, что функция `IMMUTABLE` и индекс создан.
-6. Записать в `docs/revision-log.md` строку первого импорта (Step 2), закоммитить.
+6. Записать в `docs/grls-revision-log.md` строку первого импорта (Step 2), закоммитить.
 
 - [ ] **Step 5: Финальный прогон тестов без БД и коммит**
 
