@@ -27,7 +27,8 @@ from LLM.visit_classifier import VisitClassifier
 
 _chinese_detector = ChineseDetector()
 
-NMU_RE = re.compile(r"^[ABАВ]\d{2}\.\d{3}\.\d{3}(?:\.\d{3})?$", re.I)
+# Средний сегмент: 2 цифры у A-кодов (A04.16.001), 3 у B-кодов (B01.070.001).
+NMU_RE = re.compile(r"^[ABАВ]\d{2}\.\d{2,3}\.\d{3}(?:\.\d{3})?$", re.I)
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,22 @@ _RULES_PATH = _HERE / "rules.json"
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "LLM" / "prompts" / "formal_structure_validator.txt"
 # ─────────────────────────────────────────────────────────────────────────────
 
-_RULES: list[dict] = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
+_RULES_DOC: dict = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
+_RULES: list[dict] = _RULES_DOC["rules"]
+_REVISED_AT: str = _RULES_DOC["revised_at"]
 _PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
 
 # ── Flag → regulatory source lookup ───────────────────────────────────────────
 _FLAG_SOURCE: dict[str, str] = {r["flag_code"]: r.get("source", "") for r in _RULES}
 _ALL_FLAGS: list[str] = list(_FLAG_SOURCE)
+
+_VERIFIED_DATES: list[str] = sorted(r["verified_at"] for r in _RULES if r.get("verified_at"))
+logger.info(
+    "[formal] formal rules revised_at=%s rules=%d oldest verified_at=%s",
+    _REVISED_AT,
+    len(_RULES),
+    _VERIFIED_DATES[0] if _VERIFIED_DATES else "none",
+)
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -117,7 +128,7 @@ class FormalValidator:
         """Determine all visit types present in a visit by checking each service.
 
         Each service entry is classified independently:
-        1. Z11.1 ICD code → always adds PROPHYLACTIC_TUBERCULIN.
+        1. Z11.1 among visit["Диагнозы"][].КодМКБ → always adds PROPHYLACTIC_TUBERCULIN.
         2. Per-service NMU code scan:
            - A*                                  → LAB_RESEARCH_INTERVENTION
            - B04.*                               → PROPHYLACTIC
@@ -131,8 +142,12 @@ class FormalValidator:
         result: set[VisitType] = set()
 
         # ── Z11.1 always adds PROPHYLACTIC_TUBERCULIN ─────────────────────────
-        diag_code: str = (visit.get("Диагноз") or {}).get("Код", "") or ""
-        if diag_code.strip().upper() == "Z11.1":
+        diagnoses: list = visit.get("Диагнозы") or []
+        if any(
+            str(d.get("КодМКБ") or "").strip().upper() == "Z11.1"
+            for d in diagnoses
+            if isinstance(d, dict)
+        ):
             result.add(VisitType.PROPHYLACTIC_TUBERCULIN)
 
         services: list = visit.get("Услуги") or []
@@ -194,17 +209,28 @@ class FormalValidator:
 
         return result
 
-    def get_rules(self, visit_types: set[VisitType], patient_age: int | None) -> list[dict]:
-        """Return rules applicable to the given visit types and patient age.
+    def get_rules(
+        self,
+        visit_types: set[VisitType],
+        patient_age: int | None,
+        icd_codes: list[str] | None = None,
+    ) -> list[dict]:
+        """Return rules applicable to the given visit types, age and ICD codes.
 
         Age group matching: a rule passes if its ``age_group`` is ``"all"``,
         or matches the derived group (``"child"`` if age < 18, ``"adult"`` otherwise).
         ``patient_age=None`` skips age filtering (matches any age_group).
+
+        ICD matching: a rule carrying ``applies_to.icd_prefixes`` passes only if
+        one of ``icd_codes`` starts with one of those prefixes.  Without codes
+        such a rule never applies.
         """
         type_keys = {_VISIT_TYPE_RULE_KEY[vt] for vt in visit_types}
         age_group: str | None = None
         if patient_age is not None:
             age_group = "child" if patient_age < 18 else "adult"
+
+        codes = [c.strip().upper() for c in (icd_codes or []) if c and c.strip()]
 
         seen: set[str] = set()
         rules: list[dict] = []
@@ -217,6 +243,9 @@ class FormalValidator:
                 rule_age = applies.get("age_group", "all")
                 if rule_age != "all" and rule_age != age_group:
                     continue
+            prefixes = applies.get("icd_prefixes") or []
+            if prefixes and not any(c.startswith(p) for c in codes for p in prefixes):
+                continue
             fc = rule.get("flag_code", "")
             if fc not in seen:
                 seen.add(fc)
@@ -314,7 +343,12 @@ class FormalValidator:
 
         _raw_age = (visit.get("Пациент") or {}).get("AGE")
         patient_age: int | None = int(_raw_age) if isinstance(_raw_age, str) and _raw_age.strip().isdigit() else (_raw_age if isinstance(_raw_age, int) else None)
-        rules = self.get_rules(visit_types, patient_age)
+        icd_codes: list[str] = [
+            str(d.get("КодМКБ") or "")
+            for d in (visit.get("Диагнозы") or [])
+            if isinstance(d, dict)
+        ]
+        rules = self.get_rules(visit_types, patient_age, icd_codes)
         logger.debug("[formal] applicable rules (%d): %s", len(rules), [r.get("flag_code") for r in rules])
 
         system_prompt = self._render_prompt(rules)

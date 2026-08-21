@@ -1,438 +1,1191 @@
-[
-  {
-    "rule_id": "visit_meta_required",
-    "source": "274n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "all"
+{
+  "revised_at": "2026-08-19",
+  "sources_doc": "docs/formal-rules-sources.md",
+  "rules": [
+    {
+      "rule_id": "visit_meta_required",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "visit_date",
+        "specialty",
+        "patient_age",
+        "patient_sex",
+        "service_name"
+      ],
+      "expectation": "В записи должны быть идентифицируемы дата приёма, возраст, пол пациента и оказываемая услуга/тип визита.",
+      "flag_code": "ОТСУТСТВУЮТ_МЕТАДАННЫЕ_ВИЗИТА",
+      "severity": "критичный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), стр. 1–2 (дата рождения, пол; дата осмотра, врач — должность, специальность); прил. 4, п. 9.11, п. 9.13, п. 9.16",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["visit_date", "specialty", "patient_age", "patient_sex", "service_name"],
-    "expectation": "В записи должны быть идентифицируемы дата приёма, возраст, пол пациента и оказываемая услуга/тип визита.",
-    "flag_code": "ОТСУТСТВУЮТ_МЕТАДАННЫЕ_ВИЗИТА",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "primary_core_sections_required",
-    "source": "274n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["primary"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "primary_core_sections_required",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "primary"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "complaints",
+        "anamnesis",
+        "objective_exam",
+        "diagnosis",
+        "recommendations"
+      ],
+      "expectation": "Для первичного амбулаторного приёма должны быть отражены жалобы, анамнез, объективный осмотр, диагноз и итоговая тактика/рекомендации.",
+      "flag_code": "ПЕРВИЧНЫЙ_ОТСУТСТВУЮТ_ОСНОВНЫЕ_РАЗДЕЛЫ",
+      "severity": "критичный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), раздел «Записи врачей-специалистов»; прил. 2, п. 13",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["complaints", "anamnesis", "objective_exam", "diagnosis", "recommendations"],
-    "expectation": "Для первичного амбулаторного приёма должны быть отражены жалобы, анамнез, объективный осмотр, диагноз и итоговая тактика/рекомендации.",
-    "flag_code": "ПЕРВИЧНЫЙ_ОТСУТСТВУЮТ_ОСНОВНЫЕ_РАЗДЕЛЫ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "repeat_core_sections_required",
-    "source": "274n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "repeat_core_sections_required",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "objective_exam",
+        "diagnosis",
+        "recommendations"
+      ],
+      "expectation": "Для повторного приёма должны быть отражены текущий статус пациента, объективный осмотр, диагноз/оценка состояния",
+      "flag_code": "ПОВТОРНЫЙ_ОТСУТСТВУЮТ_ОСНОВНЫЕ_РАЗДЕЛЫ",
+      "severity": "критичный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), раздел «Медицинское наблюдение в динамике»; прил. 2, п. 14",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["objective_exam", "diagnosis", "recommendations"],
-    "expectation": "Для повторного приёма должны быть отражены текущий статус пациента, объективный осмотр, диагноз/оценка состояния",
-    "flag_code": "ПОВТОРНЫЙ_ОТСУТСТВУЮТ_ОСНОВНЫЕ_РАЗДЕЛЫ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "repeat_needs_context_or_dynamics",
-    "source": "203n",
-    "rule_type": "conditional_required",
-    "applies_to": {
-      "visit_types": ["repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "repeat_needs_context_or_dynamics",
+      "source": "274n",
+      "rule_type": "conditional_required",
+      "applies_to": {
+        "visit_types": [
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "dynamics",
+        "clinical_context"
+      ],
+      "expectation": "Для повторного приёма должна быть отражена динамика заболевания, эффект лечения или иной клинический контекст повторного визита.",
+      "flag_code": "ПОВТОРНЫЙ_ОТСУТСТВУЕТ_ДИНАМИКА",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), раздел «Медицинское наблюдение в динамике» (строки «Жалобы», «Данные наблюдения в динамике», «Назначения (исследования, консультации)», «Лекарственные препараты, физиотерапия»); прил. 2, п. 14, п. 15",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["dynamics", "clinical_context"],
-    "expectation": "Для повторного приёма должна быть отражена динамика заболевания, эффект лечения или иной клинический контекст повторного визита.",
-    "flag_code": "ПОВТОРНЫЙ_ОТСУТСТВУЕТ_ДИНАМИКА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "diagnosis_required",
-    "source": "274n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "child"
+    {
+      "rule_id": "diagnosis_required",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "child"
+      },
+      "targets": [
+        "diagnosis"
+      ],
+      "expectation": "В записи должен быть указан хотя бы один диагноз или заключение по результату осмотра.",
+      "flag_code": "ОТСУТСТВУЕТ_ДИАГНОЗ",
+      "severity": "критичный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), строка «Диагноз основного заболевания / код по МКБ»; прил. 4, п. 9.20",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["diagnosis"],
-    "expectation": "В записи должен быть указан хотя бы один диагноз или заключение по результату осмотра.",
-    "flag_code": "ОТСУТСТВУЕТ_ДИАГНОЗ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "diagnosis_should_be_supported",
-    "source": "203n",
-    "rule_type": "diagnosis_check",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "diagnosis_should_be_supported",
+      "source": "323-FZ",
+      "rule_type": "diagnosis_check",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "complaints",
+        "anamnesis",
+        "objective_exam",
+        "diagnosis"
+      ],
+      "expectation": "Диагноз должен быть логически поддержан жалобами, анамнезом и/или данными объективного осмотра.",
+      "flag_code": "ДИАГНОЗ_НЕ_ПОДТВЕРЖДЁН_ЗАПИСЬЮ",
+      "severity": "значительный",
+      "source_ref": "Федеральный закон от 21.11.2011 № 323-ФЗ, ст. 70 ч. 5 (диагноз основан на всестороннем обследовании), ч. 6 (состав диагноза); ст. 2 п. 21",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["complaints", "anamnesis", "objective_exam", "diagnosis"],
-    "expectation": "Диагноз должен быть логически поддержан жалобами, анамнезом и/или данными объективного осмотра.",
-    "flag_code": "ДИАГНОЗ_НЕ_ПОДТВЕРЖДЁН_ЗАПИСЬЮ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "management_should_follow_diagnosis",
-    "source": "203n",
-    "rule_type": "consistency",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "management_should_follow_diagnosis",
+      "source": "323-FZ",
+      "rule_type": "consistency",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "diagnosis",
+        "recommendations",
+        "treatment_plan",
+        "investigation_plan"
+      ],
+      "expectation": "Назначения, обследования и рекомендации должны быть логически связаны с отражённым диагнозом и состоянием пациента.",
+      "flag_code": "НАЗНАЧЕНИЯ_НЕ_СООТВЕТСТВУЮТ_ДИАГНОЗУ",
+      "severity": "значительный",
+      "source_ref": "Федеральный закон от 21.11.2011 № 323-ФЗ, ст. 37 ч. 1 п. 3 (клинические рекомендации), п. 4 (стандарты медицинской помощи); ст. 70 ч. 2",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["diagnosis", "recommendations", "treatment_plan", "investigation_plan"],
-    "expectation": "Назначения, обследования и рекомендации должны быть логически связаны с отражённым диагнозом и состоянием пациента.",
-    "flag_code": "НАЗНАЧЕНИЯ_НЕ_СООТВЕТСТВУЮТ_ДИАГНОЗУ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "objective_exam_required",
-    "source": "203n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "objective_exam_required",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat",
+          "prophylactic"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "objective_exam"
+      ],
+      "expectation": "В записи должен быть отражён факт объективного осмотра пациента.",
+      "flag_code": "ОТСУТСТВУЕТ_ОБЪЕКТИВНЫЙ_ОСМОТР",
+      "severity": "критичный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), раздел «Записи врачей-специалистов» (строки «Жалобы», «Анамнез заболевания, жизни», «Объективные данные», «Диагноз основного заболевания / код по МКБ»); прил. 2, п. 13",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["objective_exam"],
-    "expectation": "В записи должен быть отражён факт объективного осмотра пациента.",
-    "flag_code": "ОТСУТСТВУЕТ_ОБЪЕКТИВНЫЙ_ОСМОТР",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "plan_vs_result_separation",
-    "source": "274n",
-    "rule_type": "structure_defect",
-    "applies_to": {
-      "visit_types": ["primary", "repeat", "prophylactic"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "plan_vs_result_separation",
+      "source": "274n",
+      "rule_type": "structure_defect",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat",
+          "prophylactic"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "investigation_plan",
+        "results"
+      ],
+      "expectation": "План обследования не должен содержать готовые результаты исследования, а результаты не должны быть записаны как план.",
+      "flag_code": "СМЕШАНЫ_ПЛАН_И_РЕЗУЛЬТАТЫ",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у): разделение строк «Назначения (исследования, консультации)» и разделов «Результаты функциональных методов исследования» / «Результаты лабораторных методов исследования»; прил. 2, п. 22, п. 23",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["investigation_plan", "results"],
-    "expectation": "План обследования не должен содержать готовые результаты исследования, а результаты не должны быть записаны как план.",
-    "flag_code": "СМЕШАНЫ_ПЛАН_И_РЕЗУЛЬТАТЫ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "placeholder_values_are_defect",
-    "source": "274n",
-    "rule_type": "structure_defect",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "placeholder_values_are_defect",
+      "source": "274n",
+      "rule_type": "structure_defect",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "any_field"
+      ],
+      "expectation": "placeholder-значения, технический мусор и неинформативные заглушки считаются дефектом оформления записи",
+      "flag_code": "ОБНАРУЖЕНЫ_ЗАГЛУШКИ",
+      "severity": "значительный",
+      "source_ref": "внутренний стандарт качества (привязка к 274н формальная)",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["any_field"],
-    "expectation": "placeholder-значения, технический мусор и неинформативные заглушки считаются дефектом оформления записи",
-    "flag_code": "ОБНАРУЖЕНЫ_ЗАГЛУШКИ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "duplicate_semantic_blocks_are_defect",
-    "source": "274n",
-    "rule_type": "structure_defect",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "duplicate_semantic_blocks_are_defect",
+      "source": "274n",
+      "rule_type": "structure_defect",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "any_field"
+      ],
+      "expectation": "Дублирование смысловых блоков или неоднократное заполнение одного и того же реквизита с конфликтом значений считается дефектом структуры.",
+      "flag_code": "ДУБЛИРОВАНИЕ_СМЫСЛОВЫХ_БЛОКОВ",
+      "severity": "незначительный",
+      "source_ref": "внутренний стандарт качества (привязка к 274н формальная)",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["any_field"],
-    "expectation": "Дублирование смысловых блоков или неоднократное заполнение одного и того же реквизита с конфликтом значений считается дефектом структуры.",
-    "flag_code": "ДУБЛИРОВАНИЕ_СМЫСЛОВЫХ_БЛОКОВ",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "service_specialty_visit_alignment",
-    "source": "274n",
-    "rule_type": "consistency",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "service_specialty_visit_alignment",
+      "source": "274n",
+      "rule_type": "consistency",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "service_name",
+        "specialty",
+        "visit_type"
+      ],
+      "expectation": "Услуга, специальность врача и тип визита должны быть согласованы друг с другом.",
+      "flag_code": "НЕСООТВЕТСТВИЕ_УСЛУГИ_И_ВИЗИТА",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), строка «Врач (должность, специальность)»; прил. 4, п. 9.11, п. 9.16",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["service_name", "specialty", "visit_type"],
-    "expectation": "Услуга, специальность врача и тип визита должны быть согласованы друг с другом.",
-    "flag_code": "НЕСООТВЕТСТВИЕ_УСЛУГИ_И_ВИЗИТА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "followup_needed_for_nontrivial_case",
-    "source": "203n",
-    "rule_type": "followup_check",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "followup_needed_for_nontrivial_case",
+      "source": "323-FZ",
+      "rule_type": "followup_check",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "follow_up",
+        "state",
+        "diagnosis",
+        "recommendations"
+      ],
+      "condition": "Если состояние описано как средней тяжести, есть осложнение, активный инфекционный процесс, бронхообструкция, отит или иная клинически значимая ситуация.",
+      "expectation": "В таких случаях в записи ожидается указание на повторный осмотр, наблюдение или контроль.",
+      "flag_code": "ОТСУТСТВУЕТ_КОНТРОЛЬ_ПРИ_АКТИВНОМ_ПРОЦЕССЕ",
+      "severity": "значительный",
+      "source_ref": "Федеральный закон от 21.11.2011 № 323-ФЗ, ст. 70 ч. 2; приказ МЗ РФ от 15.03.2022 № 168н, п. 4, п. 13; приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), строки «Назначения (исследования, консультации)», «Диспансерное наблюдение»",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["follow_up", "state", "diagnosis", "recommendations"],
-    "condition": "Если состояние описано как средней тяжести, есть осложнение, активный инфекционный процесс, бронхообструкция, отит или иная клинически значимая ситуация.",
-    "expectation": "В таких случаях в записи ожидается указание на повторный осмотр, наблюдение или контроль.",
-    "flag_code": "ОТСУТСТВУЕТ_КОНТРОЛЬ_ПРИ_АКТИВНОМ_ПРОЦЕССЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "prophylactic_absence_of_complaints_allowed",
-    "source": "211n",
-    "rule_type": "prophylactic_exception",
-    "applies_to": {
-      "visit_types": ["prophylactic"],
-      "specialties": [],
-      "age_group": "child"
+    {
+      "rule_id": "prophylactic_absence_of_complaints_allowed",
+      "source": "211n",
+      "rule_type": "prophylactic_exception",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [],
+        "age_group": "child"
+      },
+      "targets": [
+        "complaints"
+      ],
+      "expectation": "Для профилактического осмотра отсутствие жалоб или формулировка 'жалоб нет' допустимы и не считаются дефектом.",
+      "flag_code": "ДОПУСТИМО_БЕЗ_ЖАЛОБ_ПРОФИЛАКТИКА",
+      "severity": "незначительный",
+      "source_ref": "приказ МЗ РФ от 14.04.2025 № 211н, п. 1, п. 17, п. 19, п. 20 — предмет профосмотра составляют осмотры специалистов и исследования по Перечню и группа здоровья; жалобы, динамика и лечение его содержанием не являются",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["complaints"],
-    "expectation": "Для профилактического осмотра отсутствие жалоб или формулировка 'жалоб нет' допустимы и не считаются дефектом.",
-    "flag_code": "ДОПУСТИМО_БЕЗ_ЖАЛОБ_ПРОФИЛАКТИКА",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "prophylactic_absence_of_dynamics_allowed",
-    "source": "211n",
-    "rule_type": "prophylactic_exception",
-    "applies_to": {
-      "visit_types": ["prophylactic"],
-      "specialties": [],
-      "age_group": "child"
+    {
+      "rule_id": "prophylactic_absence_of_dynamics_allowed",
+      "source": "211n",
+      "rule_type": "prophylactic_exception",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [],
+        "age_group": "child"
+      },
+      "targets": [
+        "dynamics",
+        "clinical_context"
+      ],
+      "expectation": "Для профилактического осмотра отсутствие динамики заболевания допустимо, если цель визита профилактическая или административная.",
+      "flag_code": "ДОПУСТИМО_БЕЗ_ДИНАМИКИ_ПРОФИЛАКТИКА",
+      "severity": "незначительный",
+      "source_ref": "приказ МЗ РФ от 14.04.2025 № 211н, п. 1, п. 17, п. 19, п. 20 — предмет профосмотра составляют осмотры специалистов и исследования по Перечню и группа здоровья; жалобы, динамика и лечение его содержанием не являются",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["dynamics", "clinical_context"],
-    "expectation": "Для профилактического осмотра отсутствие динамики заболевания допустимо, если цель визита профилактическая или административная.",
-    "flag_code": "ДОПУСТИМО_БЕЗ_ДИНАМИКИ_ПРОФИЛАКТИКА",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "prophylactic_no_treatment_allowed_if_decision_present",
-    "source": "211n",
-    "rule_type": "allowed_missing",
-    "applies_to": {
-      "visit_types": ["prophylactic"],
-      "specialties": ["pediatrics"],
-      "age_group": "all"
+    {
+      "rule_id": "prophylactic_no_treatment_allowed_if_decision_present",
+      "source": "211n",
+      "rule_type": "allowed_missing",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [
+          "pediatrics"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "recommendations",
+        "treatment_plan"
+      ],
+      "expectation": "Для профилактического осмотра отсутствие лечения допустимо, если в записи есть понятное итоговое медицинское решение или заключение.",
+      "flag_code": "ДОПУСТИМО_БЕЗ_ЛЕЧЕНИЯ_ПРОФИЛАКТИКА",
+      "severity": "незначительный",
+      "source_ref": "приказ МЗ РФ от 14.04.2025 № 211н, п. 1, п. 17, п. 19, п. 20 — предмет профосмотра составляют осмотры специалистов и исследования по Перечню и группа здоровья; жалобы, динамика и лечение его содержанием не являются",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["recommendations", "treatment_plan"],
-    "expectation": "Для профилактического осмотра отсутствие лечения допустимо, если в записи есть понятное итоговое медицинское решение или заключение.",
-    "flag_code": "ДОПУСТИМО_БЕЗ_ЛЕЧЕНИЯ_ПРОФИЛАКТИКА",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "icd_text_alignment",
-    "source": "icd10",
-    "rule_type": "diagnosis_check",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["pediatrics"],
-      "age_group": "all"
+    {
+      "rule_id": "icd_text_alignment",
+      "source": "icd10",
+      "rule_type": "diagnosis_check",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "pediatrics"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "diagnosis_code",
+        "diagnosis_text"
+      ],
+      "expectation": "Клинический диагноз должен соответствовать выбранному коду МКБ-10 по анатомической локализации и патогенезу. Использование симптоматических кодов (класс R) при наличии установленного основного заболевания считается дефектом",
+      "flag_code": "НЕСООТВЕТСТВИЕ_МКБ_И_ТЕКСТА_ДИАГНОЗА",
+      "severity": "значительный",
+      "source_ref": "МКБ-10 — справочник, не нормативный правовой акт",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["diagnosis_code", "diagnosis_text"],
-    "expectation": "Клинический диагноз должен соответствовать выбранному коду МКБ-10 по анатомической локализации и патогенезу. Использование симптоматических кодов (класс R) при наличии установленного основного заболевания считается дефектом",
-    "flag_code": "НЕСООТВЕТСТВИЕ_МКБ_И_ТЕКСТА_ДИАГНОЗА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "too_general_icd_for_rich_detail",
-    "source": "icd10",
-    "rule_type": "diagnosis_check",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["pediatrics"],
-      "age_group": "child"
+    {
+      "rule_id": "too_general_icd_for_rich_detail",
+      "source": "icd10",
+      "rule_type": "diagnosis_check",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "pediatrics"
+        ],
+        "age_group": "child"
+      },
+      "targets": [
+        "diagnosis_code",
+        "diagnosis_text"
+      ],
+      "expectation": "Если код МКБ слишком общий, а детализация диагноза содержит несколько самостоятельных состояний, это должно помечаться как флаг неполного или грубого кодирования.",
+      "flag_code": "СЛИШКОМ_ОБЩИЙ_КОД_МКБ",
+      "severity": "значительный",
+      "source_ref": "МКБ-10 — справочник, не нормативный правовой акт",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["diagnosis_code", "diagnosis_text"],
-    "expectation": "Если код МКБ слишком общий, а детализация диагноза содержит несколько самостоятельных состояний, это должно помечаться как флаг неполного или грубого кодирования.",
-    "flag_code": "СЛИШКОМ_ОБЩИЙ_КОД_МКБ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "has_typos",
-    "source": "",
-    "rule_type": "structure_defect",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["pediatrics"],
-      "age_group": "all"
+    {
+      "rule_id": "has_typos",
+      "source": "",
+      "rule_type": "structure_defect",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "pediatrics"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "any_field"
+      ],
+      "expectation": "Запись не должна содержать явных орфографических ошибок, опечаток или искажённых медицинских терминов, затрудняющих понимание документа.",
+      "flag_code": "ОРФОГРАФИЧЕСКИЕ_ОШИБКИ",
+      "severity": "незначительный",
+      "source_ref": "внутренний стандарт качества",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["any_field"],
-    "expectation": "Запись не должна содержать явных орфографических ошибок, опечаток или искажённых медицинских терминов, затрудняющих понимание документа.",
-    "flag_code": "ОРФОГРАФИЧЕСКИЕ_ОШИБКИ",
-    "severity": "незначительный"
-  },
-  {
-    "rule_id": "legal_representative_info",
-    "source": "323-FZ",
-    "rule_type": "required_field",
-    "targets": ["companion_info"],
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "child"
+    {
+      "rule_id": "legal_representative_info",
+      "source": "323-FZ",
+      "rule_type": "required_field",
+      "targets": [
+        "companion_info"
+      ],
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "child"
+      },
+      "expectation": "Должно быть указано, в сопровождении какого законного представителя проведен осмотр ребенка младше 15 лет.",
+      "flag_code": "ОТСУТСТВУЕТ_ИНФОРМАЦИЯ_О_СОПРОВОЖДАЮЩЕМ",
+      "severity": "значительный",
+      "source_ref": "Федеральный закон от 21.11.2011 № 323-ФЗ, ст. 20 ч. 1 (согласие законного представителя); ст. 54",
+      "verified_at": "2026-08-19"
     },
-    "expectation": "Должно быть указано, в сопровождении какого законного представителя проведен осмотр ребенка младше 15 лет.",
-    "flag_code": "ОТСУТСТВУЕТ_ИНФОРМАЦИЯ_О_СОПРОВОЖДАЮЩЕМ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "treatment_dosage_clarity",
-    "source": "203n",
-    "rule_type": "content_analysis",
-    "applies_to": {
-      "visit_types": ["all"],
-      "specialties": ["all"],
-      "age_group": "child"
+    {
+      "rule_id": "treatment_dosage_clarity",
+      "source": "1094n",
+      "rule_type": "content_analysis",
+      "applies_to": {
+        "visit_types": [
+          "all"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "treatment_plan"
+      ],
+      "expectation": "Каждое назначение лекарственного препарата содержит наименование, дозировку, способ введения и применения, режим дозирования (кратность), продолжительность лечения и обоснование назначения.",
+      "flag_code": "НЕПОЛНОЕ_НАЗНАЧЕНИЕ_ПРЕПАРАТА",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 24.11.2021 № 1094н, прил. 1, п. 2, п. 17",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["treatment_plan"],
-    "expectation": "Назначение лекарственных препаратов должно содержать дозировку, кратность и длительность приема.",
-    "flag_code": "НЕПОЛНОЕ_НАЗНАЧЕНИЕ_ПРЕПАРАТА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "diagnosis_justification_presence",
-    "source": "203n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["primary", "repeat"],
-      "specialties": ["all"],
-      "age_group": "child"
+    {
+      "rule_id": "diagnosis_justification_presence",
+      "source": "323-FZ",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "child"
+      },
+      "targets": [
+        "diagnosis_justification"
+      ],
+      "expectation": "Должно присутствовать текстовое обоснование клинического диагноза.",
+      "flag_code": "ОТСУТСТВУЕТ_ОБОСНОВАНИЕ_ДИАГНОЗА",
+      "severity": "незначительный",
+      "source_ref": "Федеральный закон от 21.11.2011 № 323-ФЗ, ст. 70 ч. 5 — ближайшая норма; прямой нормы «оформить обоснование диагноза записью» нет, требование удержано как внутренний стандарт качества",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["diagnosis_justification"],
-    "expectation": "Должно присутствовать текстовое обоснование клинического диагноза.",
-    "flag_code": "ОТСУТСТВУЕТ_ОБОСНОВАНИЕ_ДИАГНОЗА",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "lab_biomaterial_and_result",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "lab_biomaterial_and_result",
+      "source": "464n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "biomaterial",
+        "result_value",
+        "units",
+        "reference_range",
+        "collection_date"
+      ],
+      "expectation": "Для лабораторных исследований (коды A09.*): должны быть указаны вид биоматериала, результат с единицами измерения, референсные значения и дата забора/выполнения.",
+      "flag_code": "ЛАБОРАТОРИЯ_НЕПОЛНЫЕ_ДАННЫЕ",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 18.05.2021 № 464н, прил. 1 к Правилам, п. 16",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["biomaterial", "result_value", "units", "reference_range", "collection_date"],
-    "expectation": "Для лабораторных исследований (коды A09.*): должны быть указаны вид биоматериала, результат с единицами измерения, референсные значения и дата забора/выполнения.",
-    "flag_code": "ЛАБОРАТОРИЯ_НЕПОЛНЫЕ_ДАННЫЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "ultrasound_protocol_and_conclusion",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "ultrasound_protocol_and_conclusion",
+      "source": "557n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "study_area",
+        "protocol_description",
+        "conclusion"
+      ],
+      "expectation": "Для УЗИ (коды A04.*): должны быть указаны область исследования, описание/протокол и заключение.",
+      "flag_code": "УЗИ_НЕПОЛНЫЙ_ПРОТОКОЛ",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 08.06.2020 № 557н, п. 19, п. 20, п. 24",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["study_area", "protocol_description", "conclusion"],
-    "expectation": "Для УЗИ (коды A04.*): должны быть указаны область исследования, описание/протокол и заключение.",
-    "flag_code": "УЗИ_НЕПОЛНЫЙ_ПРОТОКОЛ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "xray_protocol_and_conclusion",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "xray_protocol_and_conclusion",
+      "source": "560n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "study_area",
+        "protocol_description",
+        "conclusion",
+        "study_date"
+      ],
+      "expectation": "Для рентгена и флюорографии (коды A06.*): должны быть указаны область исследования, описание/протокол, заключение и дата исследования.",
+      "flag_code": "РЕНТГЕН_НЕПОЛНЫЙ_ПРОТОКОЛ",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 09.06.2020 № 560н, п. 16, п. 17, п. 21 (действует до 01.09.2026; с 01.09.2026 — приказ МЗ РФ от 08.05.2026 № 359н, прил. 1, п. 20, п. 21, п. 25)",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["study_area", "protocol_description", "conclusion", "study_date"],
-    "expectation": "Для рентгена и флюорографии (коды A06.*): должны быть указаны область исследования, описание/протокол, заключение и дата исследования.",
-    "flag_code": "РЕНТГЕН_НЕПОЛНЫЙ_ПРОТОКОЛ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "ecg_functional_description_and_conclusion",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "ecg_functional_description_and_conclusion",
+      "source": "205n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "parameters_description",
+        "conclusion"
+      ],
+      "expectation": "Для функциональных исследований (коды A05.*, A12.*): должны быть указаны описание параметров/результатов, расчётные показатели функциональных нарушений (при наличии) и заключение по результатам исследования.",
+      "flag_code": "ФУНКЦИОНАЛЬНОЕ_ИССЛЕДОВАНИЕ_НЕПОЛНОЕ",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 14.04.2025 № 205н, п. 18, п. 19, п. 24",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["parameters_description", "conclusion"],
-    "expectation": "Для функциональных исследований (коды A05.*, A12.*): должны быть указаны описание параметров/результатов и заключение.",
-    "flag_code": "ФУНКЦИОНАЛЬНОЕ_ИССЛЕДОВАНИЕ_НЕПОЛНОЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "manipulation_technique_and_outcome",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "manipulation_technique_and_outcome",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "procedure_performed",
+        "area_or_material",
+        "technique_or_result",
+        "complications"
+      ],
+      "expectation": "Для манипуляций (коды A11.*, A16.*): должны быть указаны описание выполненного вмешательства, область/материал, техника/результат и сведения об осложнениях (или их отсутствии) при необходимости.",
+      "flag_code": "МАНИПУЛЯЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), раздел «Сведения о проведённых оперативных вмешательствах в амбулаторных условиях» (дата, вмешательство, код, врач) и строка «Назначения (исследования, консультации)»; отдельного приказа о содержании записи о манипуляции нет",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["procedure_performed", "area_or_material", "technique_or_result", "complications"],
-    "expectation": "Для манипуляций (коды A11.*, A16.*): должны быть указаны описание выполненного вмешательства, область/материал, техника/результат и сведения об осложнениях (или их отсутствии) при необходимости.",
-    "flag_code": "МАНИПУЛЯЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "injection_procedure_completeness",
-    "source": "464n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["lab_research_intervention"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "injection_procedure_completeness",
+      "source": "274n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "drug_name",
+        "dose",
+        "route",
+        "patient_reaction"
+      ],
+      "expectation": "Для инъекций и процедур (коды A02.*, A03.*): должны быть указаны наименование препарата, доза, путь введения и реакция пациента (если применимо).",
+      "flag_code": "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
+      "severity": "значительный",
+      "source_ref": "приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), строка «Лекарственные препараты, физиотерапия»; приказ МЗ РФ от 24.11.2021 № 1094н, прил. 1, п. 2 (наименование, доза, способ введения)",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["drug_name", "dose", "route", "patient_reaction"],
-    "expectation": "Для инъекций и процедур (коды A02.*, A03.*): должны быть указаны наименование препарата, доза, путь введения и реакция пациента (если применимо).",
-    "flag_code": "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ",
-    "severity": "значительный"
-  },
-  {
-    "rule_id": "tuberculin_objective_data_required",
-    "source": "190n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["prophylactic_tuberculin"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "tuberculin_objective_data_required",
+      "source": "190n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic_tuberculin"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "objective_exam",
+        "test_result"
+      ],
+      "expectation": "В записи туберкулинодиагностики должны быть отражены объективные данные по результатам проведённого исследования (размер папулы, гиперемия или иная реакция на туберкулин).",
+      "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЮТ_ОБЪЕКТИВНЫЕ_ДАННЫЕ",
+      "severity": "критичный",
+      "source_ref": "приказ МЗ РФ от 11.04.2025 № 190н, п. 18 пп. «а»",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["objective_exam", "test_result"],
-    "expectation": "В записи туберкулинодиагностики должны быть отражены объективные данные по результатам проведённого исследования (размер папулы, гиперемия или иная реакция на туберкулин).",
-    "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЮТ_ОБЪЕКТИВНЫЕ_ДАННЫЕ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "tuberculin_specialist_examination_if_pathology",
-    "source": "190n",
-    "rule_type": "conditional_required",
-    "applies_to": {
-      "visit_types": ["prophylactic_tuberculin"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "tuberculin_specialist_examination_if_pathology",
+      "source": "190n",
+      "rule_type": "conditional_required",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic_tuberculin"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "specialist_examination"
+      ],
+      "condition": "Если выявлены патологические состояния, свидетельствующие о наличии туберкулёза (положительная или гиперергическая реакция, вираж туберкулиновой пробы).",
+      "expectation": "При выявлении патологических состояний должна быть отражена информация об осмотре медицинским работником, ответственным за проведение профилактического осмотра.",
+      "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ОСМОТР_СПЕЦИАЛИСТА_ПРИ_ПАТОЛОГИИ",
+      "severity": "критичный",
+      "source_ref": "приказ МЗ РФ от 11.04.2025 № 190н, п. 18 пп. «б», п. 19",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["specialist_examination"],
-    "condition": "Если выявлены патологические состояния, свидетельствующие о наличии туберкулёза (положительная или гиперергическая реакция, вираж туберкулиновой пробы).",
-    "expectation": "При выявлении патологических состояний должна быть отражена информация об осмотре медицинским работником, ответственным за проведение профилактического осмотра.",
-    "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ОСМОТР_СПЕЦИАЛИСТА_ПРИ_ПАТОЛОГИИ",
-    "severity": "критичный"
-  },
-  {
-    "rule_id": "tuberculin_conclusion_required",
-    "source": "190n",
-    "rule_type": "required_field",
-    "applies_to": {
-      "visit_types": ["prophylactic_tuberculin"],
-      "specialties": ["all"],
-      "age_group": "all"
+    {
+      "rule_id": "tuberculin_conclusion_required",
+      "source": "190n",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic_tuberculin"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "conclusion"
+      ],
+      "expectation": "В записи должно быть заключение об отсутствии или выявлении патологических состояний, свидетельствующих о наличии туберкулёза.",
+      "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ЗАКЛЮЧЕНИЕ",
+      "severity": "критичный",
+      "source_ref": "приказ МЗ РФ от 11.04.2025 № 190н, п. 18 пп. «в»",
+      "verified_at": "2026-08-19"
     },
-    "targets": ["conclusion"],
-    "expectation": "В записи должно быть заключение об отсутствии или выявлении патологических состояний, свидетельствующих о наличии туберкулёза.",
-    "flag_code": "ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ЗАКЛЮЧЕНИЕ",
-    "severity": "критичный"
-  }
-]
+    {
+      "rule_id": "prescription_by_trade_name",
+      "source": "1094n",
+      "source_ref": "приказ МЗ РФ от 24.11.2021 № 1094н, прил. 1, п. 5",
+      "verified_at": "2026-08-19",
+      "rule_type": "content_analysis",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "treatment_plan"
+      ],
+      "expectation": "Лекарственный препарат назначен по международному непатентованному наименованию (или группировочному/химическому наименованию). Назначение только по торговому наименованию допустимо, если у препарата нет МНН, либо при наличии в записи решения врачебной комиссии.",
+      "flag_code": "НАЗНАЧЕНИЕ_ПО_ТОРГОВОМУ_БЕЗ_МНН",
+      "severity": "незначительный"
+    },
+    {
+      "rule_id": "off_standard_prescription_needs_vk",
+      "source": "1094n",
+      "source_ref": "приказ МЗ РФ от 24.11.2021 № 1094н, прил. 1, п. 5, п. 32",
+      "verified_at": "2026-08-19",
+      "rule_type": "conditional_required",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "treatment_plan"
+      ],
+      "condition": "Если в записи назначен препарат вне инструкции по применению, вне клинических рекомендаций или стандарта медицинской помощи, либо одновременно назначено 5 и более препаратов, либо назначены наркотические/психотропные средства впервые.",
+      "expectation": "В записи должна быть отметка о решении врачебной комиссии (номер и/или дата протокола либо прямое указание на врачебную комиссию).",
+      "flag_code": "НАЗНАЧЕНИЕ_ВНЕ_СТАНДАРТА_БЕЗ_ВК",
+      "severity": "значительный"
+    },
+    {
+      "rule_id": "adult_prophylactic_scope",
+      "source": "404n",
+      "source_ref": "приказ МЗ РФ от 27.04.2021 № 404н, п. 16 (пп. 1–12), п. 20",
+      "verified_at": "2026-08-19",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "adult"
+      },
+      "targets": [
+        "objective_exam",
+        "state",
+        "recommendations"
+      ],
+      "expectation": "В записи профилактического осмотра взрослого отражены: анкетирование (сбор анамнеза и факторов риска), антропометрия (рост, вес, индекс массы тела, окружность талии), артериальное давление, оценка сердечно-сосудистого риска (относительного до 40 лет, абсолютного с 40 лет) и осмотр на визуальные локализации онкологических заболеваний. Отсутствие результата исследования допустимо, если указано, что оно выполнено в течение года.",
+      "flag_code": "ПРОФ_ВЗРОСЛЫЙ_НЕПОЛНЫЙ_ОБЪЁМ",
+      "severity": "значительный"
+    },
+    {
+      "rule_id": "adult_prophylactic_health_group",
+      "source": "404n",
+      "source_ref": "приказ МЗ РФ от 27.04.2021 № 404н, п. 14 пп. 2, п. 17, п. 23",
+      "verified_at": "2026-08-19",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "adult"
+      },
+      "targets": [
+        "recommendations",
+        "follow_up"
+      ],
+      "expectation": "По итогам осмотра установлена группа здоровья (I, II, IIIа или IIIб); при II группе с высоким или очень высоким сердечно-сосудистым риском и при III группах указано диспансерное наблюдение и кем оно проводится.",
+      "flag_code": "ПРОФ_ВЗРОСЛЫЙ_НЕТ_ГРУППЫ_ЗДОРОВЬЯ",
+      "severity": "значительный"
+    },
+    {
+      "rule_id": "adult_prophylactic_counselling",
+      "source": "404n",
+      "source_ref": "приказ МЗ РФ от 27.04.2021 № 404н, п. 14 пп. 3, п. 16 пп. 1, п. 17, п. 18 пп. 14",
+      "verified_at": "2026-08-19",
+      "rule_type": "conditional_required",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "adult"
+      },
+      "targets": [
+        "recommendations"
+      ],
+      "condition": "Если выявлены факторы риска хронических неинфекционных заболеваний, высокий или очень высокий сердечно-сосудистый риск, ишемическая болезнь сердца, цереброваскулярное заболевание или артериальная гипертензия.",
+      "expectation": "В записи отражено краткое профилактическое консультирование, включая разъяснение мер по снижению факторов риска, а при высоком риске — симптомов инфаркта миокарда и инсульта и необходимости своевременного вызова скорой медицинской помощи.",
+      "flag_code": "ПРОФ_ВЗРОСЛЫЙ_НЕТ_КОНСУЛЬТИРОВАНИЯ",
+      "severity": "незначительный"
+    },
+    {
+      "rule_id": "adult_prophylactic_marker",
+      "source": "404n",
+      "source_ref": "приказ МЗ РФ от 27.04.2021 № 404н, п. 22",
+      "verified_at": "2026-08-19",
+      "rule_type": "required_field",
+      "applies_to": {
+        "visit_types": [
+          "prophylactic"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "adult"
+      },
+      "targets": [
+        "visit_meta"
+      ],
+      "expectation": "Запись помечена как «Профилактический медицинский осмотр» или «Диспансеризация» — в наименовании услуги или в тексте записи.",
+      "flag_code": "ПРОФ_ВЗРОСЛЫЙ_НЕТ_ПОМЕТКИ",
+      "severity": "незначительный"
+    },
+    {
+      "rule_id": "dispensary_followup_adult",
+      "source": "168n",
+      "source_ref": "приказ МЗ РФ от 15.03.2022 № 168н, п. 4, п. 13, п. 14, прил. 1–3; приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), раздел «Диспансерное наблюдение» — «Рекомендации и дата следующего диспансерного осмотра, консультации»",
+      "verified_at": "2026-08-19",
+      "rule_type": "followup_check",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "adult",
+        "icd_prefixes": [
+          "I10",
+          "I11",
+          "I12",
+          "I13",
+          "I14",
+          "I15",
+          "I20",
+          "I21",
+          "I22",
+          "I23",
+          "I24",
+          "I25",
+          "Z95.0",
+          "Z95.1",
+          "Z95.5",
+          "I44",
+          "I45",
+          "I46",
+          "I47",
+          "I48",
+          "I49",
+          "I50",
+          "I65.2",
+          "E78",
+          "R73.0",
+          "R73.9",
+          "E11",
+          "I69.0",
+          "I69.1",
+          "I69.2",
+          "I69.3",
+          "I69.4",
+          "I67.8",
+          "K20",
+          "K21.0",
+          "K25",
+          "K26",
+          "K31.7",
+          "K86",
+          "J41.0",
+          "J41.1",
+          "J41.8",
+          "J44.0",
+          "J44.8",
+          "J44.9",
+          "J47.0",
+          "J45.0",
+          "J45.1",
+          "J45.8",
+          "J45.9",
+          "J12",
+          "J13",
+          "J14",
+          "J84.1",
+          "N18.1",
+          "N18.9",
+          "M81.5",
+          "K29.4",
+          "K29.5",
+          "D12.6",
+          "D12.8",
+          "K62.1",
+          "K50",
+          "K51",
+          "K22.0",
+          "K22.2",
+          "K22.7",
+          "K70.3",
+          "K74.3",
+          "K74.4",
+          "K74.5",
+          "K74.6",
+          "D13.4",
+          "D37.6",
+          "I05",
+          "I06",
+          "I07",
+          "I08",
+          "I09",
+          "I34",
+          "I35",
+          "I36",
+          "I37",
+          "I51.0",
+          "I51.1",
+          "I51.2",
+          "I71",
+          "Z95.2",
+          "Z95.3",
+          "Z95.4",
+          "Z95.8",
+          "Z95.9",
+          "I26",
+          "I27.0",
+          "I27.2",
+          "I27.8",
+          "I28",
+          "I33",
+          "I38",
+          "I39",
+          "I40",
+          "I41",
+          "I51.4",
+          "I42",
+          "Q20",
+          "Q21",
+          "Q22",
+          "Q23",
+          "Q24",
+          "Q25",
+          "Q26",
+          "Q27",
+          "Q28",
+          "B18.0",
+          "B18.1",
+          "B18.2",
+          "B20",
+          "B21",
+          "B22",
+          "B23",
+          "B24",
+          "E34.8",
+          "D13.7",
+          "D35.0",
+          "D35.1",
+          "D35.2",
+          "D35.8",
+          "D44.8",
+          "E34.5",
+          "E22.0",
+          "E04.1",
+          "E04.2",
+          "E05.1",
+          "E05.2",
+          "E21.0",
+          "Q85.1",
+          "D11",
+          "Q78.1",
+          "D30.0",
+          "D30.3",
+          "D30.4",
+          "D41.0",
+          "D29.1",
+          "M96",
+          "M88",
+          "D16",
+          "M85",
+          "Q78.4",
+          "D31",
+          "D23.1",
+          "J38.1",
+          "D14.0",
+          "D14.1",
+          "D14.2",
+          "J33",
+          "D14",
+          "D10.0",
+          "D10.1",
+          "D10.2",
+          "D10.3",
+          "D10.4",
+          "D10.5",
+          "D10.6",
+          "D10.7",
+          "D10.9",
+          "J37",
+          "J31",
+          "K13.0",
+          "K13.2",
+          "K13.7",
+          "L43",
+          "D22",
+          "Q82.5",
+          "D23",
+          "L57.1",
+          "L82",
+          "Q82.1",
+          "E28.2",
+          "D39.1",
+          "D24"
+        ]
+      },
+      "targets": [
+        "follow_up",
+        "diagnosis",
+        "recommendations",
+        "treatment_plan"
+      ],
+      "condition": "Если у пациента диагноз из перечня заболеваний, подлежащих диспансерному наблюдению.",
+      "expectation": "При впервые установленном диагнозе в записи есть решение о постановке на диспансерное наблюдение или направление к специалисту для него; при повторном приёме по такому диагнозу отражены оценка эффективности лечения и контролируемых показателей, коррекция терапии при необходимости и рекомендации с датой или сроком следующего осмотра.",
+      "flag_code": "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО",
+      "severity": "значительный"
+    },
+    {
+      "rule_id": "dispensary_followup_child",
+      "source": "192n",
+      "source_ref": "приказ МЗ РФ от 11.04.2025 № 192н, п. 3, п. 9, п. 12, п. 14",
+      "verified_at": "2026-08-19",
+      "rule_type": "followup_check",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "child"
+      },
+      "targets": [
+        "follow_up",
+        "diagnosis",
+        "recommendations"
+      ],
+      "condition": "Если у несовершеннолетнего хроническое заболевание или состояние, требующее диспансерного наблюдения по клиническим рекомендациям.",
+      "expectation": "При впервые установленном диагнозе в записи есть решение о постановке на диспансерное наблюдение или направление к специалисту для него; при повторном приёме отражены оценка состояния и эффективности назначенного лечения, коррекция терапии при необходимости и рекомендации с датой или сроком следующего осмотра.",
+      "flag_code": "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО",
+      "severity": "незначительный"
+    },
+    {
+      "rule_id": "consent_for_intervention_outside_list",
+      "source": "323-FZ",
+      "source_ref": "Федеральный закон от 21.11.2011 № 323-ФЗ, ст. 20 ч. 1, ч. 6, ч. 7; приказ МЗ РФ от 12.11.2021 № 1051н, п. 1, п. 3, п. 6, п. 9; приказ Минздравсоцразвития РФ от 23.04.2012 № 390н (перечень); приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), строка «Информированное добровольное согласие на медицинское вмешательство, отказ от медицинского вмешательства»",
+      "verified_at": "2026-08-19",
+      "rule_type": "conditional_required",
+      "applies_to": {
+        "visit_types": [
+          "lab_research_intervention",
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "visit_meta",
+        "treatment_plan"
+      ],
+      "condition": "Если в записи выполнено вмешательство, не входящее в перечень 390н: вакцинация, инвазивная манипуляция, малое хирургическое вмешательство, эндоскопия, биопсия, введение препарата иным путём, чем внутримышечно, внутривенно, подкожно или внутрикожно.",
+      "expectation": "В записи отражено информированное добровольное согласие пациента или его законного представителя на это вмешательство либо отказ от него.",
+      "flag_code": "ИДС_НЕ_ОТРАЖЕНО_ПРИ_ВМЕШАТЕЛЬСТВЕ",
+      "severity": "незначительный"
+    },
+    {
+      "rule_id": "sick_leave_needs_justification",
+      "source": "1089n",
+      "source_ref": "приказ МЗ РФ от 23.11.2021 № 1089н, п. 9, п. 11; приказ МЗ РФ от 11.04.2025 № 195н, п. 6 пп. 4; приказ МЗ РФ от 13.05.2025 № 274н, прил. 1 (форма 025/у), строка «Листок нетрудоспособности, справка»",
+      "verified_at": "2026-08-19",
+      "rule_type": "conditional_required",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "visit_meta",
+        "state",
+        "recommendations"
+      ],
+      "condition": "Если в записи упомянут листок нетрудоспособности (ЛН, ЭЛН), справка о временной нетрудоспособности, или указано, что пациент либо ухаживающий за ребёнком нетрудоспособен.",
+      "expectation": "В записи есть обоснование временной нетрудоспособности состоянием пациента и отметка о сформированном или продлённом листке нетрудоспособности (номер и/или даты) либо о его закрытии с обоснованием.",
+      "flag_code": "ЛН_БЕЗ_ОБОСНОВАНИЯ",
+      "severity": "значительный"
+    },
+    {
+      "rule_id": "sick_leave_over_15_days_needs_vk",
+      "source": "1089n",
+      "source_ref": "приказ МЗ РФ от 23.11.2021 № 1089н, п. 20, п. 21, п. 22, п. 44, п. 46; приказ МЗ РФ от 11.04.2025 № 195н, п. 7",
+      "verified_at": "2026-08-19",
+      "rule_type": "conditional_required",
+      "applies_to": {
+        "visit_types": [
+          "primary",
+          "repeat"
+        ],
+        "specialties": [
+          "all"
+        ],
+        "age_group": "all"
+      },
+      "targets": [
+        "visit_meta",
+        "recommendations"
+      ],
+      "condition": "Если из записи следует, что суммарный срок временной нетрудоспособности по данному случаю превышает 15 календарных дней, либо листок нетрудоспособности по уходу за ребёнком до 15 лет продлён с 16-го дня.",
+      "expectation": "В записи указано решение врачебной комиссии о продлении.",
+      "flag_code": "ЛН_СВЫШЕ_15_ДНЕЙ_БЕЗ_ВК",
+      "severity": "значительный"
+    }
+  ]
+}

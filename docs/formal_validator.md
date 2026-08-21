@@ -18,8 +18,8 @@ Each service in `Услуги` is classified independently. The result is the un
 
 **Classification priority per service:**
 
-1. If `Диагноз.Код` is `Z11.1` → always adds `PROPHYLACTIC_TUBERCULIN` to the result set (independent of services).
-2. Scan every field value for an NMU code matching `[ABАВ]\d{2}\.\d{3}\.\d{3}(\.\d{3})?`:
+1. If any diagnosis in `Диагнозы[].КодМКБ` is `Z11.1` (compared upper-case, whitespace-trimmed) → always adds `PROPHYLACTIC_TUBERCULIN` to the result set (independent of services).
+2. Scan every field value for an NMU code matching `^[ABАВ]\d{2}\.\d{2,3}\.\d{3}(?:\.\d{3})?$` (the middle segment is 2 digits for A-codes and 3 for B-codes, hence `\d{2,3}`):
    - `A*` prefix → `LAB_RESEARCH_INTERVENTION`
    - `B04.*` → `PROPHYLACTIC`
    - `B01.070.001` → `PRIMARY`
@@ -31,13 +31,20 @@ Each service in `Услуги` is classified independently. The result is the un
 
 If `Услуги` is absent or empty, returns `{OTHER}`.
 
-## Rule filtering — `get_rules(visit_types, patient_age) -> list[dict]`
+## Rule filtering — `get_rules(visit_types, patient_age, icd_codes=None) -> list[dict]`
 
 Loads `rules.json` (done once at module import). Returns rules where:
 - `applies_to.visit_types` contains `"all"` or overlaps with the resolved visit type keys.
 - `applies_to.age_group` is `"all"`, or matches the derived group (`"child"` if `age < 18`, `"adult"` otherwise). When `patient_age=None`, age filtering is skipped.
 
 Deduplicates by `flag_code` — the first matching rule wins.
+
+Third filter — ICD codes.  A rule carrying `applies_to.icd_prefixes` applies
+only when one of the visit's diagnosis codes (`Диагнозы[].КодМКБ`, passed in as
+`icd_codes`) starts with one of those prefixes; comparison is upper-case and
+whitespace-trimmed.  Without codes such a rule never applies.  Today only
+`dispensary_followup_adult` uses it (the 168н list of conditions subject to
+dispensary follow-up).
 
 ## LLM call — `validate(visit) -> list[dict]`
 
@@ -60,3 +67,25 @@ Returns the combined findings list. Empty list means no defects detected.
 | `PROPHYLACTIC_TUBERCULIN` | `prophylactic_tuberculin` | Туберкулинодиагностика (Z11.1) |
 | `LAB_RESEARCH_INTERVENTION` | `lab_research_intervention` | A-коды: лаб/инстр/вмешательства |
 | `OTHER` | `other` | Не удалось определить |
+
+## Rule file format
+
+`rules.json` is an object, not a bare list:
+
+```json
+{
+  "revised_at": "2026-08-19",
+  "sources_doc": "docs/formal-rules-sources.md",
+  "rules": [ … ]
+}
+```
+
+`revised_at` is the date of the last revision of the whole set; every rule
+carries `source_ref` (the exact clause of the regulation it rests on) and
+`verified_at` (the date that wording was last checked against the primary
+source).  On import the module logs
+`[formal] formal rules revised_at=… rules=N oldest verified_at=…`, so the age of the
+regulatory base is visible in the logs.
+
+The regulations themselves — editions, validity periods, planned replacements
+and open verification tails — are listed in `docs/formal-rules-sources.md`.
