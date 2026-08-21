@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import sys
-import types
+
+import pytest
 
 import LLM.graphs.diagnosis_nodes as nodes
 from LLM.graphs.diagnosis_nodes import (
@@ -274,6 +274,31 @@ async def test_generate_questions_uses_templates_on_invalid_json() -> None:
     assert update["errors"][0].startswith("generate_questions: fallback templates")
 
 
+async def test_generate_questions_raises_when_fallback_has_no_diagnosis(
+    monkeypatch,
+) -> None:
+    trace_events = []
+    monkeypatch.setattr(
+        nodes,
+        "trace_emit",
+        lambda event, **fields: trace_events.append((event, fields)),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="cannot build fallback questions without diagnosis",
+    ):
+        await generate_questions(
+            {"diagnosis_block": "   ", "dx_code": "?"},
+            client=_Client("truncated", tokens=13),
+        )
+
+    event, fields = trace_events[-1]
+    assert event == "graph.node.failed"
+    assert fields["node"] == "generate_questions"
+    assert fields["tokens"] == 13
+
+
 async def test_extract_drugs_degrades_on_schema_error() -> None:
     update = await extract_drugs(
         {"visit_context": "Назначен амоксициллин"},
@@ -332,39 +357,60 @@ async def test_lookup_drugs_passes_visit_date_and_formats_one_context(
     ]
 
 
-async def test_default_medicine_lookup_uses_legacy_when_grls_tables_are_absent(
+async def test_default_medicine_lookup_uses_grls_with_visit_date(
     monkeypatch,
 ) -> None:
     from datetime import date
 
-    from psycopg.errors import UndefinedTable
+    import grls.format as grls_format
+    import grls.lookup as grls_lookup
 
-    package = types.ModuleType("grls")
-    package.__path__ = []
-    format_module = types.ModuleType("grls.format")
-    lookup_module = types.ModuleType("grls.lookup")
-    format_module.format_medicine_lookup = lambda result: str(result)
+    raw_result = object()
+    calls: list[tuple[str, date | None]] = []
+    trace_events = []
 
-    async def missing_grls(query, *, on=None):
-        del query, on
-        raise UndefinedTable("relation grls_registry does not exist")
-
-    lookup_module.lookup_medicine = missing_grls
-    monkeypatch.setitem(sys.modules, "grls", package)
-    monkeypatch.setitem(sys.modules, "grls.format", format_module)
-    monkeypatch.setitem(sys.modules, "grls.lookup", lookup_module)
-
-    calls = []
-
-    async def legacy(query, on=None):
+    async def lookup(query, *, on=None):
         calls.append((query, on))
-        return "legacy result"
+        return raw_result
 
-    monkeypatch.setattr(nodes, "_legacy_medicine_lookup", legacy)
+    def format_lookup(result):
+        assert result is raw_result
+        return "GRLS result"
+
+    monkeypatch.setattr(grls_lookup, "lookup_medicine", lookup)
+    monkeypatch.setattr(grls_format, "format_medicine_lookup", format_lookup)
+    monkeypatch.setattr(
+        nodes,
+        "trace_emit",
+        lambda event, **fields: trace_events.append((event, fields)),
+    )
     visit_date = date(2025, 3, 10)
 
-    assert await _default_medicine_lookup("Амоксиклав", visit_date) == "legacy result"
+    assert await _default_medicine_lookup("Амоксиклав", visit_date) == "GRLS result"
     assert calls == [("Амоксиклав", visit_date)]
+    registry_event = next(
+        fields for event, fields in trace_events if event == "medicine.registry.completed"
+    )
+    assert registry_event["registry"] == "grls"
+    assert registry_event["results"] is raw_result
+
+
+async def test_lookup_drugs_degrades_when_grls_is_unavailable() -> None:
+    async def lookup(query, *, on=None):
+        del query, on
+        raise RuntimeError("GRLS unavailable")
+
+    update = await lookup_drugs(
+        {
+            "drug_mentions": [
+                {"as_written": "Амоксиклав", "normalized": "амоксиклав"}
+            ]
+        },
+        lookup=lookup,
+    )
+
+    assert update["drug_context"] == "справка недоступна"
+    assert update["errors"] == ["lookup_drugs: GRLS unavailable"]
 
 
 async def test_retrieve_skips_one_failed_question_and_builds_all_pools(
@@ -479,6 +525,35 @@ async def test_judge_criteria_receives_the_reconstructed_table() -> None:
     assert "| chunk_ref (источник) | № | Критерий |" in user_context
     assert "| 1 | 20 | Проведён осмотр |" in user_context
     assert "фрагмент 7" not in user_context
+
+
+async def test_judge_treatment_receives_grls_context() -> None:
+    pool = build_aspect_pool(
+        [("therapy", [_row("treatment-1", section="Лечение", index=8, rrf=0.5)])],
+        file_id="file-1",
+        doc_title="КР",
+    )
+    client = _Client('{"issues":[]}')
+
+    update = await judge_aspect(
+        {
+            "doc_title": "КР",
+            "drug_context": (
+                "Дата визита: 2025-03-10\n"
+                "- Амоксиклав → Найдено в ГРЛС; МНН: амоксициллин"
+            ),
+            "pools": {"treatment": pool},
+        },
+        "treatment",
+        client=client,
+        detector=_Detector(),
+    )
+
+    user_context = client.calls[0][0][1]["content"]
+    assert update["issues"] == {"treatment": []}
+    assert "## Справка по препаратам" in user_context
+    assert "Найдено в ГРЛС" in user_context
+    assert "## Фрагменты клинических рекомендаций «КР»" in user_context
 
 
 async def test_judge_aspect_degrades_on_invalid_json_without_losing_tokens() -> None:

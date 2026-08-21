@@ -78,7 +78,9 @@ def _error(label: str, exc: Exception) -> str:
 
 
 def _fallback_questions(diagnosis_block: str) -> list[Question]:
-    diagnosis = diagnosis_block.strip() or "указанном диагнозе"
+    diagnosis = diagnosis_block.strip()
+    if not diagnosis:
+        raise ValueError("cannot build fallback questions without diagnosis")
     return [
         {
             "aspect": "anamnesis",
@@ -177,9 +179,23 @@ async def generate_questions(
             raw_output=output,
         )
         return update
-    except Exception as exc:  # noqa: BLE001 - node-level degradation is deliberate
+    except Exception as exc:  # noqa: BLE001 - diagnosed fallback is deliberate
+        try:
+            fallback_questions = _fallback_questions(
+                state.get("diagnosis_block", "")
+            )
+        except ValueError as fallback_exc:
+            trace_emit(
+                "graph.node.failed",
+                node="generate_questions",
+                dx_code=state.get("dx_code"),
+                exception=fallback_exc,
+                generation_exception=exc,
+                tokens=tokens,
+            )
+            raise fallback_exc from exc
         update = {
-            "questions": _fallback_questions(state.get("diagnosis_block", "")),
+            "questions": fallback_questions,
             "errors": [_error("generate_questions: fallback templates", exc)],
             "tokens": tokens,
         }
@@ -262,100 +278,21 @@ async def extract_drugs(
         return update
 
 
-async def _legacy_medicine_lookup(query: str, on: date | None = None) -> str:
-    del on  # The legacy ESKLP table has no registration history.
-    from storage.dietary_supplements_storage import DietarySupplementsStorage
-    from storage.drugs_storage import DrugsStorage
-
-    async with DrugsStorage() as storage:
-        inn_matches = await storage.search_by_inn(query)
-        trace_emit(
-            "medicine.registry.completed",
-            registry="legacy_drugs.search_by_inn",
-            query=query,
-            results=inn_matches,
-        )
-        if inn_matches:
-            inn = inn_matches[0].inn_name or query
-            return f"МНН: {inn} (реестр ЕСКЛП без статуса РУ)"
-        drugs = await storage.search(query, threshold=0.85)
-    trace_emit(
-        "medicine.registry.completed",
-        registry="legacy_drugs.search",
-        query=query,
-        results=drugs,
-    )
-    if drugs:
-        rendered = []
-        for drug in drugs:
-            details = [drug.trade_name]
-            if drug.inn_name:
-                details.append(f"МНН {drug.inn_name}")
-            if drug.dosage_form:
-                details.append(drug.dosage_form)
-            rendered.append(", ".join(details))
-        return "ЕСКЛП: " + "; ".join(rendered)
-
-    async with DietarySupplementsStorage() as storage:
-        supplements = await storage.search(query)
-    trace_emit(
-        "medicine.registry.completed",
-        registry="dietary_supplements.search",
-        query=query,
-        results=supplements,
-    )
-    if supplements:
-        return "БАД: " + "; ".join(
-            supplement.product_name
-            + (
-                f" ({supplement.registration_number})"
-                if supplement.registration_number
-                else ""
-            )
-            for supplement in supplements
-        )
-    return "не найден в реестрах"
-
-
 async def _default_medicine_lookup(query: str, on: date | None = None) -> str:
-    try:
-        from grls.format import format_medicine_lookup
-        from grls.lookup import lookup_medicine
-    except ModuleNotFoundError:
-        trace_emit(
-            "medicine.registry_fallback",
-            query=query,
-            reason="GRLS package is unavailable",
-        )
-        return await _legacy_medicine_lookup(query, on)
-    try:
-        raw_result = await lookup_medicine(query, on=on)
-        formatted = format_medicine_lookup(raw_result)
-        trace_emit(
-            "medicine.registry.completed",
-            registry="grls",
-            query=query,
-            visit_date=on,
-            results=raw_result,
-            formatted=formatted,
-        )
-        return formatted
-    except Exception as exc:
-        # The graph can be deployed before migration 027 even when the GRLS
-        # package is already present. Keep using the old registry during that
-        # transition instead of losing the whole medicine context.
-        from psycopg.errors import UndefinedTable
+    from grls.format import format_medicine_lookup
+    from grls.lookup import lookup_medicine
 
-        if isinstance(exc, UndefinedTable):
-            logger.info("[diagnosis_graph] GRLS tables are absent; using legacy drugs")
-            trace_emit(
-                "medicine.registry_fallback",
-                query=query,
-                reason="GRLS tables are absent",
-                exception=exc,
-            )
-            return await _legacy_medicine_lookup(query, on)
-        raise
+    raw_result = await lookup_medicine(query, on=on)
+    formatted = format_medicine_lookup(raw_result)
+    trace_emit(
+        "medicine.registry.completed",
+        registry="grls",
+        query=query,
+        visit_date=on,
+        results=raw_result,
+        formatted=formatted,
+    )
+    return formatted
 
 
 async def lookup_drugs(

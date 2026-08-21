@@ -47,6 +47,9 @@ python scripts/fix-broken.py ORG|--all [-y] [--dry-run] [--num-batches N]
 
 # Replay today's cached 1C data (for development)
 python scripts/mock-run-today.py
+
+# Import GRLS registry (xlsx zip → grls_registry/grls_imports), see docs/grls.md
+python scripts/import-grls.py <archive.zip> [--dry-run] [--make-dump FILE]
 ```
 
 ## Architecture
@@ -80,7 +83,7 @@ src/
 ├── storage/                 # psycopg3 async storage classes (BaseStorage pattern)
 │   ├── docs_storage.py      # Clinical guideline chunks (docs table)
 │   ├── done_cards_storage.py# Deduplication: already-audited visit GUIDs
-│   ├── drugs_storage.py     # Drug reference data
+│   ├── grls_storage.py      # GRLS registry (drug certificates + statuses), see docs/grls.md
 │   └── ...
 ├── integrations/
 │   ├── one_c.py             # AlenkaOneCClient / MdsOneCClient: fetch visits from 1C

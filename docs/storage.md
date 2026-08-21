@@ -14,7 +14,8 @@ asyncpg: это два независимых клиента одной PostgreS
 | `GuidelinesStorage` | Метаданные клинических рекомендаций |
 | `DocsStorage` | Чанки клинических рекомендаций и их метаданные |
 | `IngestRunsStorage` | История загрузки документов |
-| `DrugsStorage` / `DietarySupplementsStorage` | Legacy-справочники лекарств и БАД |
+| `GrlsStorage` | Реестр лекарственных средств со статусами РУ и история импортов |
+| `DietarySupplementsStorage` | Реестр БАД — fallback, если лекарство не найдено в ГРЛС |
 
 ## `done_cards`
 
