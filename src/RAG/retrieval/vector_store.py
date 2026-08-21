@@ -28,7 +28,6 @@ from pgvector.asyncpg import register_vector
 from rank_bm25 import BM25Okapi
 
 from audit.graph_trace import emit as trace_emit
-from LLM.observability import emit
 from RAG.retrieval.embeddings import EMBEDDING_DIM, EMBEDDING_MODEL, embed  # noqa: F401
 
 load_dotenv()
@@ -357,8 +356,8 @@ async def rerank_results(
                 len(candidates),
                 len(reranked),
             )
-            emit(
-                "retrieval_rerank",
+            trace_emit(
+                "retrieval.rerank.completed",
                 model=RERANK_MODEL,
                 candidate_count=len(candidates),
                 returned_count=len(reranked),
@@ -368,8 +367,8 @@ async def rerank_results(
         logger.warning(
             "[retrieval] rerank unavailable, using RRF order: %s", str(exc)[:200]
         )
-        emit(
-            "retrieval_rerank_error",
+        trace_emit(
+            "retrieval.rerank.failed",
             model=RERANK_MODEL,
             exception_type=type(exc).__name__,
             exception=str(exc)[:200],

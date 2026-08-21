@@ -117,7 +117,15 @@ for f in e2e/tests/audit/test_*.py; do python "$f" || exit 1; done
 кейса — тот же id, что `_traced_card_audit`/`graph_trace.trace_context` кладут
 во все записи `logs/graphtraces.jsonl` для этого прогона. По упавшему кейсу
 не нужно искать нужный кусок трейса по времени или `card_guid` — можно сразу
-`grep correlation_id logs/graphtraces.jsonl`.
+
+```bash
+python scripts/dump-graphtraces.py --correlation-id <id>
+```
+
+По умолчанию скрипт вычищает дословный текст приёма (`card_data`/
+`card_data_priem`/`human_message`) из каждой записи — безопасно приложить к
+обсуждению. `--keep-card-data` возвращает эти поля, если разбор идёт локально
+и карту нужно видеть целиком.
 
 ## Почему нет teardown и нет флагов командной строки
 

@@ -22,7 +22,6 @@ from pydantic import BaseModel
 
 from audit.graph_trace import emit as trace_emit
 from LLM.base import MODEL, get_openai_client
-from LLM.observability import emit
 from LLM.vllm_config import build_vllm_extra_body
 
 logger = logging.getLogger(__name__)
@@ -99,13 +98,6 @@ class LLMClient:
         total_tokens = 0
         trace_id = uuid.uuid4().hex
         metadata = metadata or {}
-        emit(
-            "llm_start",
-            trace_id=trace_id,
-            model=self._model,
-            prompt_chars=sum(len(str(m.get("content") or "")) for m in messages),
-            **metadata,
-        )
         trace_emit(
             "llm.call.started",
             trace_id=trace_id,
@@ -125,13 +117,6 @@ class LLMClient:
 
         for attempt in range(self._max_retries + 1):
             try:
-                emit(
-                    "llm_attempt_start",
-                    trace_id=trace_id,
-                    attempt=attempt + 1,
-                    temperature=temp,
-                    **metadata,
-                )
                 trace_emit(
                     "llm.call.attempt.started",
                     trace_id=trace_id,
@@ -158,15 +143,6 @@ class LLMClient:
                 total_tokens += resp.usage.total_tokens if resp.usage else 0
                 content = resp.choices[0].message.content or ""
                 finish_reason = resp.choices[0].finish_reason
-                emit(
-                    "llm_attempt_end",
-                    trace_id=trace_id,
-                    attempt=attempt + 1,
-                    finish_reason=finish_reason,
-                    total_tokens=resp.usage.total_tokens if resp.usage else 0,
-                    completion_chars=len(content),
-                    **metadata,
-                )
                 trace_emit(
                     "llm.call.attempt.completed",
                     trace_id=trace_id,
@@ -178,14 +154,6 @@ class LLMClient:
                 )
 
                 if finish_reason == "stop":
-                    emit(
-                        "llm_success",
-                        trace_id=trace_id,
-                        finish_reason=finish_reason,
-                        total_tokens=resp.usage.total_tokens if resp.usage else 0,
-                        completion_chars=len(content),
-                        **metadata,
-                    )
                     trace_emit(
                         "llm.call.completed",
                         trace_id=trace_id,
@@ -209,13 +177,6 @@ class LLMClient:
                 total_tokens += 0
                 notice = f"Предыдущая попытка завершилась ошибкой: {str(exc)[:120]}. Повтори ответ."
                 last_exc = exc
-                emit(
-                    "llm_error",
-                    trace_id=trace_id,
-                    exception_type=type(exc).__name__,
-                    exception=str(exc)[:300],
-                    **metadata,
-                )
                 trace_emit(
                     "llm.call.attempt.failed",
                     trace_id=trace_id,
@@ -235,13 +196,6 @@ class LLMClient:
             if attempt < self._max_retries:
                 messages = list(messages) + [{"role": "user", "content": notice}]
                 temp = min(temp + self._temp_bump, _TEMP_CAP)
-                emit(
-                    "llm_retry",
-                    trace_id=trace_id,
-                    attempt=attempt + 1,
-                    retry_mode="same_contract",
-                    **metadata,
-                )
                 trace_emit(
                     "llm.call.retry",
                     trace_id=trace_id,
@@ -324,13 +278,6 @@ class LLMClient:
             create_checker_agent,
         )  # lazy import
 
-        emit(
-            "agent_start",
-            trace_id=trace_id,
-            model=self._model,
-            prompt_chars=len(human_message),
-            **metadata,
-        )
         trace_emit(
             "llm.agent.started",
             trace_id=trace_id,
@@ -359,14 +306,6 @@ class LLMClient:
                     tool_guard=guard,
                 )
                 max_steps = compact_steps if compact_retry else base_steps
-                emit(
-                    "agent_attempt_start",
-                    trace_id=trace_id,
-                    attempt=attempt + 1,
-                    mode="compact" if compact_retry else "normal",
-                    recursion_limit=max_steps,
-                    **metadata,
-                )
                 trace_emit(
                     "llm.agent.attempt.started",
                     trace_id=trace_id,
@@ -382,13 +321,6 @@ class LLMClient:
                 )
                 total_tokens += _sum_agent_tokens(result)
                 for event in guard.events:
-                    emit(
-                        "agent_tool",
-                        trace_id=trace_id,
-                        attempt=attempt + 1,
-                        **event,
-                        **metadata,
-                    )
                     trace_emit(
                         "llm.agent.tool",
                         trace_id=trace_id,
@@ -408,13 +340,6 @@ class LLMClient:
                         )
                     structured = result.get("structured_response")
                     if structured is not None:
-                        emit(
-                            "agent_success",
-                            trace_id=trace_id,
-                            attempts=attempt + 1,
-                            total_tokens=total_tokens,
-                            **metadata,
-                        )
                         trace_emit(
                             "llm.agent.completed",
                             trace_id=trace_id,
@@ -428,13 +353,6 @@ class LLMClient:
 
                     parsed = getattr(last_msg, "parsed", None)
                     if parsed is not None:
-                        emit(
-                            "agent_success",
-                            trace_id=trace_id,
-                            attempts=attempt + 1,
-                            total_tokens=total_tokens,
-                            **metadata,
-                        )
                         trace_emit(
                             "llm.agent.completed",
                             trace_id=trace_id,
@@ -448,13 +366,6 @@ class LLMClient:
 
                     content = getattr(last_msg, "content", "")
                     if isinstance(content, response_format):
-                        emit(
-                            "agent_success",
-                            trace_id=trace_id,
-                            attempts=attempt + 1,
-                            total_tokens=total_tokens,
-                            **metadata,
-                        )
                         trace_emit(
                             "llm.agent.completed",
                             trace_id=trace_id,
@@ -486,13 +397,6 @@ class LLMClient:
                     "finish_reason"
                 )
                 if not finish_reason or finish_reason == "stop":
-                    emit(
-                        "agent_success",
-                        trace_id=trace_id,
-                        attempts=attempt + 1,
-                        total_tokens=total_tokens,
-                        **metadata,
-                    )
                     trace_emit(
                         "llm.agent.completed",
                         trace_id=trace_id,
@@ -515,14 +419,6 @@ class LLMClient:
             except GraphRecursionError as exc:
                 last_exc = exc
                 notice = "Предыдущая попытка достигла лимита шагов. Не повторяй одинаковые вызовы инструментов и верни итоговый JSON."
-                emit(
-                    "agent_error",
-                    trace_id=trace_id,
-                    attempt=attempt + 1,
-                    exception_type=type(exc).__name__,
-                    exception=str(exc)[:300],
-                    **metadata,
-                )
                 trace_emit(
                     "llm.agent.attempt.failed",
                     trace_id=trace_id,
@@ -531,24 +427,9 @@ class LLMClient:
                     tool_events=guard.events,
                     metadata=metadata,
                 )
-                for event in guard.events:
-                    emit(
-                        "agent_tool",
-                        trace_id=trace_id,
-                        attempt=attempt + 1,
-                        **event,
-                        **metadata,
-                    )
                 if not compact_retry and attempt < self._max_retries:
                     compact_retry = True
                     current_human = f"{human_message}\n\n{notice}"
-                    emit(
-                        "agent_retry",
-                        trace_id=trace_id,
-                        attempt=attempt + 1,
-                        retry_mode="compact",
-                        **metadata,
-                    )
                     trace_emit(
                         "llm.agent.retry",
                         trace_id=trace_id,
@@ -562,14 +443,6 @@ class LLMClient:
             except BadRequestError as exc:
                 last_exc = exc
                 error_text = str(exc)
-                emit(
-                    "agent_error",
-                    trace_id=trace_id,
-                    attempt=attempt + 1,
-                    exception_type=type(exc).__name__,
-                    exception=error_text[:300],
-                    **metadata,
-                )
                 trace_emit(
                     "llm.agent.attempt.failed",
                     trace_id=trace_id,
@@ -578,28 +451,12 @@ class LLMClient:
                     tool_events=guard.events,
                     metadata=metadata,
                 )
-                for event in guard.events:
-                    emit(
-                        "agent_tool",
-                        trace_id=trace_id,
-                        attempt=attempt + 1,
-                        **event,
-                        **metadata,
-                    )
                 if _is_context_overflow(error_text):
                     break
                 notice = f"Предыдущая попытка завершилась ошибкой: {error_text[:120]}. Верни корректный JSON."
             except Exception as exc:  # noqa: BLE001 - agent retries arbitrary failures
                 last_exc = exc
                 notice = f"Предыдущая попытка завершилась ошибкой: {str(exc)[:120]}. Верни корректный JSON."
-                emit(
-                    "agent_error",
-                    trace_id=trace_id,
-                    attempt=attempt + 1,
-                    exception_type=type(exc).__name__,
-                    exception=str(exc)[:300],
-                    **metadata,
-                )
                 trace_emit(
                     "llm.agent.attempt.failed",
                     trace_id=trace_id,
@@ -608,14 +465,6 @@ class LLMClient:
                     tool_events=guard.events,
                     metadata=metadata,
                 )
-                for event in guard.events:
-                    emit(
-                        "agent_tool",
-                        trace_id=trace_id,
-                        attempt=attempt + 1,
-                        **event,
-                        **metadata,
-                    )
                 logger.warning(
                     "[llm_client:agent] attempt %d/%d error=%s — retrying",
                     attempt + 1,
@@ -625,13 +474,6 @@ class LLMClient:
 
             if attempt < self._max_retries:
                 current_human = f"{human_message}\n\n{notice}"
-                emit(
-                    "agent_retry",
-                    trace_id=trace_id,
-                    attempt=attempt + 1,
-                    retry_mode="same_contract",
-                    **metadata,
-                )
                 trace_emit(
                     "llm.agent.retry",
                     trace_id=trace_id,
