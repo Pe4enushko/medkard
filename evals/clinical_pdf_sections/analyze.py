@@ -230,7 +230,11 @@ def _guideline_label(document_id: str, manifest_row: dict[str, str]) -> str:
 
 
 def _summary_rows(
-    details: list[dict[str, object]], key_field: str
+    details: list[dict[str, object]],
+    key_field: str,
+    *,
+    guideline_field: str = "guideline_label",
+    guideline_separator: str = " | ",
 ) -> list[dict[str, object]]:
     grouped: dict[str, list[dict[str, object]]] = {}
     for row in details:
@@ -239,11 +243,8 @@ def _summary_rows(
     result: list[dict[str, object]] = []
     for title, rows in grouped.items():
         chunks = [int(row["chunks"]) for row in rows]
-        guideline_labels = sorted(
-            {
-                str(row["guideline_label"])
-                for row in rows
-            },
+        guidelines = sorted(
+            {str(row[guideline_field]) for row in rows},
             key=str.casefold,
         )
         kinds = sorted({str(row["section_kind"]) for row in rows})
@@ -252,13 +253,13 @@ def _summary_rows(
                 key_field: title,
                 "section_kinds": " | ".join(kinds),
                 "section_occurrences": len(rows),
-                "guideline_count": len(guideline_labels),
+                "guideline_count": len(guidelines),
                 "median_chunks": statistics.median(chunks),
                 "mean_chunks": f"{statistics.fmean(chunks):.3f}",
                 "min_chunks": min(chunks),
                 "max_chunks": max(chunks),
                 "total_chunks": sum(chunks),
-                "guidelines": " | ".join(guideline_labels),
+                "guidelines": guideline_separator.join(guidelines),
             }
         )
     return sorted(
@@ -347,7 +348,12 @@ def _write_baseline(
         "total_chunks",
         "guidelines",
     ]
-    exact_rows = _summary_rows(details, "section_title")
+    exact_rows = _summary_rows(
+        details,
+        "section_title",
+        guideline_field="guideline_id",
+        guideline_separator=",",
+    )
     _write_csv(output_dir / "sections-exact.csv", summary_fields, exact_rows)
     canonical_fields = summary_fields.copy()
     canonical_fields[0] = "canonical_title"
@@ -383,7 +389,7 @@ def _write_baseline(
         f"`{metadata['corpus_sha256']}`.\n\n"
         "## Файлы\n\n"
         "- `sections-exact.csv` — точный список заголовков после схлопывания "
-        "пробелов: медиана, среднее, диапазон и список КР. Это основной baseline.\n"
+        "пробелов: медиана, среднее, диапазон и ID КР через запятую. Это основной baseline.\n"
         "- `sections-canonical.csv` — та же сводка после эвристического удаления "
         "нумерации (`8.`, `8.3`, `XIII`, `Таблица N`, `Приложение АN`). "
         "Она удобна для исследования, но не заменяет точную таблицу.\n"
