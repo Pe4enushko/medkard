@@ -39,6 +39,20 @@ e2e/run-diagnosis-graph-tests.sh audit
 e2e/run-diagnosis-graph-tests.sh 'missing_parsed|length'
 ```
 
+По умолчанию тесты выполняются последовательно. Флаг `--parallel` запускает до
+четырёх тестовых файлов одновременно; число рабочих процессов можно указать
+явно. Вывод каждого файла печатается цельным блоком, без перемешивания строк:
+
+```bash
+e2e/run-diagnosis-graph-tests.sh --parallel audit
+e2e/run-diagnosis-graph-tests.sh --parallel 8 'audit|diagnosis_graph'
+```
+
+Каждый запуск тестов автоматически сохраняет полный объединённый stdout/stderr
+в `logs/e2e-YYYY-MM-DD_HH-MM-SS-PID.log`. Содержимое файла совпадает с выводом
+в терминале, включая заголовки, результаты отдельных тестов и итоговую сводку.
+Команда `--list` тесты не запускает и лог-файл не создаёт.
+
 Другой Python-интерпретатор задаётся через
 `E2E_PYTHON_BIN=/path/to/python`.
 
