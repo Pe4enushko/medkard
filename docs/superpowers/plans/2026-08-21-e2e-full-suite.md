@@ -47,7 +47,12 @@ new dependencies. All work happens in the existing worktree at
 - Audit test fixtures use ICD code `J06.9` (guideline `306_3`, age_category `{Взрослые,дети}` —
   confirmed present in the live `guidelines`/`docs` tables) so every fixture exercises
   `DiagnosisValidator` against a real, already-ingested guideline, except the `primary`/child fixture
-  which deliberately omits `Диагнозы` (see Task 10).
+  which deliberately omits `Диагнозы` (see Task 10) and the `prophylactic`/child fixture (Task 12),
+  which uses `Z00.1` instead — J06.9 on a prophylactic child visit was found empirically to trip
+  `НЕСООТВЕТСТВИЕ_УСЛУГИ_И_ВИЗИТА` (an acute-infection code on a routine visit with no treatment reads
+  as a type/diagnosis mismatch to the model), and `Z00.1` is one of `ClinicRecs._SKIP_CODES`, so
+  `DiagnosisValidator` correctly returns "no guideline found" for that one fixture rather than
+  exercising a real guideline lookup — a known, narrow coverage gap, not an oversight.
 - Audit test assertions check that the **complete** set of formal flags equals exactly `{case.expect}`
   — not presence-only. Every fixture must therefore be otherwise flawless against every rule
   applicable to its `visit_type`/`age_group`, including the `"visit_types": ["all"]` rules
