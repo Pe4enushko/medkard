@@ -70,6 +70,13 @@ class Case:
     visit: dict[str, Any]
     expect: str
     visit_types: set[VisitType]
+    # Presence-only escape hatch: some fixtures (e.g. a no-diagnosis card)
+    # unavoidably trip other rules that are *defined in terms of* the
+    # removed field, alongside the target flag — no fixture wording can
+    # decouple them. Default True preserves the exact-set check everywhere
+    # else; set False only on a Case where that cascade was confirmed
+    # empirically, not to paper over a genuinely leaky fixture.
+    exact: bool = True
 
 
 class _Report:
@@ -200,13 +207,22 @@ async def _stage_two(cases: list[Case], report: _Report) -> None:
             continue
 
         got = _flags(result)
-        report.check(
-            f"[{case.name}] exactly one flag found — {case.expect}",
-            got == {case.expect},
-            f"extra: {', '.join(sorted(got - {case.expect})) or '—'}\n"
-            f"missing: {', '.join(sorted({case.expect} - got)) or '—'}\n"
-            f"full findings:\n{_describe(result)}",
-        )
+        if case.exact:
+            report.check(
+                f"[{case.name}] exactly one flag found — {case.expect}",
+                got == {case.expect},
+                f"extra: {', '.join(sorted(got - {case.expect})) or '—'}\n"
+                f"missing: {', '.join(sorted({case.expect} - got)) or '—'}\n"
+                f"full findings:\n{_describe(result)}",
+            )
+        else:
+            report.check(
+                f"[{case.name}] flag found (presence-only) — {case.expect}",
+                case.expect in got,
+                f"extra: {', '.join(sorted(got - {case.expect})) or '—'}\n"
+                f"missing: {', '.join(sorted({case.expect} - got)) or '—'}\n"
+                f"full findings:\n{_describe(result)}",
+            )
 
         expected_dx = len(case.visit["Диагнозы"])
         report.check(
