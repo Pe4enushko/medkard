@@ -147,7 +147,9 @@ class DiagnosisState(TypedDict):
 Провал после ретраев `LLMClient` → **статические вопросы-шаблоны** по аспекту
 (константа в `diagnosis_nodes.py`, по 2–3 на аспект с подстановкой названия
 диагноза) + запись в `errors`: `"generate_questions: fallback templates
-(<причина>)"`. Граф продолжает.
+(<причина>)"`. Если блок диагноза пуст и подставить диагноз в шаблоны нельзя,
+fallback выбрасывает исключение: граф завершается, карта сохраняется как
+`broken`.
 
 ### 4.3 `extract_drugs` → `lookup_drugs`
 
@@ -382,7 +384,8 @@ treatment-ветку через `drug_context="справка недоступн
 Без БД/LLM (обязательные), `tests/test_diagnosis_graph_*.py`:
 
 - узлы на фейках: `generate_questions` (парсинг, кап на аспект, фолбэк-шаблоны
-  при исключении, `errors`); `extract_drugs`/`lookup_drugs` (форматирование
+  при исключении, `errors`, исключение при пустом диагнозе);
+  `extract_drugs`/`lookup_drugs` (форматирование
   `drug_context`, недоступная БД); `retrieve` — сборка пула из фейкового
   `search_in_guideline`: дедуп по `id`, max скор, кап, сортировка,
   нумерация, слияние `questions`, пропуск упавшего вопроса; `judge_*` —

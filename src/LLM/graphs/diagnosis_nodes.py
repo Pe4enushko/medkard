@@ -78,7 +78,9 @@ def _error(label: str, exc: Exception) -> str:
 
 
 def _fallback_questions(diagnosis_block: str) -> list[Question]:
-    diagnosis = diagnosis_block.strip() or "указанном диагнозе"
+    diagnosis = diagnosis_block.strip()
+    if not diagnosis:
+        raise ValueError("cannot build fallback questions without diagnosis")
     return [
         {
             "aspect": "anamnesis",
@@ -177,9 +179,23 @@ async def generate_questions(
             raw_output=output,
         )
         return update
-    except Exception as exc:  # noqa: BLE001 - node-level degradation is deliberate
+    except Exception as exc:  # noqa: BLE001 - diagnosed fallback is deliberate
+        try:
+            fallback_questions = _fallback_questions(
+                state.get("diagnosis_block", "")
+            )
+        except ValueError as fallback_exc:
+            trace_emit(
+                "graph.node.failed",
+                node="generate_questions",
+                dx_code=state.get("dx_code"),
+                exception=fallback_exc,
+                generation_exception=exc,
+                tokens=tokens,
+            )
+            raise fallback_exc from exc
         update = {
-            "questions": _fallback_questions(state.get("diagnosis_block", "")),
+            "questions": fallback_questions,
             "errors": [_error("generate_questions: fallback templates", exc)],
             "tokens": tokens,
         }

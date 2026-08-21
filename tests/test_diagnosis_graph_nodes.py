@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import LLM.graphs.diagnosis_nodes as nodes
 from LLM.graphs.diagnosis_nodes import (
     _default_medicine_lookup,
@@ -270,6 +272,31 @@ async def test_generate_questions_uses_templates_on_invalid_json() -> None:
     }
     assert update["tokens"] == 13
     assert update["errors"][0].startswith("generate_questions: fallback templates")
+
+
+async def test_generate_questions_raises_when_fallback_has_no_diagnosis(
+    monkeypatch,
+) -> None:
+    trace_events = []
+    monkeypatch.setattr(
+        nodes,
+        "trace_emit",
+        lambda event, **fields: trace_events.append((event, fields)),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="cannot build fallback questions without diagnosis",
+    ):
+        await generate_questions(
+            {"diagnosis_block": "   ", "dx_code": "?"},
+            client=_Client("truncated", tokens=13),
+        )
+
+    event, fields = trace_events[-1]
+    assert event == "graph.node.failed"
+    assert fields["node"] == "generate_questions"
+    assert fields["tokens"] == 13
 
 
 async def test_extract_drugs_degrades_on_schema_error() -> None:
