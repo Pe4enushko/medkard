@@ -107,7 +107,7 @@ misbehaves.
 
 `Case` (`harness.py`) has an `exact: bool = True` field, so exact-set is the default for every case and
 must be deliberately opted out of, not the other way around. Of the suite's 10 cases, 4 set
-`exact=False`: the child case in `test_audit_primary.py` and both cases in `test_audit_repeat.py`.
+`exact=False`: both cases in `test_audit_primary.py` and both cases in `test_audit_repeat.py`.
 Each of those was only downgraded after fixture wording alone was proven, empirically and across
 multiple rewrite attempts (documented in each file's module docstring), unable to reach a clean
 exact-set result — typically because two rules are worded near-synonymously in `rules.json` and any
