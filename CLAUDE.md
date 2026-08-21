@@ -52,6 +52,9 @@ python scripts/mock-run-today.py
 python scripts/import-grls.py <archive.zip> [--dry-run] [--make-dump FILE]
 ```
 
+E2E tests (standalone scripts against a live API/Postgres/LLM, not pytest) are documented in
+`docs/e2e-testing.md`.
+
 ## Architecture
 
 ```

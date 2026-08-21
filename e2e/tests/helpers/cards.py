@@ -77,6 +77,64 @@ class CardFixtures(BaseStorage):
                 {"guid": card_guid, "formal": fake_formal_result},
             )
 
+    async def stage_done_with_meta(
+        self,
+        card_guid: str,
+        *,
+        visit_date: str,
+        doctor_code: str | None = None,
+        doctor_name: str | None = None,
+    ) -> None:
+        """Mark an existing done_cards row as done, with a controllable Прием.DATE
+        (and optionally Прием.Врач_код/Врач), for routes that filter or group by
+        those fields (check/pull/export/doctors).
+
+        Unlike stage_audited (which only flips status/audit columns for the
+        push_log override scenario), this also rewrites card_data's Прием block
+        in place — visit_date must be DD.MM.YYYY, matching what 1C sends and what
+        reporting.api_formatter's medkard_visit_date() parses.
+        """
+        fake_formal_result = json.dumps(
+            [{"flag": "e2e_fixture", "issue": "e2e fixture finding", "source": "", "comment": ""}],
+            ensure_ascii=False,
+        )
+        priem_patch: dict = {"DATE": visit_date}
+        if doctor_code is not None:
+            priem_patch["Врач_код"] = doctor_code
+        if doctor_name is not None:
+            priem_patch["Врач"] = doctor_name
+
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                """
+                UPDATE done_cards
+                SET status = 'done',
+                    formal_result = %(formal)s::jsonb,
+                    ignored = FALSE,
+                    broken = FALSE,
+                    card_data = jsonb_set(
+                        card_data,
+                        '{Прием}',
+                        COALESCE(card_data -> 'Прием', '{}'::jsonb) || %(priem)s::jsonb
+                    )
+                WHERE card_guid = %(guid)s
+                """,
+                {"guid": card_guid, "formal": fake_formal_result, "priem": json.dumps(priem_patch, ensure_ascii=False)},
+            )
+
+    async def mark_ignored(self, card_guid: str) -> None:
+        """Flip an existing done_cards row to ignored=TRUE, status='done'.
+
+        Exists to test /visits/export's include_ignored toggle — no other
+        fixture path produces an ignored row (the real pipeline sets it via
+        audit/filters.py, which this e2e suite does not invoke).
+        """
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                "UPDATE done_cards SET status = 'done', ignored = TRUE WHERE card_guid = %(guid)s",
+                {"guid": card_guid},
+            )
+
     async def card_row(self, card_guid: str) -> dict | None:
         """Return the full done_cards row for a guid, or None if it doesn't exist."""
         async with self._pool.connection() as conn:
