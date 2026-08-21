@@ -104,6 +104,7 @@ class DiagnosisState(TypedDict, total=False):
     doc_title: str
     toc: list[str]
     card_guid: str | None
+    correlation_id: str
     dx_code: str
 
     questions: list[Question]

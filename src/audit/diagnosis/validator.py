@@ -7,6 +7,14 @@ from datetime import date, datetime
 from typing import Any
 
 from audit.diagnosis.clinic_recs import ClinicRecs
+from audit.graph_trace import (
+    current_correlation_id,
+    new_correlation_id,
+    trace_context,
+)
+from audit.graph_trace import (
+    emit as trace_emit,
+)
 from audit.models import DiagnosisAuditResult
 from storage.models.result import (
     DiagnosisIssue,
@@ -175,18 +183,56 @@ class DiagnosisValidator:
     def __init__(self, visit: dict[str, Any]) -> None:
         self._visit = visit
         self._clinic_recs = ClinicRecs()
+        visit_meta = visit.get("Прием") or {}
+        self._card_guid = visit_meta.get("GUID") or None
+        self._correlation_id = current_correlation_id() or new_correlation_id()
 
     async def validate_diagnosis(
         self,
         diagnosis: dict[str, Any],
     ) -> tuple[DiagnosisAuditResult, int]:
+        with trace_context(self._correlation_id, self._card_guid):
+            return await self._validate_diagnosis(diagnosis)
+
+    async def _validate_diagnosis(
+        self,
+        diagnosis: dict[str, Any],
+    ) -> tuple[DiagnosisAuditResult, int]:
         patient = self._visit.get("Пациент") or {}
         dx_code = diagnosis.get("КодМКБ", "?")
-        file_id, clinic_tokens = await self._clinic_recs.pick_recs(patient, diagnosis)
+        trace_emit(
+            "diagnosis.guideline_selection.started",
+            dx_code=dx_code,
+            diagnosis=diagnosis,
+            patient=patient,
+        )
+        try:
+            file_id, clinic_tokens = await self._clinic_recs.pick_recs(
+                patient, diagnosis
+            )
+        except Exception as exc:
+            trace_emit(
+                "diagnosis.guideline_selection.failed",
+                dx_code=dx_code,
+                exception=exc,
+            )
+            raise
+        trace_emit(
+            "diagnosis.guideline_selection.completed",
+            dx_code=dx_code,
+            file_id=file_id,
+            tokens=clinic_tokens,
+        )
         if not file_id:
-            return DiagnosisAuditResult(
-                guideline_file_id=None, icd_code=dx_code
-            ), clinic_tokens
+            result = DiagnosisAuditResult(guideline_file_id=None, icd_code=dx_code)
+            trace_emit(
+                "diagnosis.completed",
+                dx_code=dx_code,
+                output=result.to_dict(),
+                tokens=clinic_tokens,
+                graph_ran=False,
+            )
+            return result, clinic_tokens
 
         from RAG.retrieval.searches import get_sections_for_file
         from storage.guidelines_storage import GuidelinesStorage
@@ -211,13 +257,36 @@ class DiagnosisValidator:
             "doc_title": doc_title,
             "toc": toc,
             "card_guid": visit_meta.get("GUID"),
+            "correlation_id": self._correlation_id,
             "dx_code": dx_code,
             "pools": {},
             "issues": {},
             "errors": [],
             "tokens": 0,
         }
-        graph_result = await _get_graph().ainvoke(initial_state)
+        trace_emit(
+            "diagnosis.graph.started",
+            dx_code=dx_code,
+            file_id=file_id,
+            doc_title=doc_title,
+            state=initial_state,
+        )
+        try:
+            graph_result = await _get_graph().ainvoke(initial_state)
+        except Exception as exc:
+            trace_emit(
+                "diagnosis.graph.failed",
+                dx_code=dx_code,
+                file_id=file_id,
+                exception=exc,
+            )
+            raise
+        trace_emit(
+            "diagnosis.graph.completed",
+            dx_code=dx_code,
+            file_id=file_id,
+            state=graph_result,
+        )
         issues = graph_result.get("issues", {})
         result = DiagnosisAuditResult(
             anamnesis_issues=[
@@ -240,4 +309,12 @@ class DiagnosisValidator:
             ],
             errors=list(graph_result.get("errors", [])),
         )
-        return result, clinic_tokens + int(graph_result.get("tokens", 0))
+        total_tokens = clinic_tokens + int(graph_result.get("tokens", 0))
+        trace_emit(
+            "diagnosis.completed",
+            dx_code=dx_code,
+            output=result.to_dict(),
+            tokens=total_tokens,
+            graph_ran=True,
+        )
+        return result, total_tokens

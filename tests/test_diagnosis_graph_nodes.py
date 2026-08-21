@@ -243,6 +243,7 @@ async def test_generate_questions_caps_and_labels_model_output(monkeypatch) -> N
             "diagnosis_block": "J01",
             "visit_context": "visit",
             "toc": ["3 Лечение"],
+            "correlation_id": "correlation-1",
         },
         client=client,
     )
@@ -254,6 +255,7 @@ async def test_generate_questions_caps_and_labels_model_output(monkeypatch) -> N
         {"aspect": "treatment", "text": "t1"},
     ]
     assert update["tokens"] == 11
+    assert client.calls[0][1]["metadata"]["correlation_id"] == "correlation-1"
 
 
 async def test_generate_questions_uses_templates_on_invalid_json() -> None:
@@ -283,10 +285,18 @@ async def test_extract_drugs_degrades_on_schema_error() -> None:
     assert update["errors"][0].startswith("extract_drugs:")
 
 
-async def test_lookup_drugs_passes_visit_date_and_formats_one_context() -> None:
+async def test_lookup_drugs_passes_visit_date_and_formats_one_context(
+    monkeypatch,
+) -> None:
     from datetime import date
 
     calls = []
+    trace_events = []
+    monkeypatch.setattr(
+        nodes,
+        "trace_emit",
+        lambda event, **fields: trace_events.append((event, fields)),
+    )
 
     async def lookup(query, *, on):
         calls.append((query, on))
@@ -309,6 +319,17 @@ async def test_lookup_drugs_passes_visit_date_and_formats_one_context() -> None:
     ]
     assert "Дата визита: 2025-03-10" in update["drug_context"]
     assert "- Амоксиклав → found амоксиклав" in update["drug_context"]
+    retrieved = [
+        fields for event, fields in trace_events if event == "medicine.retrieved"
+    ]
+    assert [item["mention"]["normalized"] for item in retrieved] == [
+        "амоксиклав",
+        "ксизал",
+    ]
+    assert [item["result"] for item in retrieved] == [
+        "found амоксиклав",
+        "found ксизал",
+    ]
 
 
 async def test_default_medicine_lookup_uses_legacy_when_grls_tables_are_absent(

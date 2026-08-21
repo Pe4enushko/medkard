@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
+from audit.graph_trace import emit as trace_emit
 from LLM.graphs.diagnosis_state import (
     Aspect,
     Chunk,
@@ -126,6 +127,17 @@ async def generate_questions(
     *,
     client: StructuredClient | None = None,
 ) -> dict[str, Any]:
+    trace_emit(
+        "graph.node.started",
+        node="generate_questions",
+        dx_code=state.get("dx_code"),
+        input={
+            "patient_block": state.get("patient_block"),
+            "diagnosis_block": state.get("diagnosis_block"),
+            "visit_context": state.get("visit_context"),
+            "toc": state.get("toc", []),
+        },
+    )
     client = client or _default_client()
     tokens = 0
     user = (
@@ -147,6 +159,7 @@ async def generate_questions(
             metadata={
                 "node": "generate_questions",
                 "card_guid": state.get("card_guid"),
+                "correlation_id": state.get("correlation_id"),
                 "dx_code": state.get("dx_code"),
             },
         )
@@ -155,13 +168,29 @@ async def generate_questions(
         questions = _questions_from_output(output)
         if not questions:
             raise ValueError("model returned no questions")
-        return {"questions": questions, "tokens": tokens}
+        update = {"questions": questions, "tokens": tokens}
+        trace_emit(
+            "graph.node.completed",
+            node="generate_questions",
+            dx_code=state.get("dx_code"),
+            output=update,
+            raw_output=output,
+        )
+        return update
     except Exception as exc:  # noqa: BLE001 - node-level degradation is deliberate
-        return {
+        update = {
             "questions": _fallback_questions(state.get("diagnosis_block", "")),
             "errors": [_error("generate_questions: fallback templates", exc)],
             "tokens": tokens,
         }
+        trace_emit(
+            "graph.node.degraded",
+            node="generate_questions",
+            dx_code=state.get("dx_code"),
+            exception=exc,
+            output=update,
+        )
+        return update
 
 
 async def extract_drugs(
@@ -169,6 +198,12 @@ async def extract_drugs(
     *,
     client: StructuredClient | None = None,
 ) -> dict[str, Any]:
+    trace_emit(
+        "graph.node.started",
+        node="extract_drugs",
+        dx_code=state.get("dx_code"),
+        input={"visit_context": state.get("visit_context")},
+    )
     client = client or _default_client()
     tokens = 0
     try:
@@ -183,6 +218,7 @@ async def extract_drugs(
             metadata={
                 "node": "extract_drugs",
                 "card_guid": state.get("card_guid"),
+                "correlation_id": state.get("correlation_id"),
                 "dx_code": state.get("dx_code"),
             },
         )
@@ -196,13 +232,34 @@ async def extract_drugs(
             for item in output.items
             if item.as_written.strip() and item.normalized.strip()
         ]
-        return {"drug_mentions": mentions, "tokens": tokens}
+        update = {"drug_mentions": mentions, "tokens": tokens}
+        trace_emit(
+            "graph.node.completed",
+            node="extract_drugs",
+            dx_code=state.get("dx_code"),
+            output=update,
+            raw_output=output,
+        )
+        trace_emit(
+            "medicine.extracted",
+            dx_code=state.get("dx_code"),
+            mentions=mentions,
+        )
+        return update
     except Exception as exc:  # noqa: BLE001 - node-level degradation is deliberate
-        return {
+        update = {
             "drug_mentions": [],
             "errors": [_error("extract_drugs", exc)],
             "tokens": tokens,
         }
+        trace_emit(
+            "graph.node.degraded",
+            node="extract_drugs",
+            dx_code=state.get("dx_code"),
+            exception=exc,
+            output=update,
+        )
+        return update
 
 
 async def _legacy_medicine_lookup(query: str, on: date | None = None) -> str:
@@ -212,10 +269,22 @@ async def _legacy_medicine_lookup(query: str, on: date | None = None) -> str:
 
     async with DrugsStorage() as storage:
         inn_matches = await storage.search_by_inn(query)
+        trace_emit(
+            "medicine.registry.completed",
+            registry="legacy_drugs.search_by_inn",
+            query=query,
+            results=inn_matches,
+        )
         if inn_matches:
             inn = inn_matches[0].inn_name or query
             return f"МНН: {inn} (реестр ЕСКЛП без статуса РУ)"
         drugs = await storage.search(query, threshold=0.85)
+    trace_emit(
+        "medicine.registry.completed",
+        registry="legacy_drugs.search",
+        query=query,
+        results=drugs,
+    )
     if drugs:
         rendered = []
         for drug in drugs:
@@ -229,6 +298,12 @@ async def _legacy_medicine_lookup(query: str, on: date | None = None) -> str:
 
     async with DietarySupplementsStorage() as storage:
         supplements = await storage.search(query)
+    trace_emit(
+        "medicine.registry.completed",
+        registry="dietary_supplements.search",
+        query=query,
+        results=supplements,
+    )
     if supplements:
         return "БАД: " + "; ".join(
             supplement.product_name
@@ -247,9 +322,24 @@ async def _default_medicine_lookup(query: str, on: date | None = None) -> str:
         from grls.format import format_medicine_lookup
         from grls.lookup import lookup_medicine
     except ModuleNotFoundError:
+        trace_emit(
+            "medicine.registry_fallback",
+            query=query,
+            reason="GRLS package is unavailable",
+        )
         return await _legacy_medicine_lookup(query, on)
     try:
-        return format_medicine_lookup(await lookup_medicine(query, on=on))
+        raw_result = await lookup_medicine(query, on=on)
+        formatted = format_medicine_lookup(raw_result)
+        trace_emit(
+            "medicine.registry.completed",
+            registry="grls",
+            query=query,
+            visit_date=on,
+            results=raw_result,
+            formatted=formatted,
+        )
+        return formatted
     except Exception as exc:
         # The graph can be deployed before migration 027 even when the GRLS
         # package is already present. Keep using the old registry during that
@@ -258,6 +348,12 @@ async def _default_medicine_lookup(query: str, on: date | None = None) -> str:
 
         if isinstance(exc, UndefinedTable):
             logger.info("[diagnosis_graph] GRLS tables are absent; using legacy drugs")
+            trace_emit(
+                "medicine.registry_fallback",
+                query=query,
+                reason="GRLS tables are absent",
+                exception=exc,
+            )
             return await _legacy_medicine_lookup(query, on)
         raise
 
@@ -268,23 +364,58 @@ async def lookup_drugs(
     lookup=None,
 ) -> dict[str, Any]:
     mentions = state.get("drug_mentions", [])
+    trace_emit(
+        "graph.node.started",
+        node="lookup_drugs",
+        dx_code=state.get("dx_code"),
+        input={"mentions": mentions, "visit_date": state.get("visit_date")},
+    )
     if not mentions:
-        return {"drug_context": ""}
+        update = {"drug_context": ""}
+        trace_emit(
+            "graph.node.completed",
+            node="lookup_drugs",
+            dx_code=state.get("dx_code"),
+            output=update,
+        )
+        return update
     lookup = lookup or _default_medicine_lookup
     try:
         lines = []
         for mention in mentions:
             result = await lookup(mention["normalized"], on=state.get("visit_date"))
+            trace_emit(
+                "medicine.retrieved",
+                dx_code=state.get("dx_code"),
+                mention=mention,
+                visit_date=state.get("visit_date"),
+                result=result,
+            )
             lines.append(f"- {mention['as_written']} → {result}")
     except Exception as exc:  # noqa: BLE001 - registry failure must not drop the card
-        return {
+        update = {
             "drug_context": "справка недоступна",
             "errors": [_error("lookup_drugs", exc)],
         }
+        trace_emit(
+            "graph.node.degraded",
+            node="lookup_drugs",
+            dx_code=state.get("dx_code"),
+            exception=exc,
+            output=update,
+        )
+        return update
 
     visit_date = state.get("visit_date")
     prefix = f"Дата визита: {visit_date.isoformat()}\n" if visit_date else ""
-    return {"drug_context": prefix + "\n".join(lines)}
+    update = {"drug_context": prefix + "\n".join(lines)}
+    trace_emit(
+        "graph.node.completed",
+        node="lookup_drugs",
+        dx_code=state.get("dx_code"),
+        output=update,
+    )
+    return update
 
 
 async def retrieve(
@@ -292,6 +423,15 @@ async def retrieve(
     *,
     search=None,
 ) -> dict[str, Any]:
+    trace_emit(
+        "graph.node.started",
+        node="retrieve",
+        dx_code=state.get("dx_code"),
+        input={
+            "file_id": state.get("file_id"),
+            "questions": state.get("questions", []),
+        },
+    )
     if search is None:
         from RAG.retrieval.searches import search_in_guideline
 
@@ -301,6 +441,13 @@ async def retrieve(
 
     async def _one(question: Question):
         async with semaphore:
+            trace_emit(
+                "retrieval.query.started",
+                dx_code=state.get("dx_code"),
+                file_id=state.get("file_id"),
+                aspect=question["aspect"],
+                query=question["text"],
+            )
             try:
                 rows = await search(
                     question["text"],
@@ -308,8 +455,24 @@ async def retrieve(
                     candidates=CANDIDATES_PER_QUESTION,
                     top_k=TOP_K_PER_QUESTION,
                 )
+                trace_emit(
+                    "retrieval.query.completed",
+                    dx_code=state.get("dx_code"),
+                    file_id=state.get("file_id"),
+                    aspect=question["aspect"],
+                    query=question["text"],
+                    chunks=rows,
+                )
                 return question, rows, None
             except Exception as exc:  # noqa: BLE001 - isolate one retrieval question
+                trace_emit(
+                    "retrieval.query.failed",
+                    dx_code=state.get("dx_code"),
+                    file_id=state.get("file_id"),
+                    aspect=question["aspect"],
+                    query=question["text"],
+                    exception=exc,
+                )
                 return question, [], exc
 
     results = await asyncio.gather(
@@ -339,7 +502,14 @@ async def retrieve(
     for aspect in ("anamnesis", "inspection", "treatment"):
         if not pools[aspect]:
             errors.append(f"retrieve_{aspect}: no chunks")
-    return {"pools": pools, "errors": errors}
+    update = {"pools": pools, "errors": errors}
+    trace_emit(
+        "graph.node.completed",
+        node="retrieve",
+        dx_code=state.get("dx_code"),
+        output=update,
+    )
+    return update
 
 
 async def retrieve_criteria(
@@ -347,6 +517,15 @@ async def retrieve_criteria(
     *,
     get_chunks=None,
 ) -> dict[str, Any]:
+    trace_emit(
+        "graph.node.started",
+        node="retrieve_criteria",
+        dx_code=state.get("dx_code"),
+        input={
+            "file_id": state.get("file_id"),
+            "pattern": CRITERIA_SECTION_PATTERN,
+        },
+    )
     if get_chunks is None:
         from RAG.retrieval.searches import get_section_chunks_by_pattern
 
@@ -357,15 +536,37 @@ async def retrieve_criteria(
             CRITERIA_SECTION_PATTERN,
         )
     except Exception as exc:  # noqa: BLE001 - criteria is an optional graph branch
-        return {
+        update = {
             "pools": {"criteria": []},
             "errors": [_error("retrieve_criteria", exc)],
         }
+        trace_emit(
+            "graph.node.degraded",
+            node="retrieve_criteria",
+            dx_code=state.get("dx_code"),
+            exception=exc,
+            output=update,
+        )
+        return update
+    trace_emit(
+        "retrieval.criteria.completed",
+        dx_code=state.get("dx_code"),
+        file_id=state.get("file_id"),
+        pattern=CRITERIA_SECTION_PATTERN,
+        chunks=rows,
+    )
     if not rows:
-        return {
+        update = {
             "pools": {"criteria": []},
             "errors": ["retrieve_criteria: section not found"],
         }
+        trace_emit(
+            "graph.node.degraded",
+            node="retrieve_criteria",
+            dx_code=state.get("dx_code"),
+            output=update,
+        )
+        return update
     pool = build_aspect_pool(
         [("", rows)],
         file_id=state["file_id"],
@@ -374,7 +575,14 @@ async def retrieve_criteria(
     )
     for chunk in pool:
         chunk["questions"] = []
-    return {"pools": {"criteria": pool}}
+    update = {"pools": {"criteria": pool}}
+    trace_emit(
+        "graph.node.completed",
+        node="retrieve_criteria",
+        dx_code=state.get("dx_code"),
+        output=update,
+    )
+    return update
 
 
 def _render_pool(pool: list[Chunk]) -> str:
@@ -471,8 +679,22 @@ async def judge_aspect(
     detector=None,
 ) -> dict[str, Any]:
     pool = state.get("pools", {}).get(aspect, [])
+    trace_emit(
+        "graph.node.started",
+        node=f"judge_{aspect}",
+        dx_code=state.get("dx_code"),
+        input={"pool": pool},
+    )
     if not pool:
-        return {"issues": {aspect: []}}
+        update = {"issues": {aspect: []}}
+        trace_emit(
+            "graph.node.completed",
+            node=f"judge_{aspect}",
+            dx_code=state.get("dx_code"),
+            output=update,
+            skipped_reason="empty pool",
+        )
+        return update
 
     client = client or _default_client()
     prompt_name = {
@@ -515,6 +737,7 @@ async def judge_aspect(
             metadata={
                 "node": f"judge_{aspect}",
                 "card_guid": state.get("card_guid"),
+                "correlation_id": state.get("correlation_id"),
                 "dx_code": state.get("dx_code"),
             },
         )
@@ -522,11 +745,20 @@ async def judge_aspect(
         assert isinstance(output, JudgeOutput)
         issues = resolve_judge_output(output, aspect=aspect, pool=pool)
     except Exception as exc:  # noqa: BLE001 - malformed structured output degrades one judge
-        return {
+        update = {
             "issues": {aspect: []},
             "errors": [_error(f"judge_{aspect}", exc)],
             "tokens": tokens,
         }
+        trace_emit(
+            "graph.node.degraded",
+            node=f"judge_{aspect}",
+            dx_code=state.get("dx_code"),
+            exception=exc,
+            checker_context=context_parts,
+            output=update,
+        )
+        return update
 
     if detector is None:
         from LLM.chinese_detector import ChineseDetector
@@ -542,7 +774,16 @@ async def judge_aspect(
             tokens += repair_tokens
         except Exception as exc:  # noqa: BLE001 - keep the original issue on repair failure
             errors.append(_error(f"judge_{aspect}: chinese repair", exc))
-    return {"issues": {aspect: issues}, "errors": errors, "tokens": tokens}
+    update = {"issues": {aspect: issues}, "errors": errors, "tokens": tokens}
+    trace_emit(
+        "graph.node.completed",
+        node=f"judge_{aspect}",
+        dx_code=state.get("dx_code"),
+        checker_context=context_parts,
+        raw_output=output,
+        output=update,
+    )
+    return update
 
 
 async def judge_anamnesis(state: DiagnosisState, **kwargs) -> dict[str, Any]:
@@ -562,12 +803,25 @@ async def judge_criteria(state: DiagnosisState, **kwargs) -> dict[str, Any]:
 
 
 async def collect_sources(state: DiagnosisState) -> dict[str, Any]:
-    return {
+    trace_emit(
+        "graph.node.started",
+        node="collect_sources",
+        dx_code=state.get("dx_code"),
+        input={"pools": state.get("pools", {}), "issues": state.get("issues", {})},
+    )
+    update = {
         "sources": collect_guideline_sources(
             state.get("pools", {}),
             state.get("issues", {}),
         )
     }
+    trace_emit(
+        "graph.node.completed",
+        node="collect_sources",
+        dx_code=state.get("dx_code"),
+        output=update,
+    )
+    return update
 
 
 def _metadata_dict(raw_metadata: object) -> dict[str, Any]:

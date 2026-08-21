@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -109,7 +110,9 @@ def test_run_skips_visits_with_done_guids(monkeypatch):
     )
 
     assert len(results) == 1
-    assert results[0][0].input["Прием"]["GUID"] == "2a3b5100-39e1-11f1-a224-00155daa6107"
+    assert (
+        results[0][0].input["Прием"]["GUID"] == "2a3b5100-39e1-11f1-a224-00155daa6107"
+    )
 
 
 def test_run_batched_filters_done_guids_before_processing(monkeypatch):
@@ -146,3 +149,86 @@ def test_run_batched_filters_done_guids_before_processing(monkeypatch):
         "11111111-39e1-11f1-a224-00155daa6107",
         "33333333-39e1-11f1-a224-00155daa6107",
     }
+
+
+def test_parallel_card_audits_have_separate_complete_traces(monkeypatch, tmp_path):
+    monkeypatch.setattr(pipeline_module, "FormalValidator", _FakeFormalValidator)
+    monkeypatch.setattr(pipeline_module, "DiagnosisValidator", _FakeDiagnosisValidator)
+    trace_path = tmp_path / "graphtraces.jsonl"
+    monkeypatch.setenv("GRAPH_TRACE_PATH", str(trace_path))
+
+    visits = [
+        {
+            "Прием": {"GUID": "trace-card-a", "DATE": "2026-08-21"},
+            "Диагнозы": [{"КодМКБ": "A01"}],
+        },
+        {
+            "Прием": {"GUID": "trace-card-b", "DATE": "2026-08-21"},
+            "Диагнозы": [{"КодМКБ": "B02"}],
+        },
+    ]
+
+    async def run():
+        pipeline = pipeline_module.AuditPipeline()
+        await asyncio.gather(*(pipeline._audit_visit(visit) for visit in visits))
+
+    asyncio.run(run())
+
+    records = [
+        json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    starts = [row for row in records if row["event"] == "audit.started"]
+    assert len(starts) == 2
+    assert {row["card_guid"] for row in starts} == {"trace-card-a", "trace-card-b"}
+    assert len({row["correlation_id"] for row in starts}) == 2
+    assert {row["card_data_priem"]["GUID"] for row in starts} == {
+        "trace-card-a",
+        "trace-card-b",
+    }
+
+    for start in starts:
+        card_records = [
+            row for row in records if row["correlation_id"] == start["correlation_id"]
+        ]
+        assert {row["card_guid"] for row in card_records} == {start["card_guid"]}
+        assert card_records[0]["event"] == "audit.started"
+        assert card_records[-1]["event"] == "audit.completed"
+        assert any(
+            row["event"] == "checker.completed" and row["checker"] == "formal"
+            for row in card_records
+        )
+        assert any(
+            row["event"] == "checker.completed" and row["checker"] == "icd"
+            for row in card_records
+        )
+        assert any(
+            row["event"] == "checker.completed" and row["checker"] == "diagnosis"
+            for row in card_records
+        )
+
+
+def test_failed_card_audit_closes_the_same_trace(monkeypatch, tmp_path):
+    class FailingFormalValidator:
+        async def validate(self, visit):
+            raise RuntimeError("formal unavailable")
+
+    monkeypatch.setattr(pipeline_module, "FormalValidator", FailingFormalValidator)
+    trace_path = tmp_path / "graphtraces.jsonl"
+    monkeypatch.setenv("GRAPH_TRACE_PATH", str(trace_path))
+    visit = {"Прием": {"GUID": "trace-failed-card"}}
+
+    with pytest.raises(RuntimeError, match="formal unavailable"):
+        asyncio.run(pipeline_module.AuditPipeline()._audit_visit(visit))
+
+    records = [
+        json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [row["event"] for row in records] == [
+        "audit.started",
+        "checker.started",
+        "checker.failed",
+        "audit.failed",
+    ]
+    assert len({row["correlation_id"] for row in records}) == 1
+    assert {row["card_guid"] for row in records} == {"trace-failed-card"}
+    assert records[-1]["exception"]["message"] == "formal unavailable"

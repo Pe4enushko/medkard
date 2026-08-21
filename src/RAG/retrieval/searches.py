@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
+from audit.graph_trace import emit as trace_emit
 from RAG.retrieval.embeddings import embed
 from RAG.retrieval.vector_store import (
     RRF_K,
@@ -75,9 +76,24 @@ async def search_in_guideline(
     top_k: int,
 ) -> list[dict]:
     """Retrieve and rerank chunks from one guideline without a section filter."""
+    trace_emit(
+        "retrieval.search.started",
+        retrieval="search_in_guideline",
+        query=query,
+        file_id=file_id,
+        candidates=candidates,
+        top_k=top_k,
+    )
     embedding = await embed(query)
     rows = await _vector_search_filtered(embedding, file_id, candidates)
     if not rows:
+        trace_emit(
+            "retrieval.search.completed",
+            retrieval="search_in_guideline",
+            query=query,
+            file_id=file_id,
+            chunks=[],
+        )
         return []
 
     vector_ranking = [row["id"] for row in rows]
@@ -100,6 +116,13 @@ async def search_in_guideline(
         file_id=file_id,
         section_filter=None,
         results=results,
+    )
+    trace_emit(
+        "retrieval.search.completed",
+        retrieval="search_in_guideline",
+        query=query,
+        file_id=file_id,
+        chunks=results,
     )
     return results
 
@@ -125,7 +148,14 @@ async def get_sections_for_file(file_id: str) -> list[str]:
         """,
         file_id,
     )
-    return [r["section"] for r in rows if r["section"]]
+    sections = [r["section"] for r in rows if r["section"]]
+    trace_emit(
+        "retrieval.structure.completed",
+        retrieval="get_sections_for_file",
+        file_id=file_id,
+        sections=sections,
+    )
+    return sections
 
 
 async def get_section_chunks(file_id: str, section: str) -> list[dict]:
@@ -148,7 +178,15 @@ async def get_section_chunks(file_id: str, section: str) -> list[dict]:
         file_id,
         section,
     )
-    return [dict(r) for r in rows]
+    chunks = [dict(r) for r in rows]
+    trace_emit(
+        "retrieval.section.completed",
+        retrieval="get_section_chunks",
+        file_id=file_id,
+        section=section,
+        chunks=chunks,
+    )
+    return chunks
 
 
 async def get_section_chunks_by_pattern(
@@ -174,4 +212,12 @@ async def get_section_chunks_by_pattern(
         file_id,
         pattern,
     )
-    return [dict(row) for row in rows]
+    chunks = [dict(row) for row in rows]
+    trace_emit(
+        "retrieval.section.completed",
+        retrieval="get_section_chunks_by_pattern",
+        file_id=file_id,
+        pattern=pattern,
+        chunks=chunks,
+    )
+    return chunks

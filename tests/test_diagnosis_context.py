@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import types
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,7 +33,9 @@ def _load_validator_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "storage.models", fake_storage_models_pkg)
 
     module_path = SRC / "audit" / "diagnosis" / "validator.py"
-    spec = importlib.util.spec_from_file_location("audit.diagnosis.validator", module_path)
+    spec = importlib.util.spec_from_file_location(
+        "audit.diagnosis.validator", module_path
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, "audit.diagnosis.validator", module)
@@ -119,6 +122,7 @@ async def test_validate_diagnosis_maps_graph_contract(monkeypatch) -> None:
         async def ainvoke(self, state):
             assert state["visit_date"].isoformat() == "2026-06-25"
             assert state["doc_title"] == "КР по синуситу"
+            uuid.UUID(state["correlation_id"])
             return {
                 "issues": {
                     "inspection": [
@@ -142,7 +146,11 @@ async def test_validate_diagnosis_maps_graph_contract(monkeypatch) -> None:
                         "file_id": "file-1",
                         "doc_title": "КР по синуситу",
                         "sections": [
-                            {"section": "2 Диагностика", "chunk_indices": [4], "cited": True}
+                            {
+                                "section": "2 Диагностика",
+                                "chunk_indices": [4],
+                                "cited": True,
+                            }
                         ],
                     }
                 ],
