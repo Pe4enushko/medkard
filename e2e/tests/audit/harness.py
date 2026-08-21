@@ -31,6 +31,12 @@ returns immediately while `self._done_cards is None`, and it is only set by
 `async with`, and no teardown is needed.  The database is still required:
 the ICD checker reads the guidelines catalogue.
 
+An empty finding list is never taken at face value.  `LLM.validations`
+returns `[]` both when the model reported no defects and when its answer
+failed to parse — the parse failure only shows up as a log record.  The
+runner listens for that record and for the validator's own tally, so
+«ответ не разобран» can never be read as «нарушений нет».
+
 There are no command-line flags.  These scripts are meant for unattended
 batch runs; anything that changes what they assert would make a green run
 mean different things on different days.
@@ -38,6 +44,7 @@ mean different things on different days.
 
 from __future__ import annotations
 
+import logging
 import sys
 import traceback
 from dataclasses import dataclass
@@ -92,6 +99,46 @@ def _describe(result: Any) -> str:
     return "\n".join(f"{f.flag}: {f.issue}" for f in result.formal.findings)
 
 
+class _FormalCallWatch(logging.Handler):
+    """Watches the formal-validator call so an unparsed answer is not read as a clean card.
+
+    `LLM.validations._parse_findings` returns an empty list when the model's
+    answer cannot be parsed and only records `logger.error(...)`, which makes
+    a parse failure indistinguishable from «no defects» at the Result level.
+    Two records are captured per case: that error, and the validator's own
+    "[formal] LLM returned N finding(s), tokens=T" tally.
+    """
+
+    _MARKER = "failed to parse JSON response"
+    _TALLY = "LLM returned"
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.INFO)
+        self.parse_failed = False
+        self.tally: str = ""
+
+    def reset(self) -> None:
+        self.parse_failed = False
+        self.tally = ""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return
+        if self._MARKER in message:
+            self.parse_failed = True
+        elif self._TALLY in message:
+            # keep only the tail: "N finding(s), tokens=T: [...]"
+            self.tally = message.split(self._TALLY, 1)[1].split(":", 1)[0].strip()
+
+    def install(self) -> None:
+        for name in ("LLM.validations", "audit.formal_structure.validator"):
+            logger = logging.getLogger(name)
+            logger.addHandler(self)
+            logger.setLevel(min(logger.level or logging.INFO, logging.INFO))
+
+
 async def _stage_one(cases: list[Case], report: _Report) -> None:
     """Classification and rule selection — deterministic, no LLM, no database."""
     validator = FormalValidator()
@@ -118,13 +165,29 @@ async def _stage_one(cases: list[Case], report: _Report) -> None:
 
 async def _stage_two(cases: list[Case], report: _Report) -> None:
     """The real audit — formal validator, ICD checker and DiagnosisValidator."""
+    watch = _FormalCallWatch()
+    watch.install()
     for case in cases:
         print(f"\n  {case.name}")
+        watch.reset()
         pipeline = AuditPipeline()  # deliberately not `async with` — see module docstring
         try:
             result = await pipeline._audit_visit(case.visit)
         except Exception:
             report.check(f"[{case.name}] аудит отработал", False, traceback.format_exc())
+            continue
+
+        if watch.tally:
+            print(f"          формальный вызов: {watch.tally}")
+
+        # An unparsed answer also yields zero findings — separate it out first,
+        # otherwise it reads as «карта без нарушений».
+        if not report.check(
+            f"[{case.name}] ответ формального валидатора разобран",
+            not watch.parse_failed,
+            "LLM.validations не смогла разобрать ответ модели и вернула пустой список; "
+            "текст ответа — в логе записью «failed to parse JSON response»",
+        ):
             continue
 
         got = _flags(result)
