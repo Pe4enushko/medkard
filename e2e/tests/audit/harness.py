@@ -111,15 +111,21 @@ class _FormalCallWatch(logging.Handler):
 
     _MARKER = "failed to parse JSON response"
     _TALLY = "LLM returned"
+    _DROPPED = "dropping unrecognised flag"
+    _FUZZY = "fuzzy-matched to"
 
     def __init__(self) -> None:
         super().__init__(level=logging.INFO)
         self.parse_failed = False
         self.tally: str = ""
+        self.dropped: list[str] = []
+        self.fuzzy: list[str] = []
 
     def reset(self) -> None:
         self.parse_failed = False
         self.tally = ""
+        self.dropped = []
+        self.fuzzy = []
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -128,6 +134,12 @@ class _FormalCallWatch(logging.Handler):
             return
         if self._MARKER in message:
             self.parse_failed = True
+        elif self._DROPPED in message:
+            # _enrich_flags silently discards a flag it cannot match to rules.json,
+            # which is another way an empty finding list can mislead.
+            self.dropped.append(message.split(self._DROPPED, 1)[1].strip())
+        elif self._FUZZY in message:
+            self.fuzzy.append(message.split("] ", 1)[-1].strip())
         elif self._TALLY in message:
             # keep only the tail: "N finding(s), tokens=T: [...]"
             self.tally = message.split(self._TALLY, 1)[1].split(":", 1)[0].strip()
@@ -179,6 +191,14 @@ async def _stage_two(cases: list[Case], report: _Report) -> None:
 
         if watch.tally:
             print(f"          формальный вызов: {watch.tally}")
+        for line in watch.fuzzy:
+            print(f"          флаг приведён по опечатке: {line}")
+        if watch.dropped:
+            report.check(
+                f"[{case.name}] ни один флаг не отброшен как неизвестный",
+                False,
+                "модель вернула флаги, которых нет в rules.json: " + "; ".join(watch.dropped),
+            )
 
         # An unparsed answer also yields zero findings — separate it out first,
         # otherwise it reads as «карта без нарушений».
