@@ -119,16 +119,47 @@ async def test_real_specialist_codes_give_primary_and_repeat():
         ("B01.031.002", VisitType.REPEAT),     # педиатр повторный
         ("B01.015.001", VisitType.PRIMARY),    # кардиолог первичный
         ("B01.047.001", VisitType.PRIMARY),    # терапевт первичный
-        ("B01.047.011", VisitType.REPEAT),     # врач по водолазной медицине повторный
-        ("B04.031.002", VisitType.PROPHYLACTIC),
+        ("B04.031.002", VisitType.PROPHYLACTIC),  # профилактический приём
         ("B04.047.001", VisitType.PROPHYLACTIC),  # диспансерный приём
     ]:
         got = await v.get_visit_types(_visit(services=[{"Наименование": "x", "Код": code}]))
         assert expected in got, f"{code} → {got}"
 
 
+async def test_specialties_where_the_suffix_is_not_a_pair_are_excluded():
+    """.001/.002 — приём не у каждой специальности; сверено чекером по 804н.
+
+    B01.054.001 — «Осмотр (консультация) врача-физиотерапевта», единственная
+    запись специальности; B01.030.002 — «Проведение комплексного аутопсийного
+    исследования»; B04.015.001 — «Школа для больных с артериальной
+    гипертензией». Чистое правило по окончанию назвало бы их первичным,
+    повторным приёмом и профилактическим приёмом соответственно.
+    """
+    v = FormalValidator()
+    for code in ("B01.054.001", "B01.030.002", "B01.052.001", "B04.015.001"):
+        got = await v.get_visit_types(_visit(services=[{"Наименование": "x", "Код": code}]))
+        assert got == {VisitType.OTHER}, f"{code} → {got}"
+
+
+async def test_rare_appointment_pairs_are_left_to_the_service_name():
+    """Устойчиво разбираются только .001/.002; остальные пары — по наименованию.
+
+    В 804н пары участкового, подросткового и «беременной» врача идут дальше по
+    списку (B01.047.005/.006 терапевт участковый), а между ними встречаются
+    записи, приёмом не являющиеся. Гадать по окончанию там нельзя, поэтому такие
+    услуги распознаются по наименованию, где клиника сама пишет вид приёма.
+    """
+    v = FormalValidator()
+    by_code_only = [{"Наименование": "x", "Код": "B01.047.005"}]
+    assert await v.get_visit_types(_visit(services=by_code_only)) == {VisitType.OTHER}
+
+    with_name = [{"Наименование": "Приём врача-терапевта участкового первичный",
+                  "Код": "B01.047.005"}]
+    assert VisitType.PRIMARY in await v.get_visit_types(_visit(services=with_name))
+
+
 async def test_code_outside_the_dictionary_does_not_block_the_name():
-    """Код, которого нет в 804н-словаре, не должен глушить разбор наименования.
+    """Код, о котором таблица молчит, не должен глушить разбор наименования.
 
     B01.070.001 — это «Медицинское освидетельствование на состояние опьянения»,
     а не первичный приём; раньше он давал PRIMARY, а любой неопознанный B01 —
@@ -163,3 +194,30 @@ async def test_nmu_contradiction_uses_the_dictionary():
     # Код вне словаря никакого утверждения о типе приёма не делает.
     unknown = _visit(services=[{"Наименование": "Приём первичный", "Код": "B01.070.011"}])
     assert v._check_nmu_keyword_contradiction(unknown) is None
+
+
+def test_visit_type_vocabulary_matches_the_rules():
+    """Словарь типов существует ради rules.json и не должен его опережать.
+
+    Новый тип визита без правил, которые его используют, — это ключ, по которому
+    ничего не отбирается; правило с типом, которого нет в перечислении, упадёт на
+    _VISIT_TYPE_RULE_KEY при первом же аудите.
+    """
+    import audit.formal_structure.validator as v
+
+    declared = {key for key in v._VISIT_TYPE_RULE_KEY.values()}
+    used = {t for rule in v._RULES for t in rule["applies_to"]["visit_types"]} - {"all"}
+
+    assert used <= declared, f"в rules.json есть типы вне перечисления: {sorted(used - declared)}"
+    # OTHER — служебный ответ «тип не определён», правил под ним нет и быть не должно.
+    assert declared - used == {"other"}, f"типы без единого правила: {sorted(declared - used - {'other'})}"
+
+
+def test_code_table_never_yields_a_type_no_rule_uses():
+    import audit.formal_structure.validator as v
+
+    used = {t for rule in v._RULES for t in rule["applies_to"]["visit_types"]} - {"all"}
+    for rule in v._CODE_RULES:
+        if rule.visit_type is None:
+            continue
+        assert v._VISIT_TYPE_RULE_KEY[rule.visit_type] in used, rule

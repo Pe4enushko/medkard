@@ -21,54 +21,53 @@ Each service in `Услуги` is classified independently. The result is the un
 1. If any diagnosis in `Диагнозы[].КодМКБ` is `Z11.1` (compared upper-case, whitespace-trimmed) → always adds `PROPHYLACTIC_TUBERCULIN` to the result set (independent of services).
 2. Scan every field value for an NMU code matching `^[ABАВ]\d{2}\.\d{2,3}\.\d{3}(?:\.\d{3})?$` (the middle segment is 2 digits for A-codes and 3 for B-codes, hence `\d{2,3}`):
    - `A*` prefix → `LAB_RESEARCH_INTERVENTION` (thousands of codes; rules narrow them further through `applies_to.service_code_prefixes`)
-   - a code listed in `nmu_services.json` → the visit type its 804н kind maps to
+   - matched by `_CODE_RULES` (begin / middle / end of the code) → its visit type
    - any other code → **no verdict**; step 3 decides
 3. Keyword fallback on `Наименование` — for every service the code left undecided, not only for services carrying no code at all:
    - `повторн` → `REPEAT`, `первичн` → `PRIMARY`, `профилактическ` → `PROPHYLACTIC`
 4. A service neither step decided contributes nothing. `OTHER` is the answer only when no service contributed anything.
 
-### `nmu_services.json` — справочник по 804н
+### Таблица `_CODE_RULES` — разбор кода по частям
 
 The middle segment of an NMU code is the **doctor's specialty**, not a property
 of the appointment: `B01.023.001` is a neurologist, `B01.031.002` a paediatrician,
-`B01.015.001` a cardiologist. The suffix carries no global meaning either —
-`B01.047.001/.002` are терапевт первичный/повторный while `B01.047.010/.011` are
-врач по водолазной медицине первичный/повторный, and 96 codes of the `B01`
-section are not appointments at all (ежедневный осмотр, ведение родов,
-анестезиологическое пособие, освидетельствование, патронаж).
+`B01.015.001` a cardiologist. Until 2026-08-22 the classifier required the middle
+to be `070`, which is the «прочее» group of 804н (освидетельствование на
+опьянение, паллиативная помощь, судовой врач, медицинский психолог, патронаж),
+so every real card of a normal clinic resolved to `OTHER` and lost 34 of the 42
+rules.
 
-So the type comes from a lookup table generated from the order itself:
-`scripts/build-nmu-dictionary.py <804н.pdf>` writes
-`src/audit/formal_structure/nmu_services.json` as `{code: {kind, name}}`.
-It deliberately holds only ambulatory appointments — `B01` «Прием … первичный /
-повторный» and `B04` «Диспансерный / Профилактический прием» — because that is
-what an outpatient clinic bills. Everything else is absent on purpose and falls
-through to the service name.
+Classification is now a small table of segment matches — begin / middle / end,
+`None` meaning «any» — checked top to bottom, first match wins:
 
-**The file stores the order's categories, not ours.** `kind` is one of
-`appointment_primary`, `appointment_repeat`, `dispensary`, `prophylactic` — the
-distinctions 804н itself draws. The narrowing to medkard's six `VisitType`
-values lives in `validator._NMU_KIND_TO_VISIT_TYPE`, next to
-`_VISIT_TYPE_RULE_KEY`, so our categorisation stays in one place instead of
-leaking into the generator. A kind without a mapping raises at import;
-`tests/test_nmu_dictionary.py` guards the boundary in both directions.
+| begin | middle | end | → |
+|---|---|---|---|
+| `A` | — | — | `LAB_RESEARCH_INTERVENTION` (wins over the rest of the service) |
+| `B01` | `_B01_NOT_A_PAIR` | — | no verdict |
+| `B01` | — | `001` / `002` | `PRIMARY` / `REPEAT` |
+| `B04` | `_B04_NOT_A_PAIR` | — | no verdict |
+| `B04` | — | `001` / `002` | `PROPHYLACTIC` (диспансерный / профилактический) |
 
-Today `dispensary` and `prophylactic` both map to `PROPHYLACTIC`, as before the
-dictionary existed. That is a known compromise, not an oversight: 50 of the 93
-`B04` appointments in the order are диспансерные, and on such a visit the four
-404н rules about the scope of a ПМО fire while the 168н/192н rules — the ones
-actually about dispensary follow-up — do not, because they are declared for
-`primary`/`repeat`. Splitting the two needs a new `visit_types` key in
-`rules.json` and a decision about which rules follow it; tracked in
-`docs/tech-debt.md`.
+The suffix is only reliable for the first pair of a specialty, and only for
+specialties where that pair exists at all. `_B01_NOT_A_PAIR` and
+`_B04_NOT_A_PAIR` list the exceptions with the reason for each: `B01.054.001` is
+«Осмотр (консультация) врача-физиотерапевта» (a single entry, no primary/repeat
+split), `B01.030.002` is «Проведение комплексного аутопсийного исследования»,
+`B04.015.001` is «Школа для больных с артериальной гипертензией». Without the
+exclusions a pure suffix rule gives 23 wrong verdicts across the order.
 
-Until 2026-08-22 the classifier recognised `B01.070.*` only, which is the
-«прочее» group (врач по медицинской профилактике, паллиативная помощь, судовой
-врач, медицинский психолог, патронаж). Every real card of a normal clinic
-therefore resolved to `OTHER` and lost 34 of the 42 rules; `B01.070.001`, mapped
-to PRIMARY, is in fact «Медицинское освидетельствование на состояние опьянения».
+Further pairs — участковый, подростковый, детский врач, «беременной»
+(`.003/.004`, `.005/.006`) — are deliberately **not** decoded from the code:
+in the order they are interleaved with entries that are not appointments, so
+guessing by suffix is unsafe. 90 such appointments exist; they are recognised by
+the service name instead, where the clinic writes «первичный» / «повторный»
+itself.
 
-If `Услуги` is absent or empty, returns `{OTHER}`.
+`scripts/check-nmu-classifier.py <804н.pdf>` audits the table against the order:
+it reports contradictions and verdicts the order does not support (both are
+errors, non-zero exit) and counts what the table leaves to the name (expected).
+The order is the oracle, not a data source — nothing is generated from it into
+the repository.
 
 ## Rule filtering — `get_rules(visit_types, patient_age, icd_codes=None, visit=None) -> list[dict]`
 

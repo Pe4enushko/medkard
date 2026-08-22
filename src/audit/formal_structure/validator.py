@@ -20,7 +20,7 @@ import logging
 import re
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from LLM.chinese_detector import ChineseDetector
 from LLM.validations import validate_rule
@@ -42,14 +42,12 @@ logger = logging.getLogger(__name__)
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE = Path(__file__).parent
 _RULES_PATH = _HERE / "rules.json"
-_NMU_PATH = _HERE / "nmu_services.json"
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "LLM" / "prompts" / "formal_structure_validator.txt"
 # ─────────────────────────────────────────────────────────────────────────────
 
 _RULES_DOC: dict = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
 _RULES: list[dict] = _RULES_DOC["rules"]
 _REVISED_AT: str = _RULES_DOC["revised_at"]
-_NMU_DOC: dict = json.loads(_NMU_PATH.read_text(encoding="utf-8"))
 _PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
 
 # ── Flag → regulatory source lookup ───────────────────────────────────────────
@@ -114,53 +112,91 @@ _VISIT_TYPE_RULE_KEY: dict[VisitType, str] = {
     VisitType.OTHER:                     "other",
 }
 
-# Вид услуги по 804н → тип визита medkard. Справочник nmu_services.json хранит
-# категории приказа, а сужение до наших шести типов — здесь, рядом с
-# _VISIT_TYPE_RULE_KEY: наша категоризация должна жить в одном месте, иначе она
-# расползётся по генератору справочника.
+class _CodeRule(NamedTuple):
+    """Совпадение по частям кода номенклатуры; None — «любое значение»."""
+
+    begin: str | None      # начало кода: раздел и подраздел, «A», «B01», «B04»
+    middle: str | None     # середина: специальность врача
+    end: str | None        # конец: вид приёма внутри специальности
+    visit_type: VisitType | None   # None — вердикта нет, решает наименование
+
+
+# Специальности (середина кода), у которых окончания .001/.002 — не пара
+# «первичный/повторный». Списки сверены с 804н скриптом
+# scripts/check-nmu-classifier.py; без них таблица ниже выносит неверный вердикт.
+_B01_NOT_A_PAIR: dict[str, str] = {
+    "017": "клинический фармаколог — приём один, без деления",
+    "020": ".001 врач по лечебной физкультуре, .002 врач по спортивной медицине",
+    "021": "врач по общей гигиене — осмотр один",
+    "030": ".001 патологоанатом, .002 аутопсийное исследование",
+    "044": ".001 врач скорой помощи, .002 фельдшер скорой помощи",
+    "045": "экспертизы тяжести вреда и состояния здоровья",
+    "052": "врач ультразвуковой диагностики — осмотр один",
+    "054": "врач-физиотерапевт — осмотр один",
+    "056": ".001 осмотр, .002 первичный приём — окончания сдвинуты",
+    "070": "«прочее»: освидетельствование на опьянение, паллиатив, судовой врач, "
+           "медицинский психолог, патронаж выездной бригадой",
+}
+_B04_NOT_A_PAIR: dict[str, str] = {
+    "012": "школа для пациентов с сахарным диабетом",
+    "014": "школа пациентов с ВИЧ-инфекцией",
+    "015": "школы для больных с артериальной гипертензией и сердечной недостаточностью",
+    "025": "школа для пациентов на хроническом гемодиализе",
+    "040": "школа для больных с заболеваниями суставов и позвоночника",
+    "058": "школа для эндокринологических пациентов с нарушениями роста",
+    "070": "школы профилактики и профилактическое консультирование",
+}
+
+# Классификатор кода услуги. Проверяется сверху вниз, побеждает первое
+# совпадение, поэтому исключения стоят выше общих строк.
 #
-# Диспансерный и профилактический приём приказ различает (168н/192н против
-# 404н), а мы пока сводим оба в PROPHYLACTIC — как было до появления словаря.
-# Расход известен и записан в docs/tech-debt.md: на диспансерном приёме
-# срабатывают четыре правила 404н про объём ПМО, а правила 168н/192н, которые
-# как раз про диспансерное наблюдение, объявлены на primary/repeat и не
-# срабатывают. Разведение требует нового ключа visit_types в rules.json —
-# отдельное решение, не побочный эффект справочника.
-_NMU_KIND_TO_VISIT_TYPE: dict[str, VisitType] = {
-    "appointment_primary": VisitType.PRIMARY,
-    "appointment_repeat": VisitType.REPEAT,
-    "dispensary": VisitType.PROPHYLACTIC,
-    "prophylactic": VisitType.PROPHYLACTIC,
-}
-
-_unknown_kinds = {
-    entry["kind"]
-    for entry in _NMU_DOC["codes"].values()
-    if entry["kind"] not in _NMU_KIND_TO_VISIT_TYPE
-}
-if _unknown_kinds:
-    raise RuntimeError(
-        f"nmu_services.json содержит виды услуг без типа визита: {sorted(_unknown_kinds)}"
-    )
-
-# Средний сегмент кода — это специальность врача, а не признак приёма, поэтому
-# вывести тип из самого кода арифметически нельзя: B01.047.001/.002 — терапевт
-# первичный/повторный, а B01.047.010/.011 — врач по водолазной медицине
-# первичный/повторный.
-_NMU_VISIT_TYPES: dict[str, VisitType] = {
-    code: _NMU_KIND_TO_VISIT_TYPE[entry["kind"]]
-    for code, entry in _NMU_DOC["codes"].items()
-}
-_NMU_NAMES: dict[str, str] = {
-    code: entry["name"] for code, entry in _NMU_DOC["codes"].items()
-}
-
-logger.info(
-    "[formal] NMU dictionary source=%s verified_at=%s codes=%d",
-    _NMU_DOC["source"],
-    _NMU_DOC["verified_at"],
-    len(_NMU_VISIT_TYPES),
+# Что важно знать про строение кода 804н, иначе таблица читается неверно:
+#
+# * середина — это специальность врача (023 невролог, 031 педиатр, 015
+#   кардиолог, 047 терапевт), а не признак приёма. Классификатор до 2026-08-22
+#   требовал середину 070 и поэтому отправлял в OTHER каждую боевую карту
+#   поликлиники — 34 правила из 42 не проверялись;
+# * конец .001/.002 — первичный/повторный приём, но только у специальностей вне
+#   _B01_NOT_A_PAIR и только для первой пары. Пары участкового, подросткового,
+#   детского и «беременной» врача (.003/.004, .005/.006) идут дальше по списку
+#   вперемешку с записями, приёмом не являющимися, — там гадать по окончанию
+#   нельзя, такие услуги распознаёт разбор наименования, где клиника сама пишет
+#   «первичный» или «повторный»;
+# * то же у B04: .001 диспансерный приём, .002 профилактический, но у части
+#   специальностей на этих окончаниях стоят школы для пациентов.
+#
+# Сверка таблицы с приказом: scripts/check-nmu-classifier.py <804н.pdf>.
+_CODE_RULES: tuple[_CodeRule, ...] = (
+    # Лабораторные, инструментальные исследования и вмешательства. Их тысячи,
+    # конкретную услугу правила отбирают через applies_to.service_code_prefixes.
+    _CodeRule("A", None, None, VisitType.LAB_RESEARCH_INTERVENTION),
+    *(_CodeRule("B01", middle, None, None) for middle in _B01_NOT_A_PAIR),
+    _CodeRule("B01", None, "001", VisitType.PRIMARY),
+    _CodeRule("B01", None, "002", VisitType.REPEAT),
+    *(_CodeRule("B04", middle, None, None) for middle in _B04_NOT_A_PAIR),
+    # Приказ различает диспансерный (.001) и профилактический (.002) приём
+    # (168н/192н против 404н), rules.json пока нет: оба дают PROPHYLACTIC,
+    # расход записан в docs/tech-debt.md.
+    _CodeRule("B04", None, "001", VisitType.PROPHYLACTIC),
+    _CodeRule("B04", None, "002", VisitType.PROPHYLACTIC),
 )
+
+
+def classify_code(code: str) -> VisitType | None:
+    """Тип визита по коду номенклатуры, или None если код о типе ничего не говорит."""
+    parts = code.split(".")
+    middle = parts[1] if len(parts) > 1 else ""
+    end = parts[2] if len(parts) > 2 else ""
+    for rule in _CODE_RULES:
+        if rule.begin is not None and not code.startswith(rule.begin):
+            continue
+        if rule.middle is not None and rule.middle != middle:
+            continue
+        if rule.end is not None and rule.end != end:
+            continue
+        return rule.visit_type
+    return None
+
 
 _LLM_LABEL_TO_TYPE: dict[str, VisitType] = {
     "primary":                   VisitType.PRIMARY,
@@ -187,9 +223,9 @@ class FormalValidator:
         Each service entry is classified independently:
         1. Z11.1 among visit["Диагнозы"][].КодМКБ → always adds PROPHYLACTIC_TUBERCULIN.
         2. Per-service NMU code scan:
-           - A*                                → LAB_RESEARCH_INTERVENTION
-           - code found in ``nmu_visit_types.json`` (804н) → its visit type
-           - any other code                    → no verdict, step 3 decides
+           - matched by ``_CODE_RULES`` (begin / middle / end of the code)
+             → its visit type; ``A*`` wins over the rest of the service
+           - anything the table leaves undecided → no verdict, step 3 decides
         3. Keyword fallback on ``Наименование`` — for every service the codes
            left undecided, not only for services without a code at all:
            повторн / первичн / профилактическ
@@ -227,17 +263,14 @@ class FormalValidator:
                     if not m:
                         continue
                     code = m.group(0).upper().replace("В", "B").replace("А", "A")
-                    if code.startswith("A"):
-                        # Лабораторные, инструментальные и вмешательства — по
-                        # префиксу: их тысячи, а конкретную услугу правила
-                        # отбирают через applies_to.service_code_prefixes.
-                        svc_type = VisitType.LAB_RESEARCH_INTERVENTION
+                    code_type = classify_code(code)
+                    if code_type is VisitType.LAB_RESEARCH_INTERVENTION:
+                        # Исследование или вмешательство перекрывает остальные
+                        # услуги этой строки.
+                        svc_type = code_type
                         break
-                    if svc_type is None:
-                        # Кода нет в словаре 804н (не приём либо услуга клиники
-                        # вне номенклатуры) — вердикта не выносим, пусть решает
-                        # наименование.
-                        svc_type = _NMU_VISIT_TYPES.get(code)
+                    if svc_type is None and code_type is not None:
+                        svc_type = code_type
                 else:
                     continue
                 break  # inner for-raw broke via A-code, propagate
@@ -387,9 +420,10 @@ class FormalValidator:
         """Return a NMU_CODE_CONTRADICTION finding if NMU code and service name disagree.
 
         Both sides are read the same way as in ``get_visit_types``: the code
-        through the 804н dictionary, the name through the same word stems.
-        Codes outside the dictionary (not an appointment, or a clinic-internal
-        article) carry no primary/repeat claim and cannot contradict anything.
+        through ``classify_code``, the name through the same word stems. A code
+        the table leaves undecided (not an appointment, «прочее» group, or a
+        clinic-internal article) makes no primary/repeat claim and cannot
+        contradict anything.
         """
         services: list = visit.get("Услуги") or []
         for svc in services:
@@ -411,18 +445,19 @@ class FormalValidator:
                     if not m:
                         continue
                     code = m.group(0).upper().replace("В", "B").replace("А", "A")
-                    code_type = _NMU_VISIT_TYPES.get(code)
-                    if code_type is None or code_type == name_type:
-                        continue
+                    code_type = classify_code(code)
                     if code_type not in (VisitType.PRIMARY, VisitType.REPEAT):
                         continue
+                    if code_type is name_type:
+                        continue
                     expected = "повторному" if code_type is VisitType.REPEAT else "первичному"
+                    suffix = ".002" if code_type is VisitType.REPEAT else ".001"
                     claimed = "«повторный»" if name_type is VisitType.REPEAT else "«первичный»"
                     return {
                         "flag": "NMU_CODE_CONTRADICTION",
                         "issue": (
-                            f"NMU-код {code} по номенклатуре 804н соответствует "
-                            f"{expected} приёму ({_NMU_NAMES[code]}), "
+                            f"NMU-код {code} соответствует {expected} приёму "
+                            f"(окончание {suffix} по номенклатуре 804н), "
                             f"но наименование услуги содержит {claimed}"
                         ),
                     }
