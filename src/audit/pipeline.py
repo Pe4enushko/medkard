@@ -362,22 +362,35 @@ class AuditPipeline:
                 traceback=traceback.format_exc(),
             )
             raise
-        icd_lookup: dict[int, IcdCodingIssue] = {
-            issue.dx_index: issue for issue in icd_issues
-        }
-        logger.info(
-            "[pipeline] ICD checker done — %d issue(s), tokens=%d",
-            len(icd_issues),
-            icd_tokens,
-        )
-        trace_emit(
-            "checker.completed",
-            checker="icd",
-            output=icd_issues,
-            tokens=icd_tokens,
-        )
+        if icd_issues is None:
+            # Отказ ICD-чекера не отменяет уже сделанную формальную проверку и
+            # не отменяет проверку по клин.рекомендациям: карта доезжает, а
+            # icd_check_result остаётся NULL — «мнения нет» отличимо от
+            # «замечаний нет» одним SQL-запросом.
+            trace_emit("checker.failed", checker="icd", reason="checker did not complete")
+            logger.error(
+                "[pipeline] ICD checker did not complete for visit %s — card continues without it",
+                visit_id,
+            )
+        else:
+            logger.info(
+                "[pipeline] ICD checker done — %d recommendation(s), tokens=%d",
+                len(icd_issues),
+                icd_tokens,
+            )
+            trace_emit(
+                "checker.completed",
+                checker="icd",
+                output=icd_issues,
+                tokens=icd_tokens,
+            )
 
-        # ── Diagnosis check (once per code, original + suggested if flagged) ──
+        # ── Diagnosis check (once per code врача) ─────────────────────────────
+        # Рекомендованный чекером код здесь не аудируется: он гипотеза, а не
+        # диагноз визита. Прогон по нему давал вторую порцию замечаний к тому
+        # же приёму (24 частично совпадающих на I67.8/I69.3, до 200 тысяч
+        # токенов на карту) и уходил в граф с наименованием, равным самому
+        # коду. Решение от 2026-08-22.
         diag_validator = DiagnosisValidator(visit)
         diagnosis_results: list[DiagnosisResult] = []
         total_tokens = formal_tokens + icd_tokens
@@ -471,73 +484,6 @@ class AuditPipeline:
                 tokens=diag_tokens,
             )
 
-            # If ICD checker flagged this diagnosis, also audit the suggested code
-            coding_issue = icd_lookup.get(dx_idx)
-            if coding_issue:
-                suggested_code = coding_issue.suggested_code
-                logger.info(
-                    "🔎 [pipeline] auditing suggested ICD code %s for visit %s dx %s",
-                    suggested_code,
-                    visit_id,
-                    dx_code,
-                )
-                suggested_diagnosis = dict(diagnosis)
-                suggested_diagnosis["КодМКБ"] = suggested_code
-                suggested_diagnosis["НаименованиеМКБ"] = suggested_code
-                trace_emit(
-                    "checker.started",
-                    checker="diagnosis",
-                    diagnosis_index=dx_idx,
-                    diagnosis=suggested_diagnosis,
-                    suggested=True,
-                    suggested_from=dx_code,
-                )
-                try:
-                    sugg_result, sugg_tokens = await diag_validator.validate_diagnosis(
-                        suggested_diagnosis
-                    )
-                except Exception as exc:
-                    trace_emit(
-                        "checker.failed",
-                        checker="diagnosis",
-                        diagnosis_index=dx_idx,
-                        diagnosis=suggested_diagnosis,
-                        suggested=True,
-                        suggested_from=dx_code,
-                        exception=exc,
-                        traceback=traceback.format_exc(),
-                    )
-                    raise
-                total_tokens += sugg_tokens
-                logger.info(
-                    "[pipeline] suggested code audit done — %s: anamnesis=%d inspection=%d treatment=%d criteria=%d tokens=%d",
-                    suggested_code,
-                    len(sugg_result.anamnesis_issues),
-                    len(sugg_result.inspection_issues),
-                    len(sugg_result.treatment_issues),
-                    len(sugg_result.criteria_issues),
-                    sugg_tokens,
-                )
-                diagnosis_results.append(
-                    DiagnosisResult(
-                        icd_code=suggested_code,
-                        issues=sugg_result.all_issues,
-                        guideline_file_id=sugg_result.guideline_file_id,
-                        guideline_sources=sugg_result.guideline_sources,
-                        errors=sugg_result.errors,
-                    )
-                )
-                trace_emit(
-                    "checker.completed",
-                    checker="diagnosis",
-                    diagnosis_index=dx_idx,
-                    diagnosis=suggested_diagnosis,
-                    suggested=True,
-                    suggested_from=dx_code,
-                    output=sugg_result.to_dict(),
-                    tokens=sugg_tokens,
-                )
-
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
         dt_finish = datetime.now(timezone.utc)
 
@@ -573,7 +519,7 @@ class AuditPipeline:
         card_guid: str | None,
         formal: FormalStructureResult,
         diagnosis: list[DiagnosisResult],
-        icd_check: list[IcdCodingIssue],
+        icd_check: list[IcdCodingIssue] | None,
         time_ms: int,
         started_at: datetime,
         finished_at: datetime,

@@ -29,7 +29,10 @@ def _formal_json(formal: FormalStructureResult) -> str:
     )
 
 
-def _icd_check_json(issues: list[IcdCodingIssue]) -> str:
+def _icd_check_json(issues: list[IcdCodingIssue] | None) -> str | None:
+    """None → SQL NULL: чекер не отработал, а не «замечаний нет»."""
+    if issues is None:
+        return None
     return json.dumps(
         [issue.to_dict() for issue in issues],
         ensure_ascii=False,
@@ -103,7 +106,7 @@ class DoneCardsStorage(BaseStorage):
         card_data: str,
         formal: FormalStructureResult,
         diagnosis: list[DiagnosisResult],
-        icd_check: list[IcdCodingIssue],
+        icd_check: list[IcdCodingIssue] | None,
         token_count: int,
         time_ms: int,
         started_at: datetime,
@@ -159,7 +162,7 @@ class DoneCardsStorage(BaseStorage):
         card_data: str,
         formal_json: str,
         diag_json: str,
-        icd_check_json: str,
+        icd_check_json: str | None,
         token_count: int,
         time_ms: int,
         started_at: datetime,

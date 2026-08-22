@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Active audit dimensions:
 1. **Formal structure** (`src/audit/formal_structure/`) — presence and completeness of required sections, per visit type and patient age
 2. **Diagnosis check** (`src/LLM/graphs/diagnosis.py`) — deterministic clinical-guideline graph with four aspects (anamnesis / inspection / treatment / criteria)
+3. **ICD coding** (`src/audit/icd_check/validator.py`) — two-stage pipeline: pick up to three guideline hypotheses, then judge each one separately (no ReAct loop)
 
 Core technology: LLM-based analysis (OpenAI-compatible API) combined with RAG — chunk contextual text (section + body) is embedded at ingest and matched against the query embedding, with a BM25 + vector RRF hybrid.
 
@@ -70,8 +71,8 @@ src/
 ├── LLM/
 │   ├── base.py              # Shared OpenAI client + MODEL constant
 │   ├── graphs/              # Deterministic diagnosis LangGraph, state and nodes
-│   ├── rag_agent.py         # create_checker_agent() — retained for ICD ReAct
-│   ├── tools.py             # Guideline structure/read tools retained for ICD
+│   ├── rag_agent.py         # create_checker_agent() — без вызывающих, см. docs/tech-debt.md
+│   ├── tools.py             # то же: тулы ICD-агента, которого больше нет
 │   ├── visit_classifier.py  # VisitClassifier: primary / repeat / prophylactic
 │   ├── icd_prefix_picker.py # ICD prefix matching for guideline lookup
 │   ├── decider.py           # LLM-based binary decision helper

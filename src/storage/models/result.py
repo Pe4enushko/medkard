@@ -7,11 +7,16 @@ _DELIM = "─" * 10
 
 @dataclass
 class IcdCodingIssue:
-    """ICD-10 coding error found by the ICD checker for a single diagnosis."""
+    """An alternative ICD-10 code the checker recommends for one diagnosis.
+
+    Это рекомендация, а не вердикт: чекер видит карту и справочник КР, но не
+    видит пациента. Итоговый код остаётся за врачом, поэтому запись несёт
+    обоснование и источник, а не утверждение об ошибке.
+    """
 
     dx_index: int               # position in visit["Диагнозы"] — safe key for duplicate codes
     initial_code: str           # doctor's original code, e.g. "J20.0"
-    suggested_code: str         # LLM-suggested correct code, e.g. "J18.9"
+    suggested_code: str         # code the checker recommends instead, e.g. "J18.9"
     confidence: int             # 8–10
     comment: str                # reasoning in Russian
     sources: list[IssueSource] = field(default_factory=list)
@@ -31,11 +36,11 @@ class IcdCodingIssue:
 
     def pretty_format(self) -> str:
         lines = [
-            "    [ОШИБКА КОДИРОВАНИЯ МКБ]",
-            f"    Код врача:       {self.initial_code}",
-            f"    Предложен код:   {self.suggested_code}",
-            f"    Уверенность:     {self.confidence}/10",
-            f"    Обоснование:     {self.comment}",
+            "    [РЕКОМЕНДАЦИЯ ПО КОДУ МКБ]",
+            f"    Код врача:         {self.initial_code}",
+            f"    Возможная замена:  {self.suggested_code}",
+            f"    Уверенность:       {self.confidence}/10",
+            f"    Обоснование:       {self.comment}",
         ]
         for src in self.sources:
             lines.append(src.pretty_format())

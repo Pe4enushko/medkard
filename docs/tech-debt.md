@@ -43,8 +43,8 @@
 | Что | Где |
 |---|---|
 | `last_exc` не сбрасывается: удачная, но обрезанная попытка после `APIError` поднимает исключение первой попытки вместо возврата контента | `src/LLM/client.py:120, 212–221` |
-| «Компактный» ретрай ReAct-агента ничего не сжимает — все четыре лимита равны 20; в `.env.example` при этом 12/8/12/4 | `src/LLM/client.py:273–277` |
-| `_is_length_limit_error` и `_is_context_overflow` разбирают текст чужих исключений по подстроке | `src/audit/icd_check/validator.py:134–136`, `src/LLM/client.py:32–42` |
+| `_is_context_overflow` разбирает текст чужого исключения по подстроке (парный `_is_length_limit_error` снят вместе с тихим провалом ICD) | `src/LLM/client.py:32–42` |
+| ReAct-обвязка осиротела: после перевода ICD-чекера на двухэтапный конвейер у `LLMClient.call_agent`, `LLM/rag_agent.py` и `LLM/tools.py` не осталось вызывающих. `tests/test_llm_client_agent.py` продолжает закреплять поведение мёртвого кода. Снимать одним проходом вместе с остальным мёртвым кодом | `src/LLM/client.py:243–495`, `src/LLM/rag_agent.py`, `src/LLM/tools.py` |
 | Замечание с невалидными `chunk_refs` всё равно попадает в результат — только `logger.warning` | `src/LLM/graphs/diagnosis_nodes.py:896–925` |
 | Смешение шкал `rerank_score` и `rrf_score` в одном пуле при частичном отказе реранкера | `src/LLM/graphs/diagnosis_nodes.py:823–825` |
 | BM25 считается только среди кандидатов, отобранных вектором | `src/RAG/retrieval/searches.py:87–101` |

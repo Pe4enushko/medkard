@@ -270,10 +270,13 @@ class LLMClient:
         trace_id = uuid.uuid4().hex
         metadata = metadata or {}
         compact_retry = False
-        base_steps = int(os.environ.get("AGENT_MAX_STEPS", "20"))
-        compact_steps = int(os.environ.get("AGENT_COMPACT_MAX_STEPS", "20"))
-        normal_tool_calls = int(os.environ.get("AGENT_MAX_TOOL_CALLS", "20"))
-        compact_tool_calls = int(os.environ.get("AGENT_COMPACT_MAX_TOOL_CALLS", "20"))
+        # Дефолты обязаны совпадать с .env.example: без .env агент едет на них,
+        # а компактный ретрай существует ровно ради того, чтобы вторая попытка
+        # была дешевле первой. Равные лимиты превращают его в повтор по той же цене.
+        base_steps = int(os.environ.get("AGENT_MAX_STEPS", "12"))
+        compact_steps = int(os.environ.get("AGENT_COMPACT_MAX_STEPS", "8"))
+        normal_tool_calls = int(os.environ.get("AGENT_MAX_TOOL_CALLS", "12"))
+        compact_tool_calls = int(os.environ.get("AGENT_COMPACT_MAX_TOOL_CALLS", "4"))
         result_chars = int(os.environ.get("AGENT_MAX_TOOL_RESULT_CHARS", "12000"))
 
         from LLM.rag_agent import (
