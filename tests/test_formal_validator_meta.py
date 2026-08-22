@@ -22,8 +22,17 @@ def _import_log() -> str:
 
 
 def test_load_logs_revision_meta():
-    """Модуль пишет revised_at, число правил и самую старую дату сверки при загрузке."""
+    """Модуль пишет revised_at, число правил и самую старую дату сверки при загрузке.
+
+    Значения сверяются с самим rules.json, а не с датой в тексте теста: проверяется
+    проводка лога, а каждая ревизия правил иначе роняет тест на ровном месте.
+    """
+    import json
+
+    doc = json.loads((ROOT / "src" / "audit" / "formal_structure" / "rules.json").read_text("utf-8"))
+    oldest = min(r["verified_at"] for r in doc["rules"] if r.get("verified_at"))
+
     text = _import_log()
-    assert "revised_at=2026-08-21" in text
-    assert "rules=42" in text
-    assert "oldest verified_at=2026-08-19" in text
+    assert f"revised_at={doc['revised_at']}" in text
+    assert f"rules={len(doc['rules'])}" in text
+    assert f"oldest verified_at={oldest}" in text

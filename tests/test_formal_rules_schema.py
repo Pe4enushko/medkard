@@ -25,7 +25,7 @@ def test_file_is_object_with_meta():
 _SEVERITIES = {"критичный", "значительный", "незначительный"}
 _AGE_GROUPS = {"all", "child", "adult"}
 _VISIT_TYPES = {
-    "all", "primary", "repeat", "prophylactic",
+    "all", "primary", "repeat", "prophylactic", "dispensary",
     "prophylactic_tuberculin", "lab_research_intervention", "other",
 }
 

@@ -51,7 +51,7 @@ _APPOINTMENT = (
 _BY_NAME: tuple[tuple[re.Pattern[str], VisitType], ...] = (
     (re.compile(rf"^{_APPOINTMENT}.+первичный$"), VisitType.PRIMARY),
     (re.compile(rf"^{_APPOINTMENT}.+повторный$"), VisitType.REPEAT),
-    (re.compile(r"^Диспансерный прием \("), VisitType.PROPHYLACTIC),
+    (re.compile(r"^Диспансерный прием \("), VisitType.DISPENSARY),
     (re.compile(r"^Профилактический прием \("), VisitType.PROPHYLACTIC),
 )
 

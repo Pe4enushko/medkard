@@ -1,5 +1,5 @@
 {
-  "revised_at": "2026-08-21",
+  "revised_at": "2026-08-22",
   "sources_doc": "docs/formal-rules-sources.md",
   "rules": [
     {
@@ -184,7 +184,8 @@
         "visit_types": [
           "primary",
           "repeat",
-          "prophylactic"
+          "prophylactic",
+          "dispensary"
         ],
         "specialties": [
           "all"
@@ -208,7 +209,8 @@
         "visit_types": [
           "primary",
           "repeat",
-          "prophylactic"
+          "prophylactic",
+          "dispensary"
         ],
         "specialties": [
           "all"
@@ -909,7 +911,8 @@
       "applies_to": {
         "visit_types": [
           "primary",
-          "repeat"
+          "repeat",
+          "dispensary"
         ],
         "specialties": [
           "all"
@@ -1118,7 +1121,8 @@
       "applies_to": {
         "visit_types": [
           "primary",
-          "repeat"
+          "repeat",
+          "dispensary"
         ],
         "specialties": [
           "all"

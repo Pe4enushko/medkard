@@ -24,7 +24,7 @@ Each service in `Услуги` is classified independently. The result is the un
    - matched by `_CODE_RULES` (begin / middle / end of the code) → its visit type
    - any other code → **no verdict**; step 3 decides
 3. Keyword fallback on `Наименование` — for every service the code left undecided, not only for services carrying no code at all:
-   - `повторн` → `REPEAT`, `первичн` → `PRIMARY`, `профилактическ` → `PROPHYLACTIC`
+   - `повторн` → `REPEAT`, `первичн` → `PRIMARY`, `диспансерн` → `DISPENSARY`, `профилактическ` → `PROPHYLACTIC`. «Диспансеризация» под `диспансерн` не подпадает — другая основа, и это как раз ПМО по 404н
 4. A service neither step decided contributes nothing. `OTHER` is the answer only when no service contributed anything.
 
 ### Таблица `_CODE_RULES` — разбор кода по частям
@@ -46,7 +46,15 @@ Classification is now a small table of segment matches — begin / middle / end,
 | `B01` | `_B01_NOT_A_PAIR` | — | no verdict |
 | `B01` | — | `001` / `002` | `PRIMARY` / `REPEAT` |
 | `B04` | `_B04_NOT_A_PAIR` | — | no verdict |
-| `B04` | — | `001` / `002` | `PROPHYLACTIC` (диспансерный / профилактический) |
+| `B04` | — | `001` | `DISPENSARY` (диспансерный приём) |
+| `B04` | — | `002` | `PROPHYLACTIC` (профилактический осмотр) |
+
+`B04` splits two different things the order keeps apart: `.001` — диспансерный
+приём (168н/192н, наблюдение за хроническим пациентом), `.002` —
+профилактический осмотр (404н, ПМО). Пока оба давали `PROPHYLACTIC`, на
+диспансерном приёме срабатывали четыре правила 404н про объём ПМО, а правила
+про само диспансерное наблюдение — нет: они были объявлены только на первичном
+и повторном приёме.
 
 The suffix is only reliable for the first pair of a specialty, and only for
 specialties where that pair exists at all. `_B01_NOT_A_PAIR` and
@@ -123,7 +131,8 @@ actually part of the evidence.
 |---|---|---|
 | `PRIMARY` | `primary` | Первичный приём |
 | `REPEAT` | `repeat` | Повторный приём |
-| `PROPHYLACTIC` | `prophylactic` | Профилактический |
+| `PROPHYLACTIC` | `prophylactic` | Профилактический осмотр (404н, 211н) |
+| `DISPENSARY` | `dispensary` | Диспансерный приём (168н, 192н) |
 | `PROPHYLACTIC_TUBERCULIN` | `prophylactic_tuberculin` | Туберкулинодиагностика (Z11.1) |
 | `LAB_RESEARCH_INTERVENTION` | `lab_research_intervention` | A-коды: лаб/инстр/вмешательства |
 | `OTHER` | `other` | Не удалось определить |

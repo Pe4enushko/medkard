@@ -120,7 +120,7 @@ async def test_real_specialist_codes_give_primary_and_repeat():
         ("B01.015.001", VisitType.PRIMARY),    # кардиолог первичный
         ("B01.047.001", VisitType.PRIMARY),    # терапевт первичный
         ("B04.031.002", VisitType.PROPHYLACTIC),  # профилактический приём
-        ("B04.047.001", VisitType.PROPHYLACTIC),  # диспансерный приём
+        ("B04.047.001", VisitType.DISPENSARY),    # диспансерный приём
     ]:
         got = await v.get_visit_types(_visit(services=[{"Наименование": "x", "Код": code}]))
         assert expected in got, f"{code} → {got}"
@@ -221,3 +221,39 @@ def test_code_table_never_yields_a_type_no_rule_uses():
         if rule.visit_type is None:
             continue
         assert v._VISIT_TYPE_RULE_KEY[rule.visit_type] in used, rule
+
+
+async def test_dispensary_visit_is_not_a_prophylactic_examination():
+    """Диспансерный приём (168н/192н) и профилактический осмотр (404н) — разное.
+
+    Пока оба давали PROPHYLACTIC, на диспансерном приёме срабатывали четыре
+    правила 404н про объём ПМО, а правила про само диспансерное наблюдение —
+    нет, потому что были объявлены только на первичном и повторном приёме.
+    """
+    v = FormalValidator()
+    dispensary = await v.get_visit_types(
+        _visit(services=[{"Наименование": "x", "Код": "B04.047.001"}])
+    )
+    assert dispensary == {VisitType.DISPENSARY}
+
+    prophylactic = await v.get_visit_types(
+        _visit(services=[{"Наименование": "x", "Код": "B04.047.002"}])
+    )
+    assert prophylactic == {VisitType.PROPHYLACTIC}
+
+    flags = {r["flag_code"] for r in v.get_rules(dispensary, 54, ["I10"])}
+    assert "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО" in flags
+    assert not {f for f in flags if f.startswith("ПРОФ_ВЗРОСЛЫЙ_")}
+
+    prophylactic_flags = {r["flag_code"] for r in v.get_rules(prophylactic, 54, ["I10"])}
+    assert {f for f in prophylactic_flags if f.startswith("ПРОФ_ВЗРОСЛЫЙ_")}
+    assert "ДИСПАНСЕРНОЕ_НАБЛЮДЕНИЕ_НЕ_ОТРАЖЕНО" not in prophylactic_flags
+
+
+async def test_dispensary_name_does_not_catch_дispanserizatsiya():
+    """«Диспансеризация» — это ПМО по 404н, а не диспансерное наблюдение."""
+    v = FormalValidator()
+    got = await v.get_visit_types(
+        _visit(services=[{"Наименование": "Профилактический осмотр в рамках диспансеризации"}])
+    )
+    assert got == {VisitType.PROPHYLACTIC}

@@ -96,7 +96,8 @@ class VisitType(Enum):
     """Type of ambulatory visit derived from the service name."""
     PRIMARY = auto()                   # первичный
     REPEAT = auto()                    # повторный
-    PROPHYLACTIC = auto()              # профилактический
+    PROPHYLACTIC = auto()              # профилактический осмотр (404н, 211н)
+    DISPENSARY = auto()                # диспансерный приём (168н, 192н)
     PROPHYLACTIC_TUBERCULIN = auto()   # профилактический туберкулинодиагностика (Z11.1)
     LAB_RESEARCH_INTERVENTION = auto() # лабораторные/инструментальные/вмешательства (A-коды)
     OTHER = auto()                     # не удалось определить тип
@@ -107,6 +108,7 @@ _VISIT_TYPE_RULE_KEY: dict[VisitType, str] = {
     VisitType.PRIMARY:                   "primary",
     VisitType.REPEAT:                    "repeat",
     VisitType.PROPHYLACTIC:              "prophylactic",
+    VisitType.DISPENSARY:                "dispensary",
     VisitType.PROPHYLACTIC_TUBERCULIN:   "prophylactic_tuberculin",
     VisitType.LAB_RESEARCH_INTERVENTION: "lab_research_intervention",
     VisitType.OTHER:                     "other",
@@ -174,10 +176,11 @@ _CODE_RULES: tuple[_CodeRule, ...] = (
     _CodeRule("B01", None, "001", VisitType.PRIMARY),
     _CodeRule("B01", None, "002", VisitType.REPEAT),
     *(_CodeRule("B04", middle, None, None) for middle in _B04_NOT_A_PAIR),
-    # Приказ различает диспансерный (.001) и профилактический (.002) приём
-    # (168н/192н против 404н), rules.json пока нет: оба дают PROPHYLACTIC,
-    # расход записан в docs/tech-debt.md.
-    _CodeRule("B04", None, "001", VisitType.PROPHYLACTIC),
+    # Диспансерный приём (168н/192н) и профилактический осмотр (404н) — разные
+    # вещи, и приказ различает их окончанием кода. Смешивать нельзя: иначе на
+    # диспансерном приёме срабатывают четыре правила 404н про объём ПМО, а
+    # правила про само диспансерное наблюдение — нет.
+    _CodeRule("B04", None, "001", VisitType.DISPENSARY),
     _CodeRule("B04", None, "002", VisitType.PROPHYLACTIC),
 )
 
@@ -228,7 +231,7 @@ class FormalValidator:
            - anything the table leaves undecided → no verdict, step 3 decides
         3. Keyword fallback on ``Наименование`` — for every service the codes
            left undecided, not only for services without a code at all:
-           повторн / первичн / профилактическ
+           повторн / первичн / диспансерн / профилактическ
         4. A service neither step decided contributes nothing; OTHER is the
            answer only when no service contributed anything at all.
         """
@@ -285,6 +288,10 @@ class FormalValidator:
                     svc_type = VisitType.REPEAT
                 elif "первичн" in name:
                     svc_type = VisitType.PRIMARY
+                elif "диспансерн" in name:
+                    # «Диспансерный приём», но не «диспансеризация»: у неё
+                    # другая основа (диспансериз-), и она как раз ПМО по 404н.
+                    svc_type = VisitType.DISPENSARY
                 elif "профилактическ" in name:
                     svc_type = VisitType.PROPHYLACTIC
 
