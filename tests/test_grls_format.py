@@ -85,5 +85,6 @@ def test_supplement_and_not_found():
     s = DietarySupplement(product_name="Бак-Сет", registration_number="RU.77.99.11.003.Е.000001",
                           status="действует")
     text = format_medicine_lookup(_lookup(supplements=[s]))
-    assert "Найдено как БАД" in text and "Бак-Сет" in text
+    assert "В ГРЛС лекарственный препарат не найден." in text
+    assert "Найдены похожие записи БАД" in text and "Бак-Сет" in text
     assert format_medicine_lookup(_lookup()) == NOT_FOUND

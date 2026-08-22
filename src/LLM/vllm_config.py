@@ -8,7 +8,7 @@ from typing import Any
 
 def _bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
-    if raw is None:
+    if raw is None or not raw.strip():
         return default
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
@@ -37,13 +37,22 @@ def is_vllm_endpoint(base_url: str | None = None) -> bool:
     return bool(url) and "api.openai.com" not in url.lower()
 
 
-def build_vllm_extra_body(base_url: str | None = None) -> dict[str, Any]:
+def build_vllm_extra_body(
+    base_url: str | None = None,
+    *,
+    enable_thinking: bool | None = None,
+) -> dict[str, Any]:
     if not is_vllm_endpoint(base_url):
         return {}
 
     body: dict[str, Any] = {}
-    if _bool("VLLM_DISABLE_THINKING", True):
-        body["chat_template_kwargs"] = {"enable_thinking": False}
+    if enable_thinking is None:
+        if os.environ.get("VLLM_ENABLE_THINKING") is not None:
+            enable_thinking = _bool("VLLM_ENABLE_THINKING", False)
+        elif _bool("VLLM_DISABLE_THINKING", True):
+            enable_thinking = False
+    if enable_thinking is not None:
+        body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
     body["repetition_penalty"] = _float("VLLM_REPETITION_PENALTY", 1.05)
     body["top_k"] = _int("VLLM_TOP_K", 50)
     body["min_p"] = _float("VLLM_MIN_P", 0.0)

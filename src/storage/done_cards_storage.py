@@ -13,7 +13,10 @@ import logging
 from datetime import datetime
 from typing import Any
 
+import psycopg
+
 from .base import BaseStorage
+from .base import reopen_shared_pool
 from .models.result import DiagnosisResult, FormalStructureResult, IcdCodingIssue
 
 logger = logging.getLogger(__name__)
@@ -118,6 +121,52 @@ class DoneCardsStorage(BaseStorage):
         diag_json = _diag_json(diagnosis)
         icd_check_json = _icd_check_json(icd_check)
 
+        try:
+            return await self._upsert_once(
+                card_data=card_data,
+                formal_json=formal_json,
+                diag_json=diag_json,
+                icd_check_json=icd_check_json,
+                token_count=token_count,
+                time_ms=time_ms,
+                started_at=started_at,
+                finished_at=finished_at,
+                card_guid=card_guid,
+                organization_id=organization_id,
+            )
+        except psycopg.OperationalError:
+            logger.warning(
+                "💾 done_cards UPSERT retrying with fresh pool guid=%s",
+                card_guid,
+            )
+            self._pool = await reopen_shared_pool()
+            return await self._upsert_once(
+                card_data=card_data,
+                formal_json=formal_json,
+                diag_json=diag_json,
+                icd_check_json=icd_check_json,
+                token_count=token_count,
+                time_ms=time_ms,
+                started_at=started_at,
+                finished_at=finished_at,
+                card_guid=card_guid,
+                organization_id=organization_id,
+            )
+
+    async def _upsert_once(
+        self,
+        *,
+        card_data: str,
+        formal_json: str,
+        diag_json: str,
+        icd_check_json: str,
+        token_count: int,
+        time_ms: int,
+        started_at: datetime,
+        finished_at: datetime,
+        card_guid: str | None = None,
+        organization_id: str | None = None,
+    ) -> str:
         try:
             async with self._pool.connection() as conn:
                 if card_guid:
@@ -233,6 +282,37 @@ class DoneCardsStorage(BaseStorage):
 
         Sets broken=TRUE and stores the stacktrace; all audit columns are left NULL.
         """
+        try:
+            return await self._upsert_broken_once(
+                card_data=card_data,
+                stacktrace=stacktrace,
+                started_at=started_at,
+                card_guid=card_guid,
+                organization_id=organization_id,
+            )
+        except psycopg.OperationalError:
+            logger.warning(
+                "💾 done_cards UPSERT_BROKEN retrying with fresh pool guid=%s",
+                card_guid,
+            )
+            self._pool = await reopen_shared_pool()
+            return await self._upsert_broken_once(
+                card_data=card_data,
+                stacktrace=stacktrace,
+                started_at=started_at,
+                card_guid=card_guid,
+                organization_id=organization_id,
+            )
+
+    async def _upsert_broken_once(
+        self,
+        *,
+        card_data: str,
+        stacktrace: str,
+        started_at: datetime,
+        card_guid: str | None = None,
+        organization_id: str | None = None,
+    ) -> str:
         try:
             async with self._pool.connection() as conn:
                 if card_guid:

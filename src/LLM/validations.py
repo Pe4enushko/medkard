@@ -40,31 +40,6 @@ class _Findings(RootModel[list[_Finding]]):
     pass
 
 
-class _RuleVerdict(BaseModel):
-    # Evidence comes first in the JSON Schema so the model reads the card and
-    # states the relevant facts before committing to its boolean decisions.
-    comment: str = Field(default="", max_length=1000)
-    condition_met: bool
-    violated: bool
-    issue: str = Field(default="", max_length=500)
-
-
-_NEGATED_VIOLATION_RE = re.compile(
-    r"(?:"
-    r"нарушени(?:е|я)\s+(?:(?:данного|этого|конкретного)\s+){0,3}правил[ао]\s+отсутств\w*"
-    r"|нарушени(?:е|я)\s+(?:нет|не\s+выявлено)"
-    r"|правил[ао]\s+не\s+нарушено"
-    r"|требовани(?:е|я)\s+(?:полностью\s+)?соблюден[оы]"
-    r")",
-    re.IGNORECASE,
-)
-
-
-def _verdict_text_denies_violation(verdict: _RuleVerdict) -> bool:
-    """Detect a structured ``true`` paired with an explicit textual ``pass``."""
-    return bool(_NEGATED_VIOLATION_RE.search(f"{verdict.issue}\n{verdict.comment}"))
-
-
 def _finding_to_dict(finding: _Finding) -> dict[str, str]:
     return {"flag": finding.flag, "issue": finding.issue, "comment": finding.comment}
 
@@ -165,10 +140,9 @@ async def validate_rule(
     """Validate exactly one rule against ``visit``.
 
     Message order is deliberately stable: the common system prompt first,
-    the complete visit second, and the varying rule last.  The model returns
-    an explicit condition verdict and a violation verdict; the trusted flag is
-    attached in code.  Keeping applicability separate prevents an answer about
-    a different defect from turning into this rule's flag.
+    the complete visit second, and the varying rule last.  The model still
+    returns the established findings array contract; Python attaches the
+    trusted flag for this one rule instead of trusting a generated flag value.
     """
     visit_text = json.dumps(visit, ensure_ascii=False, indent=2)
     resolved_client = client or _client
@@ -179,7 +153,7 @@ async def validate_rule(
             {"role": "user", "content": f"## Единственное проверяемое правило\n\n{rule_text}"},
         ],
         temperature=0.0,
-        response_model=_RuleVerdict,
+        response_model=_Findings,
         metadata={
             "card_guid": (visit.get("Прием") or {}).get("GUID"),
             "checker": "formal",
@@ -189,26 +163,13 @@ async def validate_rule(
     )
 
     logger.debug("[validations] raw atomic rule answer (%s): %s", rule_id, raw_content)
-    verdict = _RuleVerdict.model_validate_json(raw_content)
-    if not verdict.condition_met or not verdict.violated:
-        if verdict.violated and not verdict.condition_met:
-            logger.warning(
-                "[validations] dropping inconsistent atomic verdict for %s: "
-                "condition_met=false, violated=true",
-                rule_id,
-            )
-        return [], tokens
-    if _verdict_text_denies_violation(verdict):
-        logger.warning(
-            "[validations] dropping self-contradictory atomic verdict for %s: "
-            "text explicitly says the rule is not violated",
-            rule_id,
-        )
-        return [], tokens
+    findings = _parse_findings(raw_content)
     return [
         {
             "flag": flag_code,
-            "issue": verdict.issue,
-            "comment": verdict.comment,
+            "issue": finding["issue"],
+            "comment": finding.get("comment", ""),
         }
+        for finding in findings
+        if finding.get("issue", "").strip()
     ], tokens

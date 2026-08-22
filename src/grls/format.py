@@ -116,7 +116,10 @@ def format_medicine_lookup(lookup: MedicineLookup) -> str:
         lines += [f"--- {i} ---\n{format_record(r, lookup.on)}" for i, r in enumerate(recs, 1)]
         return "\n\n".join(lines)
     if lookup.supplements:
-        lines = [f"Найдено как БАД в Едином реестре свидетельств о государственной регистрации ({len(lookup.supplements)}):\n"]
+        lines = [
+            "В ГРЛС лекарственный препарат не найден. "
+            f"Найдены похожие записи БАД в Едином реестре свидетельств о государственной регистрации ({len(lookup.supplements)}):\n"
+        ]
         lines += [f"--- {i} ---\n{_format_supplement(s)}" for i, s in enumerate(lookup.supplements, 1)]
         return "\n\n".join(lines)
     return NOT_FOUND

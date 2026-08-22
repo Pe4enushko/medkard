@@ -1,6 +1,9 @@
 """GuidelinesStorage — async psycopg3 интерфейс к таблице guidelines."""
 from __future__ import annotations
 
+import asyncio
+import os
+
 import psycopg.rows
 from pgvector.psycopg import register_vector_async
 from psycopg_pool import AsyncConnectionPool
@@ -11,6 +14,8 @@ from .base import BaseStorage, _conninfo
 from .models.guideline import Guideline, name_embed_input
 
 _COLS = "file_id, name, mkb, age_category, developer, nps_status, published_at, usage_status"
+_shared_guidelines_pool: AsyncConnectionPool | None = None
+_shared_guidelines_pool_lock = asyncio.Lock()
 
 
 def _row_to_guideline(row: dict) -> Guideline:
@@ -30,19 +35,23 @@ class GuidelinesStorage(BaseStorage):
     """Async context-manager для таблицы guidelines (собственный пул с pgvector кодеком)."""
 
     async def __aenter__(self) -> "GuidelinesStorage":
-        self._pool = AsyncConnectionPool(
-            conninfo=_conninfo(),
-            min_size=1,
-            max_size=3,
-            open=False,
-            configure=self._configure_conn,
-            kwargs={"row_factory": psycopg.rows.dict_row},
-        )
-        await self._pool.open()
+        global _shared_guidelines_pool
+        async with _shared_guidelines_pool_lock:
+            if _shared_guidelines_pool is None or _shared_guidelines_pool.closed:
+                _shared_guidelines_pool = AsyncConnectionPool(
+                    conninfo=_conninfo(),
+                    min_size=int(os.environ.get("GUIDELINES_POOL_MIN_SIZE", "1")),
+                    max_size=int(os.environ.get("GUIDELINES_POOL_MAX_SIZE", "3")),
+                    open=False,
+                    configure=self._configure_conn,
+                    kwargs={"row_factory": psycopg.rows.dict_row},
+                )
+                await _shared_guidelines_pool.open()
+        self._pool = _shared_guidelines_pool
         return self  # type: ignore[return-value]
 
     async def __aexit__(self, *args: object) -> None:
-        await self._pool.close()
+        pass  # shared pool; keep it open for concurrent audit cards
 
     async def _configure_conn(self, conn: psycopg.AsyncConnection) -> None:
         await register_vector_async(conn)

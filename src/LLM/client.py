@@ -60,6 +60,7 @@ class LLMClient:
         temperature: float,
         response_model: type[BaseModel] | None = None,
         reasoning_effort: str | None = None,
+        enable_thinking: bool | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> tuple[str, int]:
         """Chat completion with optional json_schema structured output and retry.
@@ -91,7 +92,9 @@ class LLMClient:
         # gpt-oss reasons at 'medium' by default; for mechanical tasks the
         # reasoning tokens eat the context budget and truncate the answer.
         # 'low' is the floor (reasoning can't be fully disabled on gpt-oss).
-        extra_body: dict[str, Any] = build_vllm_extra_body()
+        extra_body: dict[str, Any] = build_vllm_extra_body(
+            enable_thinking=enable_thinking
+        )
         if reasoning_effort is not None:
             extra_body["reasoning_effort"] = reasoning_effort
 
@@ -110,6 +113,7 @@ class LLMClient:
                 else None
             ),
             reasoning_effort=reasoning_effort,
+            enable_thinking=enable_thinking,
             metadata=metadata,
         )
         temp = temperature
@@ -266,10 +270,10 @@ class LLMClient:
         trace_id = uuid.uuid4().hex
         metadata = metadata or {}
         compact_retry = False
-        base_steps = int(os.environ.get("AGENT_MAX_STEPS", "12"))
-        compact_steps = int(os.environ.get("AGENT_COMPACT_MAX_STEPS", "8"))
-        normal_tool_calls = int(os.environ.get("AGENT_MAX_TOOL_CALLS", "12"))
-        compact_tool_calls = int(os.environ.get("AGENT_COMPACT_MAX_TOOL_CALLS", "4"))
+        base_steps = int(os.environ.get("AGENT_MAX_STEPS", "20"))
+        compact_steps = int(os.environ.get("AGENT_COMPACT_MAX_STEPS", "20"))
+        normal_tool_calls = int(os.environ.get("AGENT_MAX_TOOL_CALLS", "20"))
+        compact_tool_calls = int(os.environ.get("AGENT_COMPACT_MAX_TOOL_CALLS", "20"))
         result_chars = int(os.environ.get("AGENT_MAX_TOOL_RESULT_CHARS", "12000"))
 
         from LLM.rag_agent import (

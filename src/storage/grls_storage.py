@@ -25,6 +25,7 @@ _INSERT_SQL = (
 )
 _BATCH = 1000
 _INN_FUZZY_THRESHOLD = 0.6
+_SHORT_DISCRIMINATOR_MAX_LEN = 2
 
 _RANK_CASE = sql.SQL("CASE status {} ELSE 9 END").format(
     sql.SQL(" ").join(sql.SQL("WHEN {} THEN {}").format(sql.Literal(s), sql.Literal(r))
@@ -38,6 +39,16 @@ def _row_to_record(row: dict) -> GrlsRecord:
 
 def _record_params(rec: GrlsRecord) -> dict:
     return {c: getattr(rec, c) for c in _COLS}
+
+
+def _short_discriminator_tokens(query: str) -> list[str]:
+    """Tokens too short for safe trigram fuzzy matching must survive literally."""
+    return [
+        token
+        for token in normalize_query(query).split()
+        if 0 < len(token) <= _SHORT_DISCRIMINATOR_MAX_LEN
+        and any(ch.isalpha() or ch.isdigit() for ch in token)
+    ]
 
 
 class GrlsStorage(BaseStorage):
@@ -115,16 +126,30 @@ class GrlsStorage(BaseStorage):
         q = normalize_query(query)
         if not q:
             return []
+        required_tokens = _short_discriminator_tokens(q)
         stmt = sql.SQL(
             "SELECT " + _SELECT_COLS + ", similarity(grls_norm(inn_name), %(q)s) AS sim "
             "FROM grls_registry "
             "WHERE (grls_norm(inn_name) = %(q)s "
             # `%%` also applies pg_trgm.similarity_threshold GUC (default 0.3), ANDed with the explicit fuzzy filter below.
             "       OR (grls_norm(inn_name) %% %(q)s AND similarity(grls_norm(inn_name), %(q)s) >= %(fuzzy)s)) "
+            "  AND NOT EXISTS ("
+            "      SELECT 1 FROM unnest(%(required_tokens)s::text[]) AS token "
+            "      WHERE position(token in grls_norm(inn_name)) = 0"
+            "  ) "
             "  AND (%(inc)s OR NOT is_substance) {} LIMIT %(limit)s"
         ).format(_ORDER)
         async with self._pool.connection() as conn:
-            cur = await conn.execute(stmt, {"q": q, "fuzzy": _INN_FUZZY_THRESHOLD, "inc": include_substances, "limit": limit})
+            cur = await conn.execute(
+                stmt,
+                {
+                    "q": q,
+                    "fuzzy": _INN_FUZZY_THRESHOLD,
+                    "required_tokens": required_tokens,
+                    "inc": include_substances,
+                    "limit": limit,
+                },
+            )
             rows = await cur.fetchall()
         return [_row_to_record(r) for r in rows]
 
@@ -138,6 +163,7 @@ class GrlsStorage(BaseStorage):
         q = normalize_query(query)
         if not q:
             return {}
+        required_tokens = _short_discriminator_tokens(q)
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
@@ -145,10 +171,19 @@ class GrlsStorage(BaseStorage):
                 WHERE (grls_norm(inn_name) = %(q)s
                        -- %% also applies pg_trgm.similarity_threshold GUC (default 0.3), ANDed with the explicit fuzzy filter below.
                        OR (grls_norm(inn_name) %% %(q)s AND similarity(grls_norm(inn_name), %(q)s) >= %(fuzzy)s))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM unnest(%(required_tokens)s::text[]) AS token
+                      WHERE position(token in grls_norm(inn_name)) = 0
+                  )
                   AND (%(inc)s OR NOT is_substance)
                 GROUP BY status
                 """,
-                {"q": q, "fuzzy": _INN_FUZZY_THRESHOLD, "inc": include_substances},
+                {
+                    "q": q,
+                    "fuzzy": _INN_FUZZY_THRESHOLD,
+                    "required_tokens": required_tokens,
+                    "inc": include_substances,
+                },
             )
             rows = await cur.fetchall()
         return {r["status"]: r["n"] for r in rows}

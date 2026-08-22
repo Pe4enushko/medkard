@@ -20,7 +20,7 @@ from grls import status as st
 from grls.normalize import normalize_query
 from grls.parser import build_record
 from tests.grls_fixtures import sample_row
-from storage.grls_storage import GrlsStorage
+from storage.grls_storage import GrlsStorage, _short_discriminator_tokens
 from storage.models.grls_record import GrlsImport
 
 
@@ -120,6 +120,27 @@ async def test_search_by_inn_composite_and_substance_filter():
         assert len(await s.search_by_inn("амоксициллин", include_substances=True)) >= 1
         counts = await s.inn_status_counts("амоксициллин+клавулановая кислота")
         assert counts == {st.STATUS_ACTIVE: 1, st.STATUS_EXPIRED: 1, st.STATUS_ANNULLED: 1}
+
+
+def test_short_discriminator_tokens_keep_vitamin_suffixes_exact() -> None:
+    assert _short_discriminator_tokens("Витамин D") == ["d"]
+    assert _short_discriminator_tokens("Витамин D3") == ["d3"]
+    assert _short_discriminator_tokens("Витамин Е") == ["е"]
+    assert _short_discriminator_tokens("амоксициллин + клавулановая кислота") == []
+
+
+async def test_search_by_inn_does_not_fuzzy_match_other_vitamin_suffix():
+    vitamin_e = build_record(st.STATUS_ACTIVE, sample_row(
+        reg_number="ЛП-200001", trade_name="Витамин Е", inn_name="Витамин Е"))
+    vitamin_d3 = build_record(st.STATUS_ACTIVE, sample_row(
+        reg_number="ЛП-200002", trade_name="Витамин D3", inn_name="Колекальциферол"))
+    async with GrlsStorage() as s:
+        await s.replace_all([vitamin_e, vitamin_d3],
+                            GrlsImport(archive_name="test", registry_date=date(2026, 8, 17),
+                                      status_counts={st.STATUS_ACTIVE: 2}))
+        assert await s.search_by_inn("Витамин D") == []
+        assert await s.search_by_inn("Витамин D3") == []
+        assert (await s.inn_status_counts("Витамин D")) == {}
 
 
 async def test_grls_norm_parity_with_python():

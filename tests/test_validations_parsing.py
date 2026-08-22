@@ -8,7 +8,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from LLM.validations import _Findings, _RuleVerdict, validate_rule, validate_visit
+from LLM.validations import _Findings, validate_rule, validate_visit
 
 
 class _FakeClient:
@@ -128,7 +128,7 @@ def test_validate_visit_parses_fenced_json_array_without_dropping_findings(caplo
 
 def test_validate_rule_uses_cacheable_prompt_visit_rule_order() -> None:
     client = _FakeClient(
-        '{"condition_met":true,"violated":true,"issue":"Нет диагноза","comment":"Диагнозы: []"}'
+        '[{"flag":"MISSING_DIAGNOSIS","issue":"Нет диагноза","comment":"Диагнозы: []"}]'
     )
     visit = {"Прием": {"GUID": "visit-1"}, "Диагнозы": []}
 
@@ -148,7 +148,7 @@ def test_validate_rule_uses_cacheable_prompt_visit_rule_order() -> None:
         '{\n  "Прием": {\n    "GUID": "visit-1"\n  },\n  "Диагнозы": []\n}',
         "## Единственное проверяемое правило\n\n(MISSING_DIAGNOSIS) Должен быть диагноз.",
     ]
-    assert client.response_model is _RuleVerdict
+    assert client.response_model is _Findings
     assert client.metadata == {
         "card_guid": "visit-1",
         "checker": "formal",
@@ -165,9 +165,9 @@ def test_validate_rule_uses_cacheable_prompt_visit_rule_order() -> None:
     assert tokens == 42
 
 
-def test_validate_rule_attaches_trusted_flag_and_drops_clean_verdict() -> None:
+def test_validate_rule_attaches_trusted_flag_and_keeps_findings_contract() -> None:
     client = _FakeClient(
-        '{"condition_met":true,"violated":false,"issue":"","comment":""}'
+        '[{"flag":"MODEL_FLAG","issue":"Нет обязательного поля","comment":"Факты"}]'
     )
 
     findings, _ = asyncio.run(
@@ -181,34 +181,17 @@ def test_validate_rule_attaches_trusted_flag_and_drops_clean_verdict() -> None:
         )
     )
 
-    assert findings == []
+    assert findings == [
+        {
+            "flag": "TRUSTED_FLAG",
+            "issue": "Нет обязательного поля",
+            "comment": "Факты",
+        }
+    ]
 
 
-def test_validate_rule_drops_violation_when_rule_condition_is_not_met() -> None:
-    client = _FakeClient(
-        '{"condition_met":false,"violated":true,'
-        '"issue":"Модель описала другой дефект","comment":""}'
-    )
-
-    findings, _ = asyncio.run(
-        validate_rule(
-            "prompt",
-            {"Прием": {}},
-            "rule",
-            flag_code="TRUSTED_FLAG",
-            rule_id="rule-id",
-            client=client,  # type: ignore[arg-type]
-        )
-    )
-
-    assert findings == []
-
-
-def test_validate_rule_drops_self_contradictory_violation() -> None:
-    client = _FakeClient(
-        '{"comment":"Все препараты указаны по МНН.","condition_met":true,'
-        '"violated":true,"issue":"Нарушение данного конкретного правила отсутствует."}'
-    )
+def test_validate_rule_keeps_empty_findings_for_clean_rule() -> None:
+    client = _FakeClient("[]")
 
     findings, _ = asyncio.run(
         validate_rule(
@@ -226,8 +209,8 @@ def test_validate_rule_drops_self_contradictory_violation() -> None:
 
 def test_validate_rule_keeps_real_missing_field_wording() -> None:
     client = _FakeClient(
-        '{"comment":"Длительность не указана.","condition_met":true,'
-        '"violated":true,"issue":"Нарушение правила: отсутствует длительность лечения."}'
+        '[{"flag":"TRUSTED_FLAG","comment":"Длительность не указана.",'
+        '"issue":"Нарушение правила: отсутствует длительность лечения."}]'
     )
 
     findings, _ = asyncio.run(

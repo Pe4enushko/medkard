@@ -50,6 +50,7 @@ class StructuredClient(Protocol):
         temperature: float,
         response_model: type[BaseModel] | None = None,
         reasoning_effort: str | None = None,
+        enable_thinking: bool | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> tuple[str | BaseModel, int]: ...
 
@@ -671,6 +672,7 @@ async def judge_aspect(
             temperature=0.1,
             response_model=JudgeOutput,
             reasoning_effort="low",
+            enable_thinking=True,
             metadata={
                 "node": f"judge_{aspect}",
                 "card_guid": state.get("card_guid"),

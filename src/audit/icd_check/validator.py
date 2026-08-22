@@ -13,6 +13,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,7 @@ class _IcdCheckerOutput(BaseModel):
 
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "LLM" / "prompts" / "icd_checker.txt"
 _SYSTEM_PROMPT: str = _PROMPT_PATH.read_text(encoding="utf-8")
+_MANIFEST_MAX_ROWS = int(os.environ.get("ICD_CHECK_MANIFEST_MAX_ROWS", "120"))
 
 
 def _render_manifest_table(rows: list["Guideline"]) -> str:
@@ -75,6 +77,63 @@ def _format_diagnoses(diagnoses: list[dict[str, Any]]) -> str:
             line += f" ({detail})"
         parts.append(line)
     return "\n".join(parts)
+
+
+def _code_compact(value: str) -> str:
+    return "".join(ch for ch in value.upper() if ch.isalnum())
+
+
+def _diagnosis_codes(diagnoses: list[dict[str, Any]]) -> list[str]:
+    return [
+        str(dx.get("КодМКБ", "")).strip().upper()
+        for dx in diagnoses
+        if str(dx.get("КодМКБ", "")).strip()
+    ]
+
+
+def _select_manifest_rows(
+    rows: list[Guideline],
+    diagnoses: list[dict[str, Any]],
+    *,
+    limit: int = _MANIFEST_MAX_ROWS,
+) -> list[Guideline]:
+    """Keep the ICD agent prompt bounded while preserving likely alternatives."""
+    if limit <= 0 or len(rows) <= limit:
+        return rows
+
+    dx_codes = _diagnosis_codes(diagnoses)
+    if not dx_codes:
+        return rows[:limit]
+
+    dx_compact = [_code_compact(code) for code in dx_codes]
+    dx_chapters = {code[0] for code in dx_compact if code}
+    dx_three = {code[:3] for code in dx_compact if len(code) >= 3}
+
+    exact_or_prefix: list[Guideline] = []
+    same_chapter: list[Guideline] = []
+    for row in rows:
+        row_codes = [_code_compact(code) for code in row.mkb]
+        if any(
+            row_code == dx
+            or row_code.startswith(dx)
+            or dx.startswith(row_code)
+            or row_code[:3] in dx_three
+            for row_code in row_codes
+            for dx in dx_compact
+            if row_code and dx
+        ):
+            exact_or_prefix.append(row)
+            continue
+        if any(row_code[:1] in dx_chapters for row_code in row_codes if row_code):
+            same_chapter.append(row)
+
+    selected = [*exact_or_prefix, *same_chapter]
+    return selected[:limit] if selected else rows[:limit]
+
+
+def _is_length_limit_error(exc: Exception) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return "lengthfinishreasonerror" in text or "length limit was reached" in text
 
 
 def _format_patient(patient: dict[str, Any]) -> str:
@@ -117,7 +176,8 @@ async def check_icd_codes(
     if not diagnoses:
         return [], 0
 
-    manifest_table = _render_manifest_table(manifest_rows)
+    selected_manifest_rows = _select_manifest_rows(manifest_rows, diagnoses)
+    manifest_table = _render_manifest_table(selected_manifest_rows)
     diagnoses_text = _format_diagnoses(diagnoses)
     patient_text = _format_patient(patient)
     inspection_text = _format_inspection(inspection_data or [])
@@ -139,20 +199,29 @@ async def check_icd_codes(
     )
 
     logger.info(
-        "[icd_check] launching ICD checker agent for %d diagnosis(es), age-filtered manifest rows=%d",
+        "[icd_check] launching ICD checker agent for %d diagnosis(es), manifest rows=%d/%d",
         len(diagnoses),
+        len(selected_manifest_rows),
         len(manifest_rows),
     )
     logger.debug("[icd_check] diagnosis codes: %s", [dx.get("КодМКБ", "?") for dx in diagnoses])
 
     tools = get_icd_checker_tools()
-    output, tokens = await _client.call_agent(
-        _SYSTEM_PROMPT,
-        tools,
-        human_message,
-        response_format=_IcdCheckerOutput,
-        metadata={"card_guid": card_guid, "checker": "icd"},
-    )
+    try:
+        output, tokens = await _client.call_agent(
+            _SYSTEM_PROMPT,
+            tools,
+            human_message,
+            response_format=_IcdCheckerOutput,
+            metadata={"card_guid": card_guid, "checker": "icd"},
+        )
+    except Exception as exc:
+        if _is_length_limit_error(exc):
+            logger.warning(
+                "[icd_check] agent hit output length limit; skipping ICD findings for this visit"
+            )
+            return [], 0
+        raise
 
     if not isinstance(output, _IcdCheckerOutput):
         logger.warning("[icd_check] unexpected agent output type: %s", type(output))
