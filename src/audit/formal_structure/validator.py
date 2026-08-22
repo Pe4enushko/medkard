@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE = Path(__file__).parent
 _RULES_PATH = _HERE / "rules.json"
-_NMU_PATH = _HERE / "nmu_visit_types.json"
+_NMU_PATH = _HERE / "nmu_services.json"
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "LLM" / "prompts" / "formal_structure_validator.txt"
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -114,14 +114,42 @@ _VISIT_TYPE_RULE_KEY: dict[VisitType, str] = {
     VisitType.OTHER:                     "other",
 }
 
-# Код номенклатуры → тип приёма, по приказу 804н (см. _NMU_DOC["scope"]:
-# в словаре только амбулаторные приёмы; всё остальное разбирается по
-# наименованию услуги). Средний сегмент кода — это специальность врача, а не
-# признак приёма, поэтому вывести тип из самого кода арифметически нельзя:
-# B01.047.001/.002 — терапевт первичный/повторный, а B01.047.010/.011 — врач по
-# водолазной медицине первичный/повторный.
+# Вид услуги по 804н → тип визита medkard. Справочник nmu_services.json хранит
+# категории приказа, а сужение до наших шести типов — здесь, рядом с
+# _VISIT_TYPE_RULE_KEY: наша категоризация должна жить в одном месте, иначе она
+# расползётся по генератору справочника.
+#
+# Диспансерный и профилактический приём приказ различает (168н/192н против
+# 404н), а мы пока сводим оба в PROPHYLACTIC — как было до появления словаря.
+# Расход известен и записан в docs/tech-debt.md: на диспансерном приёме
+# срабатывают четыре правила 404н про объём ПМО, а правила 168н/192н, которые
+# как раз про диспансерное наблюдение, объявлены на primary/repeat и не
+# срабатывают. Разведение требует нового ключа visit_types в rules.json —
+# отдельное решение, не побочный эффект справочника.
+_NMU_KIND_TO_VISIT_TYPE: dict[str, VisitType] = {
+    "appointment_primary": VisitType.PRIMARY,
+    "appointment_repeat": VisitType.REPEAT,
+    "dispensary": VisitType.PROPHYLACTIC,
+    "prophylactic": VisitType.PROPHYLACTIC,
+}
+
+_unknown_kinds = {
+    entry["kind"]
+    for entry in _NMU_DOC["codes"].values()
+    if entry["kind"] not in _NMU_KIND_TO_VISIT_TYPE
+}
+if _unknown_kinds:
+    raise RuntimeError(
+        f"nmu_services.json содержит виды услуг без типа визита: {sorted(_unknown_kinds)}"
+    )
+
+# Средний сегмент кода — это специальность врача, а не признак приёма, поэтому
+# вывести тип из самого кода арифметически нельзя: B01.047.001/.002 — терапевт
+# первичный/повторный, а B01.047.010/.011 — врач по водолазной медицине
+# первичный/повторный.
 _NMU_VISIT_TYPES: dict[str, VisitType] = {
-    code: VisitType[entry["visit_type"]] for code, entry in _NMU_DOC["codes"].items()
+    code: _NMU_KIND_TO_VISIT_TYPE[entry["kind"]]
+    for code, entry in _NMU_DOC["codes"].items()
 }
 _NMU_NAMES: dict[str, str] = {
     code: entry["name"] for code, entry in _NMU_DOC["codes"].items()

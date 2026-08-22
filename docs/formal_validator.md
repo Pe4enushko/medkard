@@ -21,13 +21,13 @@ Each service in `Услуги` is classified independently. The result is the un
 1. If any diagnosis in `Диагнозы[].КодМКБ` is `Z11.1` (compared upper-case, whitespace-trimmed) → always adds `PROPHYLACTIC_TUBERCULIN` to the result set (independent of services).
 2. Scan every field value for an NMU code matching `^[ABАВ]\d{2}\.\d{2,3}\.\d{3}(?:\.\d{3})?$` (the middle segment is 2 digits for A-codes and 3 for B-codes, hence `\d{2,3}`):
    - `A*` prefix → `LAB_RESEARCH_INTERVENTION` (thousands of codes; rules narrow them further through `applies_to.service_code_prefixes`)
-   - a code listed in `nmu_visit_types.json` → the visit type recorded there
+   - a code listed in `nmu_services.json` → the visit type its 804н kind maps to
    - any other code → **no verdict**; step 3 decides
 3. Keyword fallback on `Наименование` — for every service the code left undecided, not only for services carrying no code at all:
    - `повторн` → `REPEAT`, `первичн` → `PRIMARY`, `профилактическ` → `PROPHYLACTIC`
 4. A service neither step decided contributes nothing. `OTHER` is the answer only when no service contributed anything.
 
-### `nmu_visit_types.json` — словарь по 804н
+### `nmu_services.json` — справочник по 804н
 
 The middle segment of an NMU code is the **doctor's specialty**, not a property
 of the appointment: `B01.023.001` is a neurologist, `B01.031.002` a paediatrician,
@@ -39,11 +39,28 @@ section are not appointments at all (ежедневный осмотр, веде
 
 So the type comes from a lookup table generated from the order itself:
 `scripts/build-nmu-dictionary.py <804н.pdf>` writes
-`src/audit/formal_structure/nmu_visit_types.json` as `{code: {visit_type, name}}`.
+`src/audit/formal_structure/nmu_services.json` as `{code: {kind, name}}`.
 It deliberately holds only ambulatory appointments — `B01` «Прием … первичный /
 повторный» and `B04` «Диспансерный / Профилактический прием» — because that is
 what an outpatient clinic bills. Everything else is absent on purpose and falls
 through to the service name.
+
+**The file stores the order's categories, not ours.** `kind` is one of
+`appointment_primary`, `appointment_repeat`, `dispensary`, `prophylactic` — the
+distinctions 804н itself draws. The narrowing to medkard's six `VisitType`
+values lives in `validator._NMU_KIND_TO_VISIT_TYPE`, next to
+`_VISIT_TYPE_RULE_KEY`, so our categorisation stays in one place instead of
+leaking into the generator. A kind without a mapping raises at import;
+`tests/test_nmu_dictionary.py` guards the boundary in both directions.
+
+Today `dispensary` and `prophylactic` both map to `PROPHYLACTIC`, as before the
+dictionary existed. That is a known compromise, not an oversight: 50 of the 93
+`B04` appointments in the order are диспансерные, and on such a visit the four
+404н rules about the scope of a ПМО fire while the 168н/192н rules — the ones
+actually about dispensary follow-up — do not, because they are declared for
+`primary`/`repeat`. Splitting the two needs a new `visit_types` key in
+`rules.json` and a decision about which rules follow it; tracked in
+`docs/tech-debt.md`.
 
 Until 2026-08-22 the classifier recognised `B01.070.*` only, which is the
 «прочее» group (врач по медицинской профилактике, паллиативная помощь, судовой

@@ -2,16 +2,26 @@
 """Собрать словарь типов амбулаторного приёма из приказа 804н.
 
 Вход — PDF номенклатуры медицинских услуг (приказ Минздрава России от
-13.10.2017 № 804н). Выход — ``src/audit/formal_structure/nmu_visit_types.json``,
+13.10.2017 № 804н). Выход — ``src/audit/formal_structure/nmu_services.json``,
 который читает ``FormalValidator``.
+
+Файл хранит **факты приказа, а не нашу категоризацию**: у каждого кода вид
+услуги по 804н (``kind``) и её наименование. Сопоставление ``kind`` → наш
+``VisitType`` живёт в ``audit.formal_structure.validator``, рядом со словарём
+ключей ``rules.json``. Так наша узкая категоризация остаётся в одном месте: её
+изменение (например, если диспансерный приём станет отдельным типом визита) —
+это правка кода, а не перегенерация справочника.
 
 Берём только то, что бывает в обычной поликлинике:
 
 * ``B01.*`` вида «Прием (осмотр, консультация) … первичный/повторный»,
   «Прием (тестирование, консультация) … первичный/повторный» и
-  «Осмотр (консультация) врачом-… первичный/повторный» → PRIMARY/REPEAT;
-* ``B04.*`` вида «Диспансерный прием …» и «Профилактический прием …» →
-  PROPHYLACTIC.
+  «Осмотр (консультация) врачом-… первичный/повторный»
+  → ``appointment_primary`` / ``appointment_repeat``;
+* ``B04.*`` вида «Диспансерный прием …» → ``dispensary``
+  и «Профилактический прием …» → ``prophylactic``. Приказ их различает
+  (168н/192н против 404н), поэтому различие сохраняется в файле, даже пока
+  код сводит оба к одному типу визита.
 
 Всё остальное из 804н намеренно НЕ включается: ежедневные осмотры и суточное
 наблюдение (стационар), ведение родов, анестезиологические пособия, патронаж
@@ -39,7 +49,7 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT_PATH = ROOT / "src" / "audit" / "formal_structure" / "nmu_visit_types.json"
+OUT_PATH = ROOT / "src" / "audit" / "formal_structure" / "nmu_services.json"
 
 SOURCE = (
     "приказ Минздрава России от 13.10.2017 № 804н «Об утверждении номенклатуры "
@@ -60,9 +70,12 @@ _APPOINTMENT = (
 )
 _PRIMARY_RE = re.compile(rf"^{_APPOINTMENT}.+первичный$")
 _REPEAT_RE = re.compile(rf"^{_APPOINTMENT}.+повторный$")
-_PROPHYLACTIC_RE = re.compile(r"^(Диспансерный|Профилактический) прием \(")
+_DISPENSARY_RE = re.compile(r"^Диспансерный прием \(")
+_PROPHYLACTIC_RE = re.compile(r"^Профилактический прием \(")
 
-
+# Виды услуг 804н, которые различает справочник. Значения — категории приказа;
+# наш VisitType из них выводит validator.
+KINDS = ("appointment_primary", "appointment_repeat", "dispensary", "prophylactic")
 def _extract_entries(pdf_path: Path) -> list[tuple[str, str]]:
     """Вернуть (код, наименование) для каждой записи раздела B по порядку PDF."""
     import fitz  # noqa: PLC0415 — тяжёлый импорт нужен только этому скрипту
@@ -80,12 +93,15 @@ def _extract_entries(pdf_path: Path) -> list[tuple[str, str]]:
 
 
 def _classify(name: str) -> str | None:
+    """Вид услуги по 804н, или None если это не амбулаторный приём."""
     if _PRIMARY_RE.match(name):
-        return "PRIMARY"
+        return "appointment_primary"
     if _REPEAT_RE.match(name):
-        return "REPEAT"
+        return "appointment_repeat"
+    if _DISPENSARY_RE.match(name):
+        return "dispensary"
     if _PROPHYLACTIC_RE.match(name):
-        return "PROPHYLACTIC"
+        return "prophylactic"
     return None
 
 
@@ -94,13 +110,13 @@ def build(pdf_path: Path) -> dict:
     conflicts: list[str] = []
 
     for code, name in _extract_entries(pdf_path):
-        visit_type = _classify(name)
-        if visit_type is None:
+        kind = _classify(name)
+        if kind is None:
             continue
         existing = codes.get(code)
         if existing is None:
-            codes[code] = {"visit_type": visit_type, "name": name}
-        elif existing["visit_type"] != visit_type:
+            codes[code] = {"kind": kind, "name": name}
+        elif existing["kind"] != kind:
             conflicts.append(f"{code}: {existing['name']!r} vs {name!r}")
 
     if conflicts:
@@ -121,6 +137,12 @@ def build(pdf_path: Path) -> dict:
             "(ежедневный осмотр, ведение родов, анестезия, патронаж, "
             "освидетельствование, школы, B02/B03/B05) намеренно не включены — "
             "такой код уходит в разбор по наименованию услуги, затем в OTHER."
+        ),
+        "kinds": list(KINDS),
+        "kind_note": (
+            "kind — вид услуги по 804н, а не тип визита medkard. "
+            "Сопоставление kind → VisitType делает "
+            "audit.formal_structure.validator._NMU_KIND_TO_VISIT_TYPE."
         ),
         "generated_by": "scripts/build-nmu-dictionary.py",
         "codes": dict(sorted(codes.items())),
@@ -143,7 +165,7 @@ def main(argv: list[str]) -> int:
 
     counts: dict[str, int] = {}
     for entry in document["codes"].values():
-        counts[entry["visit_type"]] = counts.get(entry["visit_type"], 0) + 1
+        counts[entry["kind"]] = counts.get(entry["kind"], 0) + 1
     print(f"{args.out}: {len(document['codes'])} кодов {counts}")
     return 0
 
