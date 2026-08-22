@@ -25,8 +25,14 @@ from typing import Any
 from LLM.chinese_detector import ChineseDetector
 from LLM.validations import validate_rule
 from LLM.visit_classifier import VisitClassifier
+from parsers.json_parser import patient_age as _patient_age
 
 _chinese_detector = ChineseDetector()
+
+# Совершеннолетие: 404н задаёт объём ПМО для «граждан в возрасте 18 лет и
+# старше», 192н и 211н говорят о несовершеннолетних. Та же граница, что в
+# audit.diagnosis.clinic_recs — держим их согласованными.
+_ADULT_AGE = 18
 
 # Средний сегмент: 2 цифры у A-кодов (A04.16.001), 3 у B-кодов (B01.070.001).
 NMU_RE = re.compile(r"^[ABАВ]\d{2}\.\d{2,3}\.\d{3}(?:\.\d{3})?$", re.I)
@@ -36,12 +42,14 @@ logger = logging.getLogger(__name__)
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE = Path(__file__).parent
 _RULES_PATH = _HERE / "rules.json"
+_NMU_PATH = _HERE / "nmu_visit_types.json"
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "LLM" / "prompts" / "formal_structure_validator.txt"
 # ─────────────────────────────────────────────────────────────────────────────
 
 _RULES_DOC: dict = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
 _RULES: list[dict] = _RULES_DOC["rules"]
 _REVISED_AT: str = _RULES_DOC["revised_at"]
+_NMU_DOC: dict = json.loads(_NMU_PATH.read_text(encoding="utf-8"))
 _PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
 
 # ── Flag → regulatory source lookup ───────────────────────────────────────────
@@ -106,6 +114,26 @@ _VISIT_TYPE_RULE_KEY: dict[VisitType, str] = {
     VisitType.OTHER:                     "other",
 }
 
+# Код номенклатуры → тип приёма, по приказу 804н (см. _NMU_DOC["scope"]:
+# в словаре только амбулаторные приёмы; всё остальное разбирается по
+# наименованию услуги). Средний сегмент кода — это специальность врача, а не
+# признак приёма, поэтому вывести тип из самого кода арифметически нельзя:
+# B01.047.001/.002 — терапевт первичный/повторный, а B01.047.010/.011 — врач по
+# водолазной медицине первичный/повторный.
+_NMU_VISIT_TYPES: dict[str, VisitType] = {
+    code: VisitType[entry["visit_type"]] for code, entry in _NMU_DOC["codes"].items()
+}
+_NMU_NAMES: dict[str, str] = {
+    code: entry["name"] for code, entry in _NMU_DOC["codes"].items()
+}
+
+logger.info(
+    "[formal] NMU dictionary source=%s verified_at=%s codes=%d",
+    _NMU_DOC["source"],
+    _NMU_DOC["verified_at"],
+    len(_NMU_VISIT_TYPES),
+)
+
 _LLM_LABEL_TO_TYPE: dict[str, VisitType] = {
     "primary":                   VisitType.PRIMARY,
     "repeat":                    VisitType.REPEAT,
@@ -131,14 +159,14 @@ class FormalValidator:
         Each service entry is classified independently:
         1. Z11.1 among visit["Диагнозы"][].КодМКБ → always adds PROPHYLACTIC_TUBERCULIN.
         2. Per-service NMU code scan:
-           - A*                                  → LAB_RESEARCH_INTERVENTION
-           - B04.*                               → PROPHYLACTIC
-           - B01.070.{001}                       → PRIMARY
-           - B01.070.{011,012}                   → REPEAT
-           - B01 with middle≠070 or unknown sfx  → OTHER
-        3. Keyword fallback on ``Наименование`` (only for services with no NMU code):
+           - A*                                → LAB_RESEARCH_INTERVENTION
+           - code found in ``nmu_visit_types.json`` (804н) → its visit type
+           - any other code                    → no verdict, step 3 decides
+        3. Keyword fallback on ``Наименование`` — for every service the codes
+           left undecided, not only for services without a code at all:
            повторн / первичн / профилактическ
-        4. Services that match nothing contribute OTHER.
+        4. A service neither step decided contributes nothing; OTHER is the
+           answer only when no service contributed anything at all.
         """
         result: set[VisitType] = set()
 
@@ -171,28 +199,26 @@ class FormalValidator:
                     if not m:
                         continue
                     code = m.group(0).upper().replace("В", "B").replace("А", "A")
-                    parts = code.split(".")
-                    prefix, last = parts[0], parts[-1]
-                    if prefix.startswith("A"):
+                    if code.startswith("A"):
+                        # Лабораторные, инструментальные и вмешательства — по
+                        # префиксу: их тысячи, а конкретную услугу правила
+                        # отбирают через applies_to.service_code_prefixes.
                         svc_type = VisitType.LAB_RESEARCH_INTERVENTION
                         break
                     if svc_type is None:
-                        if prefix == "B04":
-                            svc_type = VisitType.PROPHYLACTIC
-                        elif prefix == "B01":
-                            middle = parts[1] if len(parts) > 1 else ""
-                            if middle != "070" or last not in {"001", "011", "012"}:
-                                svc_type = VisitType.OTHER
-                            elif last == "001":
-                                svc_type = VisitType.PRIMARY
-                            else:  # 011 or 012
-                                svc_type = VisitType.REPEAT
+                        # Кода нет в словаре 804н (не приём либо услуга клиники
+                        # вне номенклатуры) — вердикта не выносим, пусть решает
+                        # наименование.
+                        svc_type = _NMU_VISIT_TYPES.get(code)
                 else:
                     continue
                 break  # inner for-raw broke via A-code, propagate
 
             if svc_type is None:
                 # ── keyword fallback for this service ─────────────────────────
+                # Достижим и тогда, когда код у услуги есть, но словарь 804н его
+                # не знает: раньше такой код молча становился OTHER и глушил
+                # разбор наименования.
                 name: str = (svc.get("Наименование") or "").lower()
                 if "повторн" in name:
                     svc_type = VisitType.REPEAT
@@ -241,8 +267,11 @@ class FormalValidator:
         """Return rules applicable to the given visit types, age and ICD codes.
 
         Age group matching: a rule passes if its ``age_group`` is ``"all"``,
-        or matches the derived group (``"child"`` if age < 18, ``"adult"`` otherwise).
-        ``patient_age=None`` skips age filtering (matches any age_group).
+        or matches the derived group (``"child"`` if age < 18, ``"adult"``
+        otherwise — the boundary 404н draws with «граждане в возрасте 18 лет и
+        старше»).  ``patient_age=None`` means the card did not state a usable
+        age: only ``age_group="all"`` rules are kept, so an unknown age can
+        never widen the rule set into the wrong cohort.
 
         ICD matching: a rule carrying ``applies_to.icd_prefixes`` passes only if
         one of ``icd_codes`` starts with one of those prefixes.  Without codes
@@ -255,7 +284,7 @@ class FormalValidator:
         type_keys = {_VISIT_TYPE_RULE_KEY[vt] for vt in visit_types}
         age_group: str | None = None
         if patient_age is not None:
-            age_group = "child" if patient_age < 18 else "adult"
+            age_group = "child" if patient_age < _ADULT_AGE else "adult"
 
         codes = [c.strip().upper() for c in (icd_codes or []) if c and c.strip()]
         service_codes, service_names = self._service_metadata(visit)
@@ -267,10 +296,11 @@ class FormalValidator:
             visit_type_applies = applies.get("visit_types", [])
             if not ("all" in visit_type_applies or type_keys & set(visit_type_applies)):
                 continue
-            if age_group is not None:
-                rule_age = applies.get("age_group", "all")
-                if rule_age != "all" and rule_age != age_group:
-                    continue
+            rule_age = applies.get("age_group", "all")
+            if rule_age != "all" and rule_age != age_group:
+                # age_group is None when the age is unknown: nothing but "all"
+                # can match, which is the deliberate narrow side of the fork.
+                continue
             prefixes = applies.get("icd_prefixes") or []
             if prefixes and not any(c.startswith(p) for c in codes for p in prefixes):
                 continue
@@ -328,15 +358,23 @@ class FormalValidator:
     def _check_nmu_keyword_contradiction(self, visit: dict[str, Any]) -> dict[str, str] | None:
         """Return a NMU_CODE_CONTRADICTION finding if NMU code and service name disagree.
 
-        Checks only the PRIMARY/REPEAT pair: B01.xxx.002 with «первичн» in the
-        name, or B01.xxx.001 with «повторн» in the name.  All other combinations
-        are either unambiguous (B04, A-codes) or have no name-based signal.
+        Both sides are read the same way as in ``get_visit_types``: the code
+        through the 804н dictionary, the name through the same word stems.
+        Codes outside the dictionary (not an appointment, or a clinic-internal
+        article) carry no primary/repeat claim and cannot contradict anything.
         """
         services: list = visit.get("Услуги") or []
         for svc in services:
             if not isinstance(svc, dict):
                 continue
             name: str = (svc.get("Наименование") or "").lower()
+            name_type: VisitType | None = None
+            if "повторн" in name:
+                name_type = VisitType.REPEAT
+            elif "первичн" in name:
+                name_type = VisitType.PRIMARY
+            if name_type is None:
+                continue
             for raw in svc.values():
                 if not raw:
                     continue
@@ -345,26 +383,21 @@ class FormalValidator:
                     if not m:
                         continue
                     code = m.group(0).upper().replace("В", "B").replace("А", "A")
-                    parts = code.split(".")
-                    prefix, last = parts[0], parts[-1]
-                    if prefix != "B01":
+                    code_type = _NMU_VISIT_TYPES.get(code)
+                    if code_type is None or code_type == name_type:
                         continue
-                    if last == "002" and "первичный" in name:
-                        return {
-                            "flag": "NMU_CODE_CONTRADICTION",
-                            "issue": (
-                                f"NMU-код {m.group(0)} соответствует повторному приёму "
-                                f"(суффикс .002), но наименование услуги содержит «первичный»"
-                            ),
-                        }
-                    if last == "001" and "повторный" in name:
-                        return {
-                            "flag": "NMU_CODE_CONTRADICTION",
-                            "issue": (
-                                f"NMU-код {m.group(0)} соответствует первичному приёму "
-                                f"(суффикс .001), но наименование услуги содержит «повторный»"
-                            ),
-                        }
+                    if code_type not in (VisitType.PRIMARY, VisitType.REPEAT):
+                        continue
+                    expected = "повторному" if code_type is VisitType.REPEAT else "первичному"
+                    claimed = "«повторный»" if name_type is VisitType.REPEAT else "«первичный»"
+                    return {
+                        "flag": "NMU_CODE_CONTRADICTION",
+                        "issue": (
+                            f"NMU-код {code} по номенклатуре 804н соответствует "
+                            f"{expected} приёму ({_NMU_NAMES[code]}), "
+                            f"но наименование услуги содержит {claimed}"
+                        ),
+                    }
         return None
 
     async def validate(
@@ -388,8 +421,12 @@ class FormalValidator:
         visit_types = await self.get_visit_types(visit)
         logger.debug("[formal] visit_types resolved: %s", {vt.name for vt in visit_types})
 
-        _raw_age = (visit.get("Пациент") or {}).get("AGE")
-        patient_age: int | None = int(_raw_age) if isinstance(_raw_age, str) and _raw_age.strip().isdigit() else (_raw_age if isinstance(_raw_age, int) else None)
+        patient_age: int | None = _patient_age(visit.get("Пациент") or {})
+        if patient_age is None:
+            logger.warning(
+                "[formal] возраст пациента не прочитан (%r) — применяем только правила age_group=all",
+                (visit.get("Пациент") or {}).get("AGE"),
+            )
         icd_codes: list[str] = [
             str(d.get("КодМКБ") or "")
             for d in (visit.get("Диагнозы") or [])

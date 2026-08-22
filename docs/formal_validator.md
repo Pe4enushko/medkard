@@ -20,14 +20,36 @@ Each service in `Услуги` is classified independently. The result is the un
 
 1. If any diagnosis in `Диагнозы[].КодМКБ` is `Z11.1` (compared upper-case, whitespace-trimmed) → always adds `PROPHYLACTIC_TUBERCULIN` to the result set (independent of services).
 2. Scan every field value for an NMU code matching `^[ABАВ]\d{2}\.\d{2,3}\.\d{3}(?:\.\d{3})?$` (the middle segment is 2 digits for A-codes and 3 for B-codes, hence `\d{2,3}`):
-   - `A*` prefix → `LAB_RESEARCH_INTERVENTION`
-   - `B04.*` → `PROPHYLACTIC`
-   - `B01.070.001` → `PRIMARY`
-   - `B01.070.011` or `.012` → `REPEAT`
-   - `B01` with any other middle/suffix → `OTHER`
-3. If no NMU code found, keyword fallback on `Наименование`:
+   - `A*` prefix → `LAB_RESEARCH_INTERVENTION` (thousands of codes; rules narrow them further through `applies_to.service_code_prefixes`)
+   - a code listed in `nmu_visit_types.json` → the visit type recorded there
+   - any other code → **no verdict**; step 3 decides
+3. Keyword fallback on `Наименование` — for every service the code left undecided, not only for services carrying no code at all:
    - `повторн` → `REPEAT`, `первичн` → `PRIMARY`, `профилактическ` → `PROPHYLACTIC`
-4. Services that match nothing contribute `OTHER`.
+4. A service neither step decided contributes nothing. `OTHER` is the answer only when no service contributed anything.
+
+### `nmu_visit_types.json` — словарь по 804н
+
+The middle segment of an NMU code is the **doctor's specialty**, not a property
+of the appointment: `B01.023.001` is a neurologist, `B01.031.002` a paediatrician,
+`B01.015.001` a cardiologist. The suffix carries no global meaning either —
+`B01.047.001/.002` are терапевт первичный/повторный while `B01.047.010/.011` are
+врач по водолазной медицине первичный/повторный, and 96 codes of the `B01`
+section are not appointments at all (ежедневный осмотр, ведение родов,
+анестезиологическое пособие, освидетельствование, патронаж).
+
+So the type comes from a lookup table generated from the order itself:
+`scripts/build-nmu-dictionary.py <804н.pdf>` writes
+`src/audit/formal_structure/nmu_visit_types.json` as `{code: {visit_type, name}}`.
+It deliberately holds only ambulatory appointments — `B01` «Прием … первичный /
+повторный» and `B04` «Диспансерный / Профилактический прием» — because that is
+what an outpatient clinic bills. Everything else is absent on purpose and falls
+through to the service name.
+
+Until 2026-08-22 the classifier recognised `B01.070.*` only, which is the
+«прочее» group (врач по медицинской профилактике, паллиативная помощь, судовой
+врач, медицинский психолог, патронаж). Every real card of a normal clinic
+therefore resolved to `OTHER` and lost 34 of the 42 rules; `B01.070.001`, mapped
+to PRIMARY, is in fact «Медицинское освидетельствование на состояние опьянения».
 
 If `Услуги` is absent or empty, returns `{OTHER}`.
 
@@ -35,9 +57,9 @@ If `Услуги` is absent or empty, returns `{OTHER}`.
 
 Loads `rules.json` (done once at module import). Returns rules where:
 - `applies_to.visit_types` contains `"all"` or overlaps with the resolved visit type keys.
-- `applies_to.age_group` is `"all"`, or matches the derived group (`"child"` if `age < 18`, `"adult"` otherwise). When `patient_age=None`, age filtering is skipped.
+- `applies_to.age_group` is `"all"`, or matches the derived group (`"child"` if `age < 18`, `"adult"` otherwise — the boundary 404н draws with «граждане в возрасте 18 лет и старше»). When `patient_age=None` the card gave no usable age and **only `age_group="all"` rules are kept**: an unknown age must never widen the rule set into the wrong cohort. `Пациент.AGE` is read by `parsers.json_parser.patient_age`, the single parser shared with the clinical-guideline lookup — `AGE = 0` is an infant, not a missing value.
 
-Deduplicates by `flag_code` — the first matching rule wins.
+Deduplicates by `flag_code` — the first matching rule wins. Two rules may share a flag on purpose (`test_flag_codes_are_unique_except_shared_pairs`), so such a pair must stay mutually exclusive through `applies_to`; otherwise the second one is dropped silently.
 
 Third filter — ICD codes.  A rule carrying `applies_to.icd_prefixes` applies
 only when one of the visit's diagnosis codes (`Диагнозы[].КодМКБ`, passed in as
@@ -64,7 +86,7 @@ services (`A03.*`, `A11.*`, `A16.*`); a drug prescription inside an ordinary
 ## LLM call — `validate(visit) -> tuple[list[dict], int]`
 
 1. Calls `get_visit_types(visit)` to resolve visit type set.
-2. Reads `Пациент.AGE` → `patient_age` (int or None).
+2. Reads `Пациент.AGE` through `parsers.json_parser.patient_age` → int or None (an unreadable value is logged).
 3. Calls `get_rules(visit_types, patient_age, icd_codes, visit)` → applicable rules.
 4. Starts `LLM.validations.validate_rule(...)` concurrently for every rule.
 5. Every request has the same cacheable prefix: static system prompt, then the complete visit JSON; only the final user message with one rule differs.

@@ -36,7 +36,7 @@ SPECIALTY = "Терапевт"
 # ── ЛН упомянут без обоснования, номера и дат ────────────────────────────────
 sick_leave_without_justification = base_visit(
     guid="e2e-audit-1089n-no-justification",
-    service_code="B01.070.001",
+    service_code="B01.047.001",
     service_name="Приём (осмотр, консультация) врача-терапевта первичный",
     specialty=SPECIALTY,
     age=38,
@@ -73,7 +73,7 @@ sick_leave_without_justification = base_visit(
 # ── Срок нетрудоспособности 21 день, решения врачебной комиссии нет ───────────
 sick_leave_over_15_days = base_visit(
     guid="e2e-audit-1089n-over-15-days",
-    service_code="B01.070.011",
+    service_code="B01.047.002",
     service_name="Приём (осмотр, консультация) врача-терапевта повторный",
     specialty=SPECIALTY,
     age=41,

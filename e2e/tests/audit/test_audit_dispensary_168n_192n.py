@@ -45,7 +45,7 @@ PRIMARY = {VisitType.PRIMARY}
 # ── 168н: впервые выявленная гипертензия у взрослого без решения о ДН ─────────
 adult_hypertension = base_visit(
     guid="e2e-audit-168n-adult-hypertension",
-    service_code="B01.070.001",
+    service_code="B01.047.001",
     service_name="Приём (осмотр, консультация) врача-терапевта первичный",
     specialty="Терапевт",
     age=54,
@@ -94,7 +94,7 @@ adult_hypertension = base_visit(
 # ── 192н: хроническая астма у ребёнка без решения о диспансерном наблюдении ───
 child_asthma = base_visit(
     guid="e2e-audit-192n-child-asthma",
-    service_code="B01.070.001",
+    service_code="B01.031.001",
     service_name="Приём (осмотр, консультация) врача-педиатра первичный",
     specialty="Педиатр",
     age=8,

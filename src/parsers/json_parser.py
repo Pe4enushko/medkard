@@ -29,6 +29,35 @@ from typing import Any
 _APPOINTMENTS_KEY = "appointments"
 
 
+def patient_age(patient: dict[str, Any]) -> int | None:
+    """Возраст пациента из блока «Пациент», или None если его нельзя прочитать.
+
+    Единственное место, где карта 1С превращается в число лет: и формальный
+    контур, и подбор клинических рекомендаций обязаны видеть один и тот же
+    возраст.
+
+    Две тонкости, обе стоили дефектов:
+
+    * ``AGE = 0`` — это ребёнок до года, а не отсутствие данных. Поэтому
+      проверяется ``is None``, а не ложность значения: ``patient.get("AGE") or
+      patient.get("Возраст")`` на нуле уходило во вторую ветку и возвращало
+      None для всех младенцев.
+    * Разбор намеренно строгий: «66 лет» и прочий текст возрастом не считаются.
+      Вызывающий обязан трактовать None как «возраст неизвестен» в сторону
+      сужения (см. ``FormalValidator.get_rules``), поэтому нераспознанное
+      значение безопаснее вольного разбора.
+    """
+    raw = patient.get("AGE")
+    if raw is None:
+        raw = patient.get("Возраст")
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return int(raw) if raw >= 0 else None
+    text = str(raw).strip()
+    return int(text) if text.isdigit() else None
+
+
 @dataclass
 class ParsedAppointment:
     """Structured parts of a single raw 1C visit dict."""

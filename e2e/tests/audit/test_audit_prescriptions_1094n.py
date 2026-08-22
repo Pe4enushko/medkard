@@ -36,7 +36,7 @@ from fixtures import base_visit, dx  # noqa: E402
 from harness import Case, VisitType, run_cases  # noqa: E402
 
 PRIMARY = {VisitType.PRIMARY}
-SERVICE_CODE = "B01.070.001"
+SERVICE_CODE = "B01.047.001"
 SERVICE_NAME = "Приём (осмотр, консультация) врача-терапевта первичный"
 SPECIALTY = "Терапевт"
 

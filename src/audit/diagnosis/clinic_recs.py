@@ -14,13 +14,21 @@ from typing import Any
 
 from LLM.decider import decide_file_id
 from LLM.icd_prefix_picker import IcdPrefixPicker
+from parsers.json_parser import patient_age as _patient_age  # noqa: F401 — re-export для audit.pipeline
 from storage.guidelines_storage import GuidelinesStorage
 from storage.models.guideline import Guideline
 
 # МКБ codes for which no guideline lookup is needed (e.g. routine checkup codes).
 _SKIP_CODES: frozenset[str] = frozenset({"Z00.1"})
 
-_ADULT_THRESHOLD = 15  # age > this → adult
+# Граница «дети / взрослые». Рубрикатор относит к детям 0–17 лет
+# (`manifest.csv` знает только «Дети», «Взрослые», «Взрослые, дети»), 404н
+# задаёт объём ПМО для «граждан в возрасте 18 лет и старше». Прежние 15 лет
+# пришли из коммита 720637d без обоснования и отсекали 16–17-летних от детских
+# КР; 15 лет в 323-ФЗ — про самостоятельное информированное согласие, а не про
+# применимость рекомендации. Та же константа в
+# audit.formal_structure.validator._ADULT_AGE.
+_ADULT_AGE = 18
 
 
 def _is_age_eligible(guideline: "Guideline", age: int | None) -> bool:
@@ -28,7 +36,7 @@ def _is_age_eligible(guideline: "Guideline", age: int | None) -> bool:
     if age is None:
         return True
     cats = {c.strip().lower() for c in guideline.age_category}
-    is_child = age <= _ADULT_THRESHOLD
+    is_child = age < _ADULT_AGE
     has_child = "дети" in cats
     has_adult = "взрослые" in cats
     if has_child and not has_adult:
@@ -36,14 +44,6 @@ def _is_age_eligible(guideline: "Guideline", age: int | None) -> bool:
     if has_adult and not has_child:
         return not is_child
     return True  # оба или неизвестно — пропускаем
-
-
-def _patient_age(patient: dict[str, Any]) -> int | None:
-    raw = patient.get("AGE") or patient.get("Возраст")
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
 
 
 class ClinicRecs:

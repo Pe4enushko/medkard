@@ -295,3 +295,78 @@ def test_injection_rule_uses_real_a11_code_and_service_name():
     assert "МАНИПУЛЯЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ" not in injection
     assert "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ" not in sample_collection
     assert "ИНЪЕКЦИЯ_НЕПОЛНОЕ_ОПИСАНИЕ" not in obsolete_fake_code
+
+
+def test_unknown_age_keeps_only_age_agnostic_rules(monkeypatch):
+    """Нечитаемый возраст сужает набор правил, а не расширяет его.
+
+    Раньше patient_age=None выключал возрастной фильтр целиком, и на карте без
+    пригодного AGE детское правило уезжало взрослому пациенту вместе со
+    взрослыми правилами.
+    """
+    import audit.formal_structure.validator as v
+
+    rules = [
+        _rule(rule_id="any", flag_code="ЛЮБОЙ_ВОЗРАСТ"),
+        _rule(
+            rule_id="child",
+            flag_code="ТОЛЬКО_ДЕТИ",
+            applies_to={"visit_types": ["all"], "specialties": ["all"], "age_group": "child"},
+        ),
+        _rule(
+            rule_id="adult",
+            flag_code="ТОЛЬКО_ВЗРОСЛЫЕ",
+            applies_to={"visit_types": ["all"], "specialties": ["all"], "age_group": "adult"},
+        ),
+    ]
+    monkeypatch.setattr(v, "_RULES", rules)
+    validator = FormalValidator()
+
+    assert _flags(validator.get_rules({VisitType.PRIMARY}, None, None)) == ["ЛЮБОЙ_ВОЗРАСТ"]
+    assert _flags(validator.get_rules({VisitType.PRIMARY}, 8, None)) == [
+        "ЛЮБОЙ_ВОЗРАСТ",
+        "ТОЛЬКО_ДЕТИ",
+    ]
+    assert _flags(validator.get_rules({VisitType.PRIMARY}, 40, None)) == [
+        "ЛЮБОЙ_ВОЗРАСТ",
+        "ТОЛЬКО_ВЗРОСЛЫЕ",
+    ]
+
+
+def test_infant_is_a_child_not_an_unknown_age(monkeypatch):
+    """AGE=0 — ребёнок до года, а не отсутствие данных."""
+    import audit.formal_structure.validator as v
+
+    rules = [
+        _rule(
+            rule_id="child",
+            flag_code="ТОЛЬКО_ДЕТИ",
+            applies_to={"visit_types": ["all"], "specialties": ["all"], "age_group": "child"},
+        ),
+    ]
+    monkeypatch.setattr(v, "_RULES", rules)
+
+    assert _flags(FormalValidator().get_rules({VisitType.PRIMARY}, 0, None)) == ["ТОЛЬКО_ДЕТИ"]
+
+
+def test_eighteen_is_an_adult(monkeypatch):
+    """Граница 404н: «граждане в возрасте 18 лет и старше»."""
+    import audit.formal_structure.validator as v
+
+    rules = [
+        _rule(
+            rule_id="child",
+            flag_code="ТОЛЬКО_ДЕТИ",
+            applies_to={"visit_types": ["all"], "specialties": ["all"], "age_group": "child"},
+        ),
+        _rule(
+            rule_id="adult",
+            flag_code="ТОЛЬКО_ВЗРОСЛЫЕ",
+            applies_to={"visit_types": ["all"], "specialties": ["all"], "age_group": "adult"},
+        ),
+    ]
+    monkeypatch.setattr(v, "_RULES", rules)
+    validator = FormalValidator()
+
+    assert _flags(validator.get_rules({VisitType.PRIMARY}, 17, None)) == ["ТОЛЬКО_ДЕТИ"]
+    assert _flags(validator.get_rules({VisitType.PRIMARY}, 18, None)) == ["ТОЛЬКО_ВЗРОСЛЫЕ"]

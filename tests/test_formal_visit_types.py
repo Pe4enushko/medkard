@@ -105,19 +105,61 @@ async def test_a_code_with_trailing_space_is_handled():
     assert VisitType.LAB_RESEARCH_INTERVENTION in got
 
 
-async def test_b_code_classification_unchanged():
-    """Фикс среднего сегмента не задевает разбор B-кодов."""
+async def test_real_specialist_codes_give_primary_and_repeat():
+    """Тип приёма даёт последний сегмент кода, а не специальность врача.
+
+    Средний сегмент — это специальность (023 невролог, 031 педиатр, 015
+    кардиолог). Пока классификатор требовал B01.070.*, каждая боевая карта
+    поликлиники становилась OTHER и теряла 34 правила из 42.
+    """
     v = FormalValidator()
+    for code, expected in [
+        ("B01.023.001", VisitType.PRIMARY),    # невролог первичный
+        ("B01.023.002", VisitType.REPEAT),     # невролог повторный
+        ("B01.031.002", VisitType.REPEAT),     # педиатр повторный
+        ("B01.015.001", VisitType.PRIMARY),    # кардиолог первичный
+        ("B01.047.001", VisitType.PRIMARY),    # терапевт первичный
+        ("B01.047.011", VisitType.REPEAT),     # врач по водолазной медицине повторный
+        ("B04.031.002", VisitType.PROPHYLACTIC),
+        ("B04.047.001", VisitType.PROPHYLACTIC),  # диспансерный приём
+    ]:
+        got = await v.get_visit_types(_visit(services=[{"Наименование": "x", "Код": code}]))
+        assert expected in got, f"{code} → {got}"
 
-    primary = await v.get_visit_types(_visit(services=[{"Наименование": "x", "Код": "B01.070.001"}]))
-    assert VisitType.PRIMARY in primary
 
-    repeat = await v.get_visit_types(_visit(services=[{"Наименование": "x", "Код": "B01.070.011"}]))
-    assert VisitType.REPEAT in repeat
+async def test_code_outside_the_dictionary_does_not_block_the_name():
+    """Код, которого нет в 804н-словаре, не должен глушить разбор наименования.
 
-    prof = await v.get_visit_types(_visit(services=[{"Наименование": "x", "Код": "B04.031.002"}]))
-    assert VisitType.PROPHYLACTIC in prof
+    B01.070.001 — это «Медицинское освидетельствование на состояние опьянения»,
+    а не первичный приём; раньше он давал PRIMARY, а любой неопознанный B01 —
+    сразу OTHER, из-за чего наименование услуги уже не читалось.
+    """
+    v = FormalValidator()
+    services = [{"Наименование": "Приём повторный", "Код": "B01.070.001"}]
+    assert VisitType.REPEAT in await v.get_visit_types(_visit(services=services))
 
-    # B01 с middle != 070 по действующей ветке — намеренно OTHER
-    other = await v.get_visit_types(_visit(services=[{"Наименование": "x", "Код": "B01.058.001"}]))
-    assert VisitType.OTHER in other
+
+async def test_non_appointment_code_without_name_hint_is_other():
+    v = FormalValidator()
+    # B01.070.011 — патронаж выездной паллиативной бригадой, не приём.
+    got = await v.get_visit_types(_visit(services=[{"Наименование": "x", "Код": "B01.070.011"}]))
+    assert got == {VisitType.OTHER}
+
+
+async def test_nmu_contradiction_uses_the_dictionary():
+    """Противоречие «код против наименования» считается по 804н, а не по догадке."""
+    v = FormalValidator()
+    visit = _visit(services=[
+        {"Наименование": "Приём первичный", "Код": "B01.023.002"},  # код: повторный
+    ])
+    finding = v._check_nmu_keyword_contradiction(visit)
+    assert finding is not None
+    assert finding["flag"] == "NMU_CODE_CONTRADICTION"
+    assert "B01.023.002" in finding["issue"]
+
+    agreeing = _visit(services=[{"Наименование": "Приём первичный", "Код": "B01.023.001"}])
+    assert v._check_nmu_keyword_contradiction(agreeing) is None
+
+    # Код вне словаря никакого утверждения о типе приёма не делает.
+    unknown = _visit(services=[{"Наименование": "Приём первичный", "Код": "B01.070.011"}])
+    assert v._check_nmu_keyword_contradiction(unknown) is None
