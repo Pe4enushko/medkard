@@ -1,6 +1,7 @@
 """Снимок детерминированного слоя: профиль карты и сравнение двух снимков."""
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import sys
@@ -99,3 +100,35 @@ def test_unrecognised_shape_is_refused(tmp_path):
     path.write_text('{"что-то": "другое"}', encoding="utf-8")
     with pytest.raises(SystemExit):
         snap._cards_from_file(path)
+
+
+def test_snapshot_records_what_took_it() -> None:
+    """Снимок обязан свидетельствовать о себе сам.
+
+    Иначе сравнение двух файлов доказывает не то, что кажется: два снимка
+    разошлись по возрасту на 65 картах, и вопрос «на какой ревизии снят „до“»
+    оказалось нечем закрыть, кроме догадок.
+    """
+    meta = asyncio.run(snap._snapshot([]))["_meta"]
+
+    assert meta["age_reader"].endswith("patient_age")
+    assert meta["get_rules_arity"] >= 2
+    assert meta["revision"]
+    assert meta["src"].endswith("src")
+
+
+def test_diff_shouts_when_both_sides_are_the_same_revision(capsys) -> None:
+    """Одна ревизия по обе стороны — сравнивать нечего, и молчать об этом нельзя."""
+    meta = {"revision": "abc1234", "age_reader": "x.y", "get_rules_arity": 2, "src": "/s"}
+    same = {"_meta": meta, "card": {"visit_types": ["PRIMARY"], "age": 40,
+                                    "icd": [], "rules": [], "nmu_contradiction": False}}
+
+    snap._diff(dict(same), dict(same))
+
+    assert "сравнивать нечего" in capsys.readouterr().out
+
+
+def test_diff_says_so_when_provenance_is_missing(capsys) -> None:
+    snap._diff({}, {})
+
+    assert capsys.readouterr().out.count("происхождение не записано") == 2

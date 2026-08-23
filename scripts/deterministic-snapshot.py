@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import inspect
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -87,6 +88,31 @@ async def _cards_from_db(limit: int, org: str | None) -> list[dict[str, Any]]:
     return cards
 
 
+def _provenance(validator: FormalValidator) -> dict[str, Any]:
+    """Чем снят снимок. Без этого сравнение двух файлов доказывает не то, что кажется.
+
+    Стоило одного разбирательства: два снимка разошлись по возрасту на 65 картах,
+    и объяснить это кодом не вышло — потому что нечем было проверить, на какой
+    ревизии снят «до». Снимок обязан свидетельствовать о себе сам.
+    """
+    revision = "неизвестна"
+    try:
+        revision = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parent.parent),
+             "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip() or revision
+    except Exception:  # noqa: BLE001 — происхождение не обязано ронять снимок
+        pass
+    age_fn = _patient_age_fn
+    return {
+        "revision": revision,
+        "src": str(Path(__file__).resolve().parent.parent / "src"),
+        "age_reader": f"{age_fn.__module__}.{age_fn.__name__}",
+        "get_rules_arity": len(inspect.signature(validator.get_rules).parameters),
+    }
+
+
 async def _profile(visit: dict[str, Any], validator: FormalValidator) -> dict[str, Any]:
     """Всё, что решается кодом до обращения к модели."""
     visit_types = await validator.get_visit_types(visit)
@@ -112,7 +138,7 @@ async def _profile(visit: dict[str, Any], validator: FormalValidator) -> dict[st
 
 async def _snapshot(cards: Iterable[dict[str, Any]]) -> dict[str, Any]:
     validator = FormalValidator()
-    out: dict[str, Any] = {}
+    out: dict[str, Any] = {"_meta": _provenance(validator)}
     for i, visit in enumerate(cards):
         key = _guid(visit) or f"#{i}"
         out[key] = await _profile(visit, validator)
@@ -120,6 +146,19 @@ async def _snapshot(cards: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _diff(before: dict[str, Any], after: dict[str, Any]) -> int:
+    meta_before = before.pop("_meta", None)
+    meta_after = after.pop("_meta", None)
+    for label, meta in (("до ", meta_before), ("после", meta_after)):
+        if meta is None:
+            print(f"{label}: происхождение не записано — снимок снят старой версией скрипта")
+        else:
+            print(f"{label}: ревизия {meta.get('revision')}, возраст читает "
+                  f"{meta.get('age_reader')}, get_rules({meta.get('get_rules_arity')} арг.)")
+    if meta_before and meta_after and meta_before.get("revision") == meta_after.get("revision"):
+        print("ВНИМАНИЕ: обе стороны сняты одной ревизией — сравнивать нечего\n")
+    else:
+        print()
+
     only_before = sorted(set(before) - set(after))
     only_after = sorted(set(after) - set(before))
     shared = sorted(set(before) & set(after))
