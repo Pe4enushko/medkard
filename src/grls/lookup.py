@@ -11,6 +11,23 @@ from storage.grls_storage import GrlsStorage
 
 logger = logging.getLogger(__name__)
 
+# Аббревиатура — негодный запрос к реестру БАД. Поиск там полнотекстовый и
+# уровня совпадения не возвращает: что нашлось, то и попадёт судье как справка.
+# На прогоне 2026-08-23 «АСК (кардиомиагнил 75мг)» не нашлась в ГРЛС (врач
+# переставил буквы в «Кардиомагниле»), после чего запрос «аск» вытащил польский
+# коллаген для спортсменов — в конце его названия стоит обрубленное «L-аск».
+# Судья получил карточку коллагена как справку об ацетилсалициловой кислоте.
+#
+# Названия БАД длинные и описательные, короткому запросу в них соответствовать
+# нечему, кроме случайной лексемы. Поэтому «аск», «кок», «нпвс», «ипп» до этого
+# реестра не доходят: промах здесь дёшев, ложная справка — нет.
+_MIN_SUPPLEMENT_QUERY_LEN = 5
+
+
+def _supplement_queries(candidates: list[str]) -> list[str]:
+    """Кандидаты, по которым имеет смысл искать БАД."""
+    return [c for c in candidates if len(c) >= _MIN_SUPPLEMENT_QUERY_LEN]
+
 
 async def lookup_medicine(mention: str, *, on: date | None = None) -> MedicineLookup:
     """МНН, затем торговое наименование, затем БАДы — по каждому кандидату.
@@ -48,7 +65,7 @@ async def lookup_medicine(mention: str, *, on: date | None = None) -> MedicineLo
     supplements = []
     if not inn_records and not trade_records:
         async with DietarySupplementsStorage() as supps:
-            for candidate in candidates:
+            for candidate in _supplement_queries(candidates):
                 supplements = await supps.search(candidate)
                 if supplements:
                     query = candidate
