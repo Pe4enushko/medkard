@@ -114,7 +114,12 @@ services (`A03.*`, `A11.*`, `A16.*`); a drug prescription inside an ordinary
 3. Calls `get_rules(visit_types, patient_age, icd_codes, visit)` → applicable rules.
 4. Starts `LLM.validations.validate_rule(...)` concurrently for every rule.
 5. Every request has the same cacheable prefix: static system prompt, then the complete visit JSON; only the final user message with one rule differs.
-6. The model returns the established findings array: `[]` or `[{"flag", "issue", "comment"}]`. Python attaches the trusted `flag_code` for the current rule and the regulatory `source`.
+6. The model returns one verdict — `{"comment", "violated", "issue"}` — and Python
+   attaches the trusted `flag_code` and the regulatory `source`. Атомарный вызов с
+   атомарным правилом даёт атомарное решение: массив findings на этом месте позволял
+   вернуть несколько замечаний на одно правило, и все получали один и тот же флаг.
+   `comment` стоит в схеме первым, чтобы модель выписала факты из карты до решения.
+   Применимость правила здесь не спрашивается — её решил шаг 3.
 7. Runs `_check_nmu_keyword_contradiction(visit)` — a deterministic check that appends `NMU_CODE_CONTRADICTION` if a `B01` NMU suffix contradicts the service name (`.001` + «повторный» or `.002` + «первичный»).
 
 Returns the combined findings list and summed token count. An empty findings

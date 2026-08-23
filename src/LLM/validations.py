@@ -40,6 +40,29 @@ class _Findings(RootModel[list[_Finding]]):
     pass
 
 
+class _RuleVerdict(BaseModel):
+    """Ответ на одно правило: сначала факты из карты, потом одно решение.
+
+    Порядок полей — часть контракта, а не оформление: в json_schema он задаёт
+    порядок генерации, поэтому модель сперва выписывает относящиеся к правилу
+    факты и только затем решает.
+
+    Решение одно. Применимость правила к приёму решает код — `get_rules` по
+    типу визита из кода ЕГИСЗ и возрасту; отдельное поле «применимо ли»
+    дублировало бы этот отбор и давало модели тихий выключатель: правило,
+    выбранное детерминированно, отменялось бы ответом, неотличимым в отчёте от
+    «нарушения нет».
+
+    Массив findings на этом месте позволял вернуть несколько замечаний на одно
+    правило, и все получали один и тот же флаг — отсюда дубли одного дефекта
+    разными формулировками.
+    """
+
+    comment: str = Field(default="", max_length=1000)
+    violated: bool
+    issue: str = Field(default="", max_length=500)
+
+
 def _finding_to_dict(finding: _Finding) -> dict[str, str]:
     return {"flag": finding.flag, "issue": finding.issue, "comment": finding.comment}
 
@@ -57,6 +80,22 @@ def _json_candidates(raw_content: str) -> list[str]:
             candidates.append(text[idx:].strip())
 
     return [candidate for candidate in candidates if candidate]
+
+
+def _parse_verdict(raw_content: str) -> _RuleVerdict | None:
+    """Разобрать вердикт по правилу, переживая обёртку в ``` — как и findings.
+
+    Возврат None означает «модель не ответила по контракту»; вызывающий не
+    выставляет флаг. Это осознанный перекос: пропустить дефект дешевле, чем
+    выдумать его врачу.
+    """
+    for candidate in _json_candidates(raw_content):
+        try:
+            return _RuleVerdict.model_validate_json(candidate)
+        except Exception:
+            continue
+    logger.error("[validations] failed to parse rule verdict: %r", raw_content)
+    return None
 
 
 def _parse_findings(raw_content: str) -> list[dict[str, str]]:
@@ -140,9 +179,9 @@ async def validate_rule(
     """Validate exactly one rule against ``visit``.
 
     Message order is deliberately stable: the common system prompt first,
-    the complete visit second, and the varying rule last.  The model still
-    returns the established findings array contract; Python attaches the
-    trusted flag for this one rule instead of trusting a generated flag value.
+    the complete visit second, and the varying rule last.  Правило даёт не более
+    одного замечания; флаг проставляется кодом, а применимость решена раньше —
+    отбором правил в ``FormalValidator.get_rules``.
     """
     visit_text = json.dumps(visit, ensure_ascii=False, indent=2)
     resolved_client = client or _client
@@ -153,7 +192,7 @@ async def validate_rule(
             {"role": "user", "content": f"## Единственное проверяемое правило\n\n{rule_text}"},
         ],
         temperature=0.0,
-        response_model=_Findings,
+        response_model=_RuleVerdict,
         metadata={
             "card_guid": (visit.get("Прием") or {}).get("GUID"),
             "checker": "formal",
@@ -163,13 +202,9 @@ async def validate_rule(
     )
 
     logger.debug("[validations] raw atomic rule answer (%s): %s", rule_id, raw_content)
-    findings = _parse_findings(raw_content)
-    return [
-        {
-            "flag": flag_code,
-            "issue": finding["issue"],
-            "comment": finding.get("comment", ""),
-        }
-        for finding in findings
-        if finding.get("issue", "").strip()
-    ], tokens
+    verdict = _parse_verdict(raw_content)
+    if verdict is None:
+        return [], tokens
+    if not verdict.violated or not verdict.issue.strip():
+        return [], tokens
+    return [{"flag": flag_code, "issue": verdict.issue, "comment": verdict.comment}], tokens

@@ -13,7 +13,7 @@ Overview of every place the codebase makes an outbound LLM request, what it call
 
 ```python
 raw, tokens = await client.call(
-    response_model=_Findings,
+    response_model=_RuleVerdict,
     messages=[common_system_prompt, complete_visit_json, one_rule],
     temperature=0.0,
 )
@@ -22,13 +22,23 @@ raw, tokens = await client.call(
 The first two messages are byte-identical for all rules of one card, so the
 provider can reuse their prompt prefix. The varying rule is always last.
 
-**Output:** established findings array: `[]` or
-`[{"flag": "...", "issue": "...", "comment": "..."}]`.
-The prompt tells the model to return an empty array unless the single supplied
-rule is breached. Python attaches the trusted `flag_code` for that rule instead
-of trusting a generated flag value. Tokens from all atomic calls are summed.
-`validate_visit` remains only as a compatibility helper for direct callers/tests;
-`FormalValidator` does not use the monolithic path.
+**Output:** один вердикт `{"comment": "...", "violated": true|false, "issue": "..."}`.
+Атомарный вызов с атомарным правилом даёт атомарное решение — не более одного
+замечания. Массив findings на этом месте позволял вернуть их несколько, и все
+получали один и тот же `flag_code`: так один дефект попадал в отчёт несколькими
+формулировками.
+
+Порядок полей — часть контракта: в json_schema он задаёт порядок генерации,
+поэтому `comment` (факты из карты) идёт перед решением.
+
+Применимость правила модель не оценивает: ей передают только правила, уже
+отобранные `FormalValidator.get_rules` по типу визита из кода ЕГИСЗ и возрасту.
+Отдельное поле `condition_met` дублировало этот отбор и позволяло модели молча
+отменить выбранное кодом правило — в отчёте это неотличимо от «нарушения нет».
+
+Флаг проставляет Python, в вердикте его нет вовсе. Токены атомарных вызовов
+суммируются. `validate_visit` остаётся только для прямых вызовов и тестов;
+`FormalValidator` монолитным путём не пользуется.
 
 ---
 

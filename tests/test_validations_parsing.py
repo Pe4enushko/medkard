@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 import asyncio
 from pathlib import Path
 from typing import Any
@@ -126,10 +127,26 @@ def test_validate_visit_parses_fenced_json_array_without_dropping_findings(caplo
     assert "failed to parse JSON response" not in caplog.text
 
 
-def test_validate_rule_uses_cacheable_prompt_visit_rule_order() -> None:
-    client = _FakeClient(
-        '[{"flag":"MISSING_DIAGNOSIS","issue":"Нет диагноза","comment":"Диагнозы: []"}]'
+def _verdict(*, violated=True, issue="Нет диагноза", comment="Диагнозы: []"):
+    return json.dumps({"comment": comment, "violated": violated, "issue": issue},
+                      ensure_ascii=False)
+
+
+def _run_rule(client, *, flag_code="TRUSTED_FLAG"):
+    return asyncio.run(
+        validate_rule(
+            "prompt",
+            {"Прием": {"GUID": "visit-1"}},
+            "rule",
+            flag_code=flag_code,
+            rule_id="rule-id",
+            client=client,  # type: ignore[arg-type]
+        )
     )
+
+
+def test_validate_rule_uses_cacheable_prompt_visit_rule_order() -> None:
+    client = _FakeClient(_verdict())
     visit = {"Прием": {"GUID": "visit-1"}, "Диагнозы": []}
 
     findings, tokens = asyncio.run(
@@ -143,85 +160,90 @@ def test_validate_rule_uses_cacheable_prompt_visit_rule_order() -> None:
         )
     )
 
-    assert [message["content"] for message in client.messages] == [
-        "common prompt",
-        '{\n  "Прием": {\n    "GUID": "visit-1"\n  },\n  "Диагнозы": []\n}',
-        "## Единственное проверяемое правило\n\n(MISSING_DIAGNOSIS) Должен быть диагноз.",
-    ]
-    assert client.response_model is _Findings
-    assert client.metadata == {
-        "card_guid": "visit-1",
-        "checker": "formal",
-        "rule_id": "diagnosis_required",
-        "flag_code": "MISSING_DIAGNOSIS",
-    }
-    assert findings == [
-        {
-            "flag": "MISSING_DIAGNOSIS",
-            "issue": "Нет диагноза",
-            "comment": "Диагнозы: []",
-        }
-    ]
+    roles = [m["role"] for m in client.messages]
+    assert roles == ["system", "user", "user"]
+    assert client.messages[0]["content"] == "common prompt"
+    assert "Диагнозы" in client.messages[1]["content"]
+    assert client.messages[2]["content"].endswith("(MISSING_DIAGNOSIS) Должен быть диагноз.")
+    assert findings == [{"flag": "MISSING_DIAGNOSIS", "issue": "Нет диагноза",
+                         "comment": "Диагнозы: []"}]
     assert tokens == 42
 
 
-def test_validate_rule_attaches_trusted_flag_and_keeps_findings_contract() -> None:
-    client = _FakeClient(
-        '[{"flag":"MODEL_FLAG","issue":"Нет обязательного поля","comment":"Факты"}]'
+def test_flag_comes_from_code_not_from_the_model() -> None:
+    """Вердикт не содержит флага вовсе: его нечем подменить."""
+    findings, _ = _run_rule(_FakeClient(_verdict(issue="Нет обязательного поля",
+                                                 comment="Факты")))
+    assert findings == [{"flag": "TRUSTED_FLAG", "issue": "Нет обязательного поля",
+                         "comment": "Факты"}]
+
+
+def test_one_rule_yields_at_most_one_flag() -> None:
+    """Схема не даёт вернуть несколько замечаний на одно правило.
+
+    Массив findings это позволял, и все замечания получали один и тот же флаг —
+    так один дефект попадал в отчёт несколько раз разными формулировками.
+    """
+    from LLM.validations import _RuleVerdict
+
+    schema = _RuleVerdict.model_json_schema()
+    assert schema["properties"]["issue"]["type"] == "string"
+    assert "array" not in json.dumps(schema)
+
+
+def test_applicability_is_not_asked_of_the_model() -> None:
+    """Какие правила относятся к приёму, решает get_rules по коду ЕГИСЗ и возрасту.
+
+    Отдельное поле «применимо ли» дублировало этот отбор и давало модели тихий
+    выключатель: выбранное кодом правило отменялось ответом, неотличимым в
+    отчёте от «нарушения нет».
+    """
+    from LLM.validations import _RuleVerdict
+
+    assert "condition_met" not in _RuleVerdict.model_json_schema()["properties"]
+    prompt = (ROOT / "src" / "LLM" / "prompts" / "formal_structure_validator.txt").read_text(
+        encoding="utf-8"
     )
-
-    findings, _ = asyncio.run(
-        validate_rule(
-            "prompt",
-            {"Прием": {}},
-            "rule",
-            flag_code="TRUSTED_FLAG",
-            rule_id="rule-id",
-            client=client,  # type: ignore[arg-type]
-        )
-    )
-
-    assert findings == [
-        {
-            "flag": "TRUSTED_FLAG",
-            "issue": "Нет обязательного поля",
-            "comment": "Факты",
-        }
-    ]
+    assert "condition_met" not in prompt
 
 
-def test_validate_rule_keeps_empty_findings_for_clean_rule() -> None:
-    client = _FakeClient("[]")
-
-    findings, _ = asyncio.run(
-        validate_rule(
-            "prompt",
-            {"Прием": {}},
-            "rule",
-            flag_code="TRUSTED_FLAG",
-            rule_id="rule-id",
-            client=client,  # type: ignore[arg-type]
-        )
-    )
-
+def test_clean_rule_yields_no_flag() -> None:
+    findings, _ = _run_rule(_FakeClient(_verdict(violated=False, issue="")))
     assert findings == []
 
 
-def test_validate_rule_keeps_real_missing_field_wording() -> None:
-    client = _FakeClient(
-        '[{"flag":"TRUSTED_FLAG","comment":"Длительность не указана.",'
-        '"issue":"Нарушение правила: отсутствует длительность лечения."}]'
-    )
+def test_violation_without_wording_is_not_a_finding() -> None:
+    """Флаг без текста замечания врачу бесполезен и в отчёт не идёт."""
+    findings, _ = _run_rule(_FakeClient(_verdict(issue="   ")))
+    assert findings == []
 
-    findings, _ = asyncio.run(
-        validate_rule(
-            "prompt",
-            {"Прием": {}},
-            "rule",
-            flag_code="TRUSTED_FLAG",
-            rule_id="rule-id",
-            client=client,  # type: ignore[arg-type]
-        )
-    )
 
-    assert [finding["flag"] for finding in findings] == ["TRUSTED_FLAG"]
+def test_verdict_survives_a_fenced_answer(caplog) -> None:
+    """vLLM оборачивает структурный ответ в ``` — разбор это переживает."""
+    with caplog.at_level("ERROR"):
+        findings, _ = _run_rule(_FakeClient("```json\n" + _verdict() + "\n```"))
+    assert findings == [{"flag": "TRUSTED_FLAG", "issue": "Нет диагноза",
+                         "comment": "Диагнозы: []"}]
+    assert "failed to parse" not in caplog.text
+
+
+def test_unparsable_verdict_yields_no_flag(caplog) -> None:
+    """Пропустить дефект дешевле, чем выдумать его врачу."""
+    with caplog.at_level("ERROR"):
+        findings, tokens = _run_rule(_FakeClient("не json вовсе"))
+    assert findings == []
+    assert tokens == 42
+    assert "failed to parse rule verdict" in caplog.text
+
+
+def test_evidence_is_generated_before_the_decisions() -> None:
+    """Порядок полей в схеме — часть контракта, а не оформление.
+
+    В json_schema он задаёт порядок генерации: модель сперва выписывает факты
+    из карты и только потом принимает решения.
+    """
+    from LLM.validations import _RuleVerdict
+
+    assert list(_RuleVerdict.model_json_schema()["properties"]) == [
+        "comment", "violated", "issue",
+    ]
