@@ -3,6 +3,7 @@ from datetime import date
 from grls import status as st
 from grls.format import (NOT_FOUND, MedicineLookup, format_medicine_lookup, format_record,
                          status_line)
+from grls.match import MatchKind
 from grls.parser import build_record
 from tests.grls_fixtures import sample_row
 from storage.models.dietary_supplement import DietarySupplement
@@ -16,7 +17,8 @@ def _rec(status, **over):
 
 def _lookup(**over):
     base = dict(query="амоксиклав", on=None, registry_date=date(2026, 8, 17),
-                inn_records=[], inn_counts={}, trade_records=[], supplements=[])
+                inn_records=[], inn_counts={}, inn_match=None, inn_valid_at_visit=0,
+                trade_records=[], trade_match=None, supplements=[])
     base.update(over)
     return MedicineLookup(**base)
 
@@ -60,6 +62,7 @@ def test_format_record_uses_derived_forms_and_caps():
 def test_inn_branch_counts_and_examples():
     recs = [_rec(st.STATUS_ACTIVE, trade_name="Амоксиклав"), _rec(st.STATUS_EXPIRED, trade_name="Аугментин")]
     text = format_medicine_lookup(_lookup(query="амоксициллин+клавулановая кислота", inn_records=recs,
+                                          inn_match=MatchKind.EXACT,
                                           inn_counts={st.STATUS_ACTIVE: 12, st.STATUS_EXPIRED: 3}))
     assert text.startswith("В ГРЛС «амоксициллин+клавулановая кислота» — это МНН.")
     assert "Регистраций: 15, из них действующих: 12" in text
@@ -70,6 +73,7 @@ def test_inn_branch_counts_and_examples():
 
 def test_inn_branch_warns_when_nothing_live():
     text = format_medicine_lookup(_lookup(inn_records=[_rec(st.STATUS_EXPIRED)],
+                                          inn_match=MatchKind.EXACT,
                                           inn_counts={st.STATUS_EXPIRED: 2}))
     assert "Внимание: все РУ по этому МНН истекли или аннулированы." in text
 
@@ -88,3 +92,59 @@ def test_supplement_and_not_found():
     assert "В ГРЛС лекарственный препарат не найден." in text
     assert "Найдены похожие записи БАД" in text and "Бак-Сет" in text
     assert format_medicine_lookup(_lookup()) == NOT_FOUND
+
+
+def test_inn_headline_states_the_match_level():
+    """«Это МНН» — утверждение, и оно разрешено только точному совпадению.
+
+    На пороге 0.6 «Преднизолон» и «Преднизон» неразличимы, а это разные
+    вещества: нечёткое попадание — похожесть строки, а не опознание.
+    """
+    recs = [_rec(st.STATUS_ACTIVE, inn_name="Метопролола сукцинат", trade_name="Беталок ЗОК")]
+    counts = {st.STATUS_ACTIVE: 4}
+
+    exact = format_medicine_lookup(_lookup(query="метопролола сукцинат", inn_records=recs,
+                                           inn_match=MatchKind.EXACT, inn_counts=counts))
+    assert exact.startswith("В ГРЛС «метопролола сукцинат» — это МНН.")
+
+    contains = format_medicine_lookup(_lookup(query="метопролол", inn_records=recs,
+                                              inn_match=MatchKind.CONTAINS, inn_counts=counts))
+    assert contains.startswith("В ГРЛС «метопролол» входит в МНН «Метопролола сукцинат».")
+
+    fuzzy = format_medicine_lookup(_lookup(query="преднизолон", inn_records=recs,
+                                           inn_match=MatchKind.FUZZY, inn_counts=counts))
+    assert "это МНН" not in fuzzy
+    assert "препарат не опознан" in fuzzy
+
+
+def test_fuzzy_trade_match_does_not_claim_a_find():
+    recs = [_rec(st.STATUS_ACTIVE)]
+    exact = format_medicine_lookup(_lookup(trade_records=recs, trade_match=MatchKind.EXACT))
+    assert exact.startswith("Найдено в ГРЛС (1;")
+
+    fuzzy = format_medicine_lookup(_lookup(trade_records=recs, trade_match=MatchKind.FUZZY))
+    assert fuzzy.startswith("Точного совпадения с торговым наименованием нет")
+    assert "препарат не опознан" in fuzzy.lower()
+
+
+def test_inn_branch_counts_live_at_the_visit_date():
+    """Ветка МНН считала действующие на сегодня, хотя визит был раньше.
+
+    Соседняя ветка про торговые наименования дату уважала всегда и печатала
+    «на дату визита действовало» — один форматтер, две ветки, разные ответы.
+    """
+    recs = [_rec(st.STATUS_EXPIRED, expires_at="31.12.2025")]
+    text = format_medicine_lookup(_lookup(
+        query="тестамол", on=VISIT, inn_records=recs, inn_match=MatchKind.EXACT,
+        inn_counts={st.STATUS_ACTIVE: 2, st.STATUS_EXPIRED: 5}, inn_valid_at_visit=5))
+
+    assert "действовавших на дату визита 2025-03-10: 7" in text
+    assert "действующих сейчас: 2" in text
+    assert "внимание" not in text.lower()
+
+
+def test_all_dead_at_the_visit_date_still_warns():
+    text = format_medicine_lookup(_lookup(
+        on=VISIT, inn_records=[_rec(st.STATUS_EXPIRED)], inn_match=MatchKind.EXACT,
+        inn_counts={st.STATUS_EXPIRED: 3}, inn_valid_at_visit=0))
+    assert "Внимание: все РУ по этому МНН истекли или аннулированы." in text

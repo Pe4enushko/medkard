@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from grls.match import FUZZY_THRESHOLD, MIN_CONTAINED_LEN, MatchKind, discriminator_tokens
 from grls.normalize import normalize_query
-from grls.status import STATUS_RANK
+from grls.status import LIVE_STATUSES, STATUS_RANK
 from storage.base import BaseStorage
 from storage.models.grls_record import GrlsImport, GrlsRecord
 
@@ -24,13 +26,40 @@ _INSERT_SQL = (
     + ") ON CONFLICT (row_hash) DO NOTHING"
 )
 _BATCH = 1000
-_INN_FUZZY_THRESHOLD = 0.6
-_SHORT_DISCRIMINATOR_MAX_LEN = 2
+_TRADE_FUZZY_THRESHOLD = 0.85
 
 _RANK_CASE = sql.SQL("CASE status {} ELSE 9 END").format(
     sql.SQL(" ").join(sql.SQL("WHEN {} THEN {}").format(sql.Literal(s), sql.Literal(r))
                       for s, r in STATUS_RANK.items()))
 _ORDER = sql.SQL("ORDER BY {} ASC, sim DESC, expires_at DESC NULLS FIRST").format(_RANK_CASE)
+
+# Различители обязаны совпасть ОТДЕЛЬНЫМ словом: сравнение по подстроке
+# пропускало «в1» внутрь «в12», то есть тиамин находился как цианокобаламин.
+_GUARD = sql.SQL(
+    "NOT EXISTS (SELECT 1 FROM unnest(%(tokens)s::text[]) AS token "
+    "            WHERE NOT (token = ANY(string_to_array({col}, ' '))))"
+)
+# Вхождение в обе стороны: врач пишет и короче реестра («Метопролол» при
+# «Метопролола сукцинат»), и длиннее («Левотироксин натрия» при «Левотироксин»).
+_CONTAINS = sql.SQL(
+    "((length(%(q)s) >= {min_len} AND position(%(q)s in {col}) > 0) "
+    " OR (length({col}) >= {min_len} AND position({col} in %(q)s) > 0))"
+)
+# `%%` дополнительно ограничен GUC pg_trgm.similarity_threshold (по умолчанию
+# 0.3) — действующая отсечка равна max(GUC, явного порога ниже).
+_FUZZY = sql.SQL("({col} %% %(q)s AND similarity({col}, %(q)s) >= %(fuzzy)s)")
+
+
+def _tier_predicate(column: sql.SQL, kind: MatchKind) -> sql.Composed:
+    """Условие одного уровня. Зеркало grls.match.classify — правьте вместе."""
+    if kind is MatchKind.EXACT:
+        return sql.SQL("{col} = %(q)s").format(col=column)
+    body = (_CONTAINS if kind is MatchKind.CONTAINS else _FUZZY).format(
+        col=column, min_len=sql.Literal(MIN_CONTAINED_LEN)
+    )
+    return sql.SQL("{body} AND {guard}").format(
+        body=body, guard=_GUARD.format(col=column)
+    )
 
 
 def _row_to_record(row: dict) -> GrlsRecord:
@@ -88,105 +117,78 @@ class GrlsStorage(BaseStorage):
                 )
         return inserted
 
-    async def search_by_trade_name(self, query: str, *, threshold: float = 0.85, limit: int = 6,
-                                   include_substances: bool = False) -> list[GrlsRecord]:
-        """Trigram search on trade_name, ordered by status rank then similarity.
-
-        Note: the `%` operator is also gated by the session's
-        `pg_trgm.similarity_threshold` GUC (default 0.3), ANDed with the
-        explicit `threshold` below — effective cut-off is max(GUC, threshold).
-        A `threshold` lower than the GUC will not be honored.
-        """
-        q = normalize_query(query)
-        if not q:
-            return []
-        stmt = sql.SQL(
-            "SELECT " + _SELECT_COLS + ", similarity(grls_norm(trade_name), %(q)s) AS sim "
-            "FROM grls_registry "
-            # `%%` also applies pg_trgm.similarity_threshold GUC (default 0.3), ANDed with the explicit filter below.
-            "WHERE grls_norm(trade_name) %% %(q)s "
-            "  AND similarity(grls_norm(trade_name), %(q)s) >= %(threshold)s "
-            "  AND (%(inc)s OR NOT is_substance) {} LIMIT %(limit)s"
-        ).format(_ORDER)
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(stmt, {"q": q, "threshold": threshold, "inc": include_substances, "limit": limit})
-            rows = await cur.fetchall()
-        return [_row_to_record(r) for r in rows]
-
     async def search_by_inn(self, query: str, *, limit: int = 20,
-                            include_substances: bool = False) -> list[GrlsRecord]:
-        """Exact-or-fuzzy match on inn_name, ordered by status rank then similarity.
+                            include_substances: bool = False,
+                            ) -> tuple[list[GrlsRecord], MatchKind | None]:
+        """Найти МНН по уровням: точное → вхождение → триграммы.
 
-        Note: the `%` operator is also gated by the session's
-        `pg_trgm.similarity_threshold` GUC (default 0.3), ANDed with the
-        module's `_INN_FUZZY_THRESHOLD` (0.6) — effective cut-off is
-        max(GUC, 0.6). If the GUC is raised above 0.6 on the stand, fuzzy
-        composite-INN matches silently stop returning rows.
+        Возвращает записи и уровень, на котором они нашлись. Уровень обязан
+        доехать до ответа: нечёткое совпадение — это «похоже», а не «это оно».
+        """
+        return await self._search(sql.SQL("grls_norm(inn_name)"), query,
+                                  limit=limit, include_substances=include_substances,
+                                  fuzzy=FUZZY_THRESHOLD)
+
+    async def search_by_trade_name(self, query: str, *, limit: int = 6,
+                                   include_substances: bool = False,
+                                   ) -> tuple[list[GrlsRecord], MatchKind | None]:
+        """То же по торговому наименованию; триграммный порог тут строже."""
+        return await self._search(sql.SQL("grls_norm(trade_name)"), query,
+                                  limit=limit, include_substances=include_substances,
+                                  fuzzy=_TRADE_FUZZY_THRESHOLD)
+
+    async def _search(self, column: sql.SQL, query: str, *, limit: int,
+                      include_substances: bool, fuzzy: float,
+                      ) -> tuple[list[GrlsRecord], MatchKind | None]:
+        q = normalize_query(query)
+        if not q:
+            return [], None
+        params = {"q": q, "fuzzy": fuzzy, "tokens": discriminator_tokens(q),
+                  "inc": include_substances, "limit": limit}
+        for kind in MatchKind:
+            stmt = sql.SQL(
+                "SELECT " + _SELECT_COLS + ", similarity({col}, %(q)s) AS sim "
+                "FROM grls_registry WHERE {pred} AND (%(inc)s OR NOT is_substance) "
+                "{order} LIMIT %(limit)s"
+            ).format(col=column, pred=_tier_predicate(column, kind), order=_ORDER)
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(stmt, params)
+                rows = await cur.fetchall()
+            if rows:
+                return [_row_to_record(r) for r in rows], kind
+        return [], None
+
+    async def inn_status_counts(self, query: str, *, kind: MatchKind, on: date | None = None,
+                                include_substances: bool = False) -> tuple[dict[str, int], int]:
+        """Регистрации по статусам ТЕМ ЖЕ условием, каким нашлись записи.
+
+        Иначе «Регистраций: N» разъедется с показанным списком: счёт по одному
+        правилу, список по другому.
+
+        Второе значение — сколько мёртвых сегодня РУ были действительны на дату
+        визита. Ветка торговых наименований это учитывала всегда
+        (`format_record(..., lookup.on)`), ветка МНН — нет.
         """
         q = normalize_query(query)
         if not q:
-            return []
-        required_tokens = _short_discriminator_tokens(q)
+            return {}, 0
+        column = sql.SQL("grls_norm(inn_name)")
         stmt = sql.SQL(
-            "SELECT " + _SELECT_COLS + ", similarity(grls_norm(inn_name), %(q)s) AS sim "
+            "SELECT status, count(*) AS n, "
+            "       count(*) FILTER (WHERE %(on)s IS NOT NULL "
+            "                          AND COALESCE(annulled_at, expires_at) >= %(on)s"
+            "                       ) AS valid_at_visit "
             "FROM grls_registry "
-            "WHERE (grls_norm(inn_name) = %(q)s "
-            # `%%` also applies pg_trgm.similarity_threshold GUC (default 0.3), ANDed with the explicit fuzzy filter below.
-            "       OR (grls_norm(inn_name) %% %(q)s AND similarity(grls_norm(inn_name), %(q)s) >= %(fuzzy)s)) "
-            "  AND NOT EXISTS ("
-            "      SELECT 1 FROM unnest(%(required_tokens)s::text[]) AS token "
-            "      WHERE position(token in grls_norm(inn_name)) = 0"
-            "  ) "
-            "  AND (%(inc)s OR NOT is_substance) {} LIMIT %(limit)s"
-        ).format(_ORDER)
+            "WHERE {pred} AND (%(inc)s OR NOT is_substance) GROUP BY status"
+        ).format(pred=_tier_predicate(column, kind))
         async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                stmt,
-                {
-                    "q": q,
-                    "fuzzy": _INN_FUZZY_THRESHOLD,
-                    "required_tokens": required_tokens,
-                    "inc": include_substances,
-                    "limit": limit,
-                },
-            )
+            cur = await conn.execute(stmt, {"q": q, "fuzzy": FUZZY_THRESHOLD,
+                                            "tokens": discriminator_tokens(q),
+                                            "on": on, "inc": include_substances})
             rows = await cur.fetchall()
-        return [_row_to_record(r) for r in rows]
-
-    async def inn_status_counts(self, query: str, *, include_substances: bool = False) -> dict[str, int]:
-        """Per-status row counts for an INN match (see search_by_inn for the matching rule).
-
-        Note: the `%` operator is also gated by the session's
-        `pg_trgm.similarity_threshold` GUC (default 0.3), ANDed with
-        `_INN_FUZZY_THRESHOLD` (0.6) — effective cut-off is max(GUC, 0.6).
-        """
-        q = normalize_query(query)
-        if not q:
-            return {}
-        required_tokens = _short_discriminator_tokens(q)
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                """
-                SELECT status, count(*) AS n FROM grls_registry
-                WHERE (grls_norm(inn_name) = %(q)s
-                       -- %% also applies pg_trgm.similarity_threshold GUC (default 0.3), ANDed with the explicit fuzzy filter below.
-                       OR (grls_norm(inn_name) %% %(q)s AND similarity(grls_norm(inn_name), %(q)s) >= %(fuzzy)s))
-                  AND NOT EXISTS (
-                      SELECT 1 FROM unnest(%(required_tokens)s::text[]) AS token
-                      WHERE position(token in grls_norm(inn_name)) = 0
-                  )
-                  AND (%(inc)s OR NOT is_substance)
-                GROUP BY status
-                """,
-                {
-                    "q": q,
-                    "fuzzy": _INN_FUZZY_THRESHOLD,
-                    "required_tokens": required_tokens,
-                    "inc": include_substances,
-                },
-            )
-            rows = await cur.fetchall()
-        return {r["status"]: r["n"] for r in rows}
+        counts = {r["status"]: r["n"] for r in rows}
+        revived = sum(r["valid_at_visit"] for r in rows if r["status"] not in LIVE_STATUSES)
+        return counts, revived
 
     async def latest_import(self) -> GrlsImport | None:
         async with self._pool.connection() as conn:

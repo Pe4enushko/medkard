@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
+from grls.match import MatchKind
 from grls.status import (LIVE_STATUSES, STATUS_ANNULLED, STATUS_CONFIRMING, STATUS_EXPIRED,
                          STATUS_FOREIGN_PACK, STATUS_SUSPENDED, StatusAtVisit, status_at)
 from storage.models.dietary_supplement import DietarySupplement
@@ -11,7 +12,6 @@ from storage.models.grls_record import GrlsRecord
 
 MAX_TRADE_RECORDS = 6
 MAX_LIST_ITEMS = 5
-TRADE_THRESHOLD = 0.85
 NOT_FOUND = "Препарат или БАД не найден в реестрах."
 
 _NOTES = {
@@ -28,7 +28,10 @@ class MedicineLookup:
     registry_date: date | None
     inn_records: list[GrlsRecord] = field(default_factory=list)
     inn_counts: dict[str, int] = field(default_factory=dict)
+    inn_match: MatchKind | None = None
+    inn_valid_at_visit: int = 0          # мёртвых сегодня РУ, действовавших на дату визита
     trade_records: list[GrlsRecord] = field(default_factory=list)
+    trade_match: MatchKind | None = None
     supplements: list[DietarySupplement] = field(default_factory=list)
 
 
@@ -95,24 +98,63 @@ def _registry_note(lookup: MedicineLookup) -> str:
     return f"реестр от {_iso(lookup.registry_date)}" if lookup.registry_date else "дата реестра неизвестна"
 
 
+def _inn_names(records: list[GrlsRecord]) -> list[str]:
+    names: list[str] = []
+    for r in records:
+        if r.inn_name and r.inn_name not in names:
+            names.append(r.inn_name)
+    return names
+
+
+def _trade_names(records: list[GrlsRecord]) -> list[str]:
+    names: list[str] = []
+    for r in records:
+        if r.trade_name not in names:
+            names.append(r.trade_name)
+    return names
+
+
+def _inn_headline(lookup: MedicineLookup) -> str:
+    """Утверждать «это МНН» можно только про точное совпадение.
+
+    Нечёткое совпадение — похожесть строки, а не опознание препарата: на
+    пороге 0.6 «Преднизолон» и «Преднизон» неразличимы, а это разные вещества.
+    """
+    found = ", ".join(_inn_names(lookup.inn_records)[:MAX_LIST_ITEMS]) or lookup.query
+    if lookup.inn_match is MatchKind.EXACT:
+        return f"В ГРЛС «{lookup.query}» — это МНН."
+    if lookup.inn_match is MatchKind.CONTAINS:
+        return f"В ГРЛС «{lookup.query}» входит в МНН «{found}»."
+    return (f"Точного совпадения с МНН нет. По написанию похоже на «{found}» — "
+            f"совпадение неточное, препарат не опознан.")
+
+
+def _live_line(lookup: MedicineLookup) -> str:
+    total = sum(lookup.inn_counts.values()) or len(lookup.inn_records)
+    live = sum(n for s, n in lookup.inn_counts.items() if s in LIVE_STATUSES)
+    if lookup.on and lookup.inn_valid_at_visit:
+        return (f"Регистраций: {total}, действовавших на дату визита {_iso(lookup.on)}: "
+                f"{live + lookup.inn_valid_at_visit} (действующих сейчас: {live}).")
+    return f"Регистраций: {total}, из них действующих: {live}."
+
+
 def format_medicine_lookup(lookup: MedicineLookup) -> str:
     if lookup.inn_records:
-        total = sum(lookup.inn_counts.values()) or len(lookup.inn_records)
         live = sum(n for s, n in lookup.inn_counts.items() if s in LIVE_STATUSES)
-        names: list[str] = []
-        for r in lookup.inn_records:
-            if r.trade_name not in names:
-                names.append(r.trade_name)
-        lines = [f"В ГРЛС «{lookup.query}» — это МНН. "
-                 f"Регистраций: {total}, из них действующих: {live}. "
-                 f"Примеры торговых наименований: {', '.join(names[:MAX_LIST_ITEMS])} "
+        lines = [f"{_inn_headline(lookup)} {_live_line(lookup)} "
+                 f"Примеры торговых наименований: "
+                 f"{', '.join(_trade_names(lookup.inn_records)[:MAX_LIST_ITEMS])} "
                  f"({_registry_note(lookup)})."]
-        if live == 0:
+        if live + lookup.inn_valid_at_visit == 0:
             lines.append("Внимание: все РУ по этому МНН истекли или аннулированы.")
         return "\n".join(lines)
     if lookup.trade_records:
         recs = lookup.trade_records[:MAX_TRADE_RECORDS]
-        lines = [f"Найдено в ГРЛС ({len(recs)}; {_registry_note(lookup)}):\n"]
+        head = f"Найдено в ГРЛС ({len(recs)}; {_registry_note(lookup)}):"
+        if lookup.trade_match is MatchKind.FUZZY:
+            head = (f"Точного совпадения с торговым наименованием нет; по написанию похожи "
+                    f"({len(recs)}; {_registry_note(lookup)}). Препарат не опознан:")
+        lines = [head + "\n"]
         lines += [f"--- {i} ---\n{format_record(r, lookup.on)}" for i, r in enumerate(recs, 1)]
         return "\n\n".join(lines)
     if lookup.supplements:
