@@ -18,6 +18,7 @@ _SUBSTANCE_FORM = "субстанция"
 # Keep in sync with SQL grls_norm() in migrations/028_grls_registry.sql.
 _DROP_CHARS = "\"«»„“”‘’'®™©~"
 _QUERY_TABLE = str.maketrans({"ё": "е", **{c: None for c in _DROP_CHARS}})
+_PLUS_RE = re.compile(r"\s*\+\s*")
 
 
 def clean_cell(value: object) -> str | None:
@@ -119,5 +120,12 @@ def row_hash(*, status, reg_number, registered_at, expires_at, annulled_at, hold
 
 
 def normalize_query(text: str) -> str:
-    """Python mirror of SQL grls_norm(): lower, drop quotes/®™©/~, ё→е, collapse spaces."""
-    return " ".join(text.lower().translate(_QUERY_TABLE).split())
+    """Python mirror of SQL grls_norm(): lower, drop quotes/®™©/~, ё→е, collapse
+    whitespace, убрать пробелы вокруг «+».
+
+    Про «+»: врач пишет «Амоксициллин + Клавулановая кислота», реестр хранит
+    «Амоксициллин+клавулановая кислота». Без общей формы это разные строки, и
+    составное МНН опознаётся как «похожее».
+    """
+    collapsed = " ".join(text.lower().translate(_QUERY_TABLE).split())
+    return _PLUS_RE.sub("+", collapsed)

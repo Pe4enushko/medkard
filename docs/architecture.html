@@ -1,0 +1,1725 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>medkard — архитектура</title>
+<style>
+:root{
+  --bg:#f5f6f8; --bg2:#ffffff; --fg:#1c2128; --muted:#5a6472;
+  --border:#d5dae1; --accent:#2f6df6; --accent2:#8957e5;
+  --actor:#2b8a5e; --actor-bg:#e5f4ec;
+  --comp:#2f6df6; --comp-bg:#e6efff;
+  --db:#b8860b; --db-bg:#fbf3dd;
+  --ext:#c2410c; --ext-bg:#fdecdf;
+  --llm:#8957e5; --llm-bg:#f0e8fd;
+  --edge:#8892a0; --edge-hl:#2f6df6; --flow:#f59e0b;
+  --code-bg:#eef1f4; --panel-bg:#ffffff; --shadow:rgba(20,30,50,.18);
+  --ok:#2b8a5e; --warn:#c2410c; --dead:#9aa3af;
+  --mono:"SF Mono",ui-monospace,"JetBrains Mono",Consolas,"Liberation Mono",Menlo,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+:root[data-theme="dark"]{
+  --bg:#0d1117; --bg2:#161b22; --fg:#e6edf3; --muted:#8b949e;
+  --border:#2b333d; --accent:#4c8dff; --accent2:#a371f7;
+  --actor:#3fb27f; --actor-bg:#12271d;
+  --comp:#4c8dff; --comp-bg:#0f1f38;
+  --db:#e0b341; --db-bg:#2a2410;
+  --ext:#f0854d; --ext-bg:#2e1a10;
+  --llm:#a371f7; --llm-bg:#221436;
+  --edge:#6a7482; --edge-hl:#4c8dff; --flow:#fbbf24;
+  --code-bg:#1c2330; --panel-bg:#161b22; --shadow:rgba(0,0,0,.5);
+  --ok:#3fb27f; --warn:#f0854d; --dead:#5a6472;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d1117; --bg2:#161b22; --fg:#e6edf3; --muted:#8b949e;
+    --border:#2b333d; --accent:#4c8dff; --accent2:#a371f7;
+    --actor:#3fb27f; --actor-bg:#12271d;
+    --comp:#4c8dff; --comp-bg:#0f1f38;
+    --db:#e0b341; --db-bg:#2a2410;
+    --ext:#f0854d; --ext-bg:#2e1a10;
+    --llm:#a371f7; --llm-bg:#221436;
+    --edge:#6a7482; --edge-hl:#4c8dff; --flow:#fbbf24;
+    --code-bg:#1c2330; --panel-bg:#161b22; --shadow:rgba(0,0,0,.5);
+    --ok:#3fb27f; --warn:#f0854d; --dead:#5a6472;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--fg); font-family:var(--sans);
+  font-size:15px; line-height:1.55; overflow-x:hidden;
+}
+code,.mono{font-family:var(--mono); font-size:.86em}
+a{color:var(--accent)}
+
+/* Header */
+header{
+  position:sticky; top:0; z-index:40; background:var(--bg2);
+  border-bottom:1px solid var(--border); box-shadow:0 1px 6px var(--shadow);
+}
+.hbar{display:flex; align-items:center; gap:16px; padding:10px 18px; flex-wrap:wrap}
+.brand{font-weight:700; font-size:18px; letter-spacing:.2px; display:flex; align-items:center; gap:9px}
+.brand .logo{width:24px;height:24px;flex:0 0 auto}
+.brand small{font-weight:400; color:var(--muted); font-size:12.5px}
+.spacer{flex:1}
+.tbtn{
+  background:var(--bg); color:var(--fg); border:1px solid var(--border);
+  border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px; font-family:var(--sans);
+}
+.tbtn:hover{border-color:var(--accent)}
+nav.tabs{display:flex; gap:4px; padding:0 12px 8px; flex-wrap:wrap}
+nav.tabs button{
+  background:transparent; border:none; border-bottom:2.5px solid transparent;
+  color:var(--muted); padding:8px 14px; cursor:pointer; font-size:14px;
+  font-family:var(--sans); border-radius:6px 6px 0 0; white-space:nowrap;
+}
+nav.tabs button:hover{color:var(--fg); background:var(--bg)}
+nav.tabs button.active{color:var(--accent); border-bottom-color:var(--accent); font-weight:600}
+
+/* Layout */
+main{max-width:1240px; margin:0 auto; padding:20px 18px 90px}
+section.tab{display:none; animation:fade .25s ease}
+section.tab.active{display:block}
+@keyframes fade{from{opacity:0; transform:translateY(6px)}to{opacity:1; transform:none}}
+h2.sec{font-size:22px; margin:4px 0 4px}
+.lede{color:var(--muted); margin:0 0 14px; max-width:80ch}
+h3.blk{font-size:16px; margin:26px 0 8px; padding-top:8px; border-top:1px dashed var(--border)}
+
+/* Diagram container */
+.diagram-wrap{
+  background:var(--bg2); border:1px solid var(--border); border-radius:12px;
+  padding:6px; overflow-x:auto; box-shadow:0 1px 4px var(--shadow); margin:8px 0;
+}
+.diagram-wrap svg{display:block; width:100%; min-width:720px; height:auto}
+
+/* Flow controls */
+.flowbar{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:10px 0 2px}
+.playbtn{
+  background:var(--accent); color:#fff; border:none; border-radius:8px;
+  padding:8px 16px; cursor:pointer; font-size:14px; font-weight:600; font-family:var(--sans);
+}
+.playbtn:hover{filter:brightness(1.08)}
+.playbtn.stop{background:var(--warn)}
+.flowcap{
+  flex:1; min-width:240px; background:var(--code-bg); border:1px solid var(--border);
+  border-radius:8px; padding:8px 12px; font-size:13.5px; min-height:20px; color:var(--fg);
+}
+.flowcap b{color:var(--accent)}
+.flowcap .step-n{
+  display:inline-block; background:var(--accent); color:#fff; border-radius:50%;
+  width:20px; height:20px; line-height:20px; text-align:center; font-size:12px;
+  margin-right:8px; font-weight:700;
+}
+
+/* SVG node styling */
+.node{cursor:pointer}
+.node .box{transition:filter .15s, stroke-width .15s}
+.node:hover .box{filter:brightness(1.05)}
+.node.dim{opacity:.32; transition:opacity .2s}
+.node.active .box{stroke-width:3.5px; filter:drop-shadow(0 0 7px var(--flow))}
+.node text{pointer-events:none; font-family:var(--sans)}
+.node .stereo{font-size:9.5px; fill:var(--muted); font-style:italic}
+.n-label{font-size:12.5px; font-weight:600}
+.n-sub{font-size:10px; fill:var(--muted)}
+.edge{fill:none; stroke:var(--edge); stroke-width:1.8px; transition:stroke .2s, stroke-width .2s}
+.edge.hl{stroke:var(--edge-hl); stroke-width:2.6px}
+.edge.active{stroke:var(--flow); stroke-width:3px; stroke-dasharray:7 5; animation:march .6s linear infinite}
+@keyframes march{to{stroke-dashoffset:-24}}
+.elabel{font-size:10px; fill:var(--muted); font-family:var(--mono)}
+.elabel.hl{fill:var(--edge-hl); font-weight:700}
+.flow-dot{fill:var(--flow); opacity:0; filter:drop-shadow(0 0 4px var(--flow))}
+.flow-dot.on{opacity:1}
+.sys-boundary{fill:none; stroke:var(--accent2); stroke-width:1.5px; stroke-dasharray:6 5; rx:14; opacity:.7}
+.sys-label{font-size:11px; fill:var(--accent2); font-weight:700; letter-spacing:.5px}
+
+/* Legend */
+.legend{display:flex; gap:14px; flex-wrap:wrap; margin:10px 0 4px; font-size:12.5px; color:var(--muted)}
+.legend .li{display:flex; align-items:center; gap:6px}
+.legend .sw{width:26px; height:15px; border-radius:4px; border:1.6px solid}
+.sw.actor{background:var(--actor-bg); border-color:var(--actor)}
+.sw.comp{background:var(--comp-bg); border-color:var(--comp)}
+.sw.db{background:var(--db-bg); border-color:var(--db); border-radius:4px 4px 7px 7px}
+.sw.ext{background:var(--ext-bg); border-color:var(--ext)}
+.sw.llm{background:var(--llm-bg); border-color:var(--llm)}
+.sw.flowsw{background:var(--flow); border-color:var(--flow)}
+
+/* Side panel */
+.overlay{
+  position:fixed; inset:0; background:rgba(10,15,25,.4); z-index:60;
+  opacity:0; pointer-events:none; transition:opacity .2s;
+}
+.overlay.open{opacity:1; pointer-events:auto}
+aside.panel{
+  position:fixed; top:0; right:0; height:100%; width:min(560px,94vw);
+  background:var(--panel-bg); border-left:1px solid var(--border); z-index:70;
+  transform:translateX(102%); transition:transform .28s cubic-bezier(.4,0,.2,1);
+  box-shadow:-6px 0 26px var(--shadow); display:flex; flex-direction:column;
+}
+aside.panel.open{transform:none}
+.panel-head{
+  display:flex; align-items:flex-start; gap:12px; padding:16px 18px 12px;
+  border-bottom:1px solid var(--border);
+}
+.panel-head .kind{
+  font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; font-weight:700;
+  padding:3px 8px; border-radius:20px; white-space:nowrap; margin-top:3px;
+}
+.kind.actor{background:var(--actor-bg); color:var(--actor)}
+.kind.comp{background:var(--comp-bg); color:var(--comp)}
+.kind.db{background:var(--db-bg); color:var(--db)}
+.kind.ext{background:var(--ext-bg); color:var(--ext)}
+.kind.llm{background:var(--llm-bg); color:var(--llm)}
+.panel-head h3{margin:0; font-size:18px; line-height:1.3; flex:1}
+.panel-head .close{
+  background:none; border:none; color:var(--muted); font-size:26px; cursor:pointer;
+  line-height:1; padding:0 4px;
+}
+.panel-head .close:hover{color:var(--fg)}
+.panel-body{padding:14px 18px 40px; overflow-y:auto; flex:1}
+.panel-body p{margin:8px 0}
+.panel-body h4{margin:16px 0 6px; font-size:13.5px; color:var(--accent); text-transform:uppercase; letter-spacing:.4px}
+.panel-body ul{margin:6px 0; padding-left:20px}
+.panel-body li{margin:4px 0}
+.panel-body code{background:var(--code-bg); padding:1.5px 5px; border-radius:5px; border:1px solid var(--border)}
+.panel-body .path{color:var(--accent2); font-family:var(--mono); font-size:12.5px}
+.panel-body pre{
+  background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+  padding:10px 12px; overflow-x:auto; font-family:var(--mono); font-size:12px; line-height:1.5;
+}
+.tag{display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px; margin:2px 4px 2px 0; font-weight:600}
+.tag.dead{background:var(--code-bg); color:var(--dead); border:1px dashed var(--dead)}
+.tag.warn{background:var(--ext-bg); color:var(--warn)}
+.tag.ok{background:var(--actor-bg); color:var(--ok)}
+.note{
+  border-left:3px solid var(--warn); background:var(--ext-bg); padding:8px 12px;
+  border-radius:0 8px 8px 0; margin:10px 0; font-size:13.5px;
+}
+.note.info{border-left-color:var(--accent); background:var(--comp-bg)}
+.hint{color:var(--muted); font-size:12.5px; margin:6px 0 0}
+.klass{font-family:var(--mono); font-size:12.5px; color:var(--comp); font-weight:600}
+
+/* Fact cards on overview */
+.factgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; margin:14px 0}
+.fact{background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:12px 14px}
+.fact h5{margin:0 0 5px; font-size:13.5px; color:var(--accent)}
+.fact p{margin:0; font-size:13px; color:var(--muted)}
+.dims{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin:12px 0}
+.dim{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--bg2); border-top:3px solid var(--accent)}
+.dim:nth-child(2){border-top-color:var(--accent2)}
+.dim:nth-child(3){border-top-color:var(--actor)}
+.dim h5{margin:0 0 4px; font-size:14px}
+.dim .num{font-size:11px; color:var(--muted); font-weight:700}
+.dim p{margin:4px 0 0; font-size:12.5px; color:var(--muted)}
+@media (max-width:600px){
+  .hbar{padding:8px 12px} main{padding:16px 10px 80px}
+  .brand{font-size:16px}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="hbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="3" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.6"/><path d="M7 12h3l1.5-3 2 6 1.5-3h2.5" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      medkard <small>архитектура · release · 2026-07-16</small>
+    </div>
+    <div class="spacer"></div>
+    <button class="tbtn" id="themeBtn" title="Переключить тему">🌓 Тема</button>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="overview" class="active">Обзор</button>
+    <button data-tab="pipeline">Пайплайн аудита</button>
+    <button data-tab="rag">RAG</button>
+    <button data-tab="llm">LLM-слой</button>
+    <button data-tab="db">База данных</button>
+    <button data-tab="api">API и интеграции</button>
+  </nav>
+</header>
+<main id="main">
+
+<!-- ============ ОБЗОР ============ -->
+<section class="tab active" id="tab-overview">
+  <h2 class="sec">Обзор системы</h2>
+  <p class="lede"><b>medkard</b> — система автоматического аудита амбулаторных карт (записей о визитах пациентов к врачу). Забирает записи из МИС на базе 1С, проверяет их LLM-моделью по <b>трём измерениям качества</b> и отдаёт результаты Excel-отчётами и HTTP-API. Визиты приходят из 1С <b>обезличенными</b>; LLM и эмбеддинги работают через self-hosted OpenAI-совместимый эндпоинт (vLLM); база — Postgres с pgvector.</p>
+
+  <div class="dims">
+    <div class="dim"><div class="num">ИЗМЕРЕНИЕ 1</div><h5>Формальная структура</h5><p>Присутствуют ли обязательные разделы записи (жалобы, анамнез, осмотр…) для типа визита и возраста. Правила из приказов МЗ 274н/203н в <code>rules.json</code>.</p></div>
+    <div class="dim"><div class="num">ИЗМЕРЕНИЕ 2</div><h5>Кодирование МКБ-10</h5><p>Соответствует ли выставленный код диагноза содержимому записи. Агент может предложить исправленный код → повторный аудит.</p></div>
+    <div class="dim"><div class="num">ИЗМЕРЕНИЕ 3</div><h5>Клинические рекомендации</h5><p>Соответствует ли запись (анамнез, обследование, лечение) клинрекам Минздрава для диагноза. Тексты клинреков (PDF) проиндексированы в RAG.</p></div>
+  </div>
+
+  <div class="legend">
+    <div class="li"><span class="sw actor"></span> актор</div>
+    <div class="li"><span class="sw comp"></span> компонент</div>
+    <div class="li"><span class="sw db"></span> база данных</div>
+    <div class="li"><span class="sw ext"></span> внешняя система</div>
+    <div class="li"><span class="sw llm"></span> LLM-эндпоинт</div>
+    <div class="li"><span class="sw flowsw"></span> активный поток данных</div>
+  </div>
+
+  <div class="flowbar">
+    <button class="playbtn" data-flow="overview">▶ Запустить поток</button>
+    <div class="flowcap" id="cap-overview">Клик по любому элементу открывает подробную документацию. Наведение подсвечивает связи. Кнопка проигрывает сквозной поток: визит из 1С → фильтр → аудит → done_cards → Excel/FTP.</div>
+  </div>
+
+  <div class="diagram-wrap">
+    <svg id="svg-overview" viewBox="0 0 1120 660" role="img" aria-label="Контекстная диаграмма medkard">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--edge)"/></marker>
+        <marker id="arrhl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--edge-hl)"/></marker>
+      </defs>
+
+      <!-- system boundary -->
+      <rect class="sys-boundary" x="250" y="42" width="620" height="596"/>
+      <text class="sys-label" x="264" y="62">MEDKARD (граница системы)</text>
+
+      <!-- EDGES (drawn first, under nodes) -->
+      <g id="edges-overview">
+        <path class="edge" id="ov-e1" data-endpoints="ov-onec ov-script" marker-end="url(#arr)" d="M210 140 H275"/>
+        <path class="edge" id="ov-e2" data-endpoints="ov-operator ov-script" marker-end="url(#arr)" d="M210 260 H255 V95 H273"/>
+        <path class="edge" id="ov-e3" data-endpoints="ov-script ov-pipeline" marker-end="url(#arr)" d="M400 120 V148"/>
+        <path class="edge" id="ov-e4" data-endpoints="ov-mz ov-ingest" marker-end="url(#arr)" d="M210 460 H288"/>
+        <path class="edge" id="ov-e5" data-endpoints="ov-ingest ov-db" marker-end="url(#arr)" d="M360 482 V518"/>
+        <path class="edge" id="ov-e6" data-endpoints="ov-pipeline ov-formal" marker-end="url(#arr)" d="M360 204 V238"/>
+        <path class="edge" id="ov-e7" data-endpoints="ov-pipeline ov-icd" marker-end="url(#arr)" d="M560 204 V238"/>
+        <path class="edge" id="ov-e8" data-endpoints="ov-pipeline ov-diag" marker-end="url(#arr)" d="M760 204 V238"/>
+        <path class="edge" id="ov-e9" data-endpoints="ov-diag ov-rag" marker-end="url(#arr)" d="M760 296 V338"/>
+        <path class="edge" id="ov-e10" data-endpoints="ov-rag ov-db" marker-end="url(#arr)" d="M670 366 H545 V518" />
+        <path class="edge" id="ov-e11" data-endpoints="ov-pipeline ov-db" marker-end="url(#arr)" d="M300 190 H286 V518" />
+        <path class="edge" id="ov-e12" data-endpoints="ov-db ov-excel" marker-end="url(#arr)" d="M540 545 H635 V488"/>
+        <path class="edge" id="ov-e13" data-endpoints="ov-excel ov-ftpup" marker-end="url(#arr)" d="M710 488 H760 V544 H745"/>
+        <path class="edge" id="ov-e14" data-endpoints="ov-db ov-api" marker-end="url(#arr)" d="M540 560 H825 V492"/>
+        <path class="edge" id="ov-e15" data-endpoints="ov-formal ov-llm" marker-end="url(#arr)" d="M455 250 H965 V240" opacity="0.55"/>
+        <path class="edge" id="ov-e16" data-endpoints="ov-icd ov-llm" marker-end="url(#arr)" d="M645 250 H980 V240" opacity="0.55"/>
+        <path class="edge" id="ov-e17" data-endpoints="ov-diag ov-llm" marker-end="url(#arr)" d="M850 268 H1000" opacity="0.7"/>
+        <path class="edge" id="ov-e18" data-endpoints="ov-ftpup ov-ftp" marker-end="url(#arr)" d="M785 570 H918"/>
+        <path class="edge" id="ov-e19" data-endpoints="ov-integrator ov-api" marker-end="url(#arr)" d="M918 458 H855" marker-start="url(#arr)"/>
+      </g>
+
+      <!-- NODES -->
+      <!-- 1C -->
+      <g class="node" data-detail="ov-onec">
+        <rect class="box" x="40" y="110" width="170" height="60" rx="9" fill="var(--actor-bg)" stroke="var(--actor)" stroke-width="1.8"/>
+        <circle cx="62" cy="132" r="6" fill="none" stroke="var(--actor)" stroke-width="1.6"/><path d="M56 152 q6 -10 12 0" fill="none" stroke="var(--actor)" stroke-width="1.6"/>
+        <text class="stereo" x="80" y="128">«actor»</text>
+        <text class="n-label" x="80" y="144" fill="var(--fg)">1С МИС</text>
+        <text class="n-sub" x="80" y="160">Alenka · MDS</text>
+      </g>
+      <!-- Operator -->
+      <g class="node" data-detail="ov-operator">
+        <rect class="box" x="40" y="230" width="170" height="60" rx="9" fill="var(--actor-bg)" stroke="var(--actor)" stroke-width="1.8"/>
+        <circle cx="62" cy="252" r="6" fill="none" stroke="var(--actor)" stroke-width="1.6"/><path d="M56 272 q6 -10 12 0" fill="none" stroke="var(--actor)" stroke-width="1.6"/>
+        <text class="stereo" x="80" y="248">«actor»</text>
+        <text class="n-label" x="80" y="264" fill="var(--fg)">Оператор / cron</text>
+        <text class="n-sub" x="80" y="280">по расписанию + вручную</text>
+      </g>
+      <!-- MZ -->
+      <g class="node" data-detail="ov-mz">
+        <rect class="box" x="40" y="430" width="170" height="60" rx="9" fill="var(--ext-bg)" stroke="var(--ext)" stroke-width="1.8"/>
+        <text class="stereo" x="56" y="450">«external»</text>
+        <text class="n-label" x="56" y="466" fill="var(--fg)">Минздрав</text>
+        <text class="n-sub" x="56" y="482">клинреки: PDF + manifest</text>
+      </g>
+      <!-- script -->
+      <g class="node" data-detail="ov-script">
+        <rect class="box" x="275" y="70" width="250" height="50" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/>
+        <text class="stereo" x="290" y="88">«component» · CLI</text>
+        <text class="n-label" x="290" y="106" fill="var(--fg)">audit-one-c-period.py</text>
+      </g>
+      <!-- pipeline -->
+      <g class="node" data-detail="ov-pipeline">
+        <rect class="box" x="275" y="150" width="580" height="54" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="2.2"/>
+        <text class="stereo" x="292" y="170">«component» · оркестратор</text>
+        <text class="n-label" x="292" y="190" fill="var(--fg)">AuditPipeline · src/audit/pipeline.py</text>
+      </g>
+      <!-- formal -->
+      <g class="node" data-detail="ov-formal">
+        <rect class="box" x="290" y="238" width="165" height="58" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/>
+        <text class="stereo" x="302" y="256">«component»</text>
+        <text class="n-label" x="302" y="272" fill="var(--fg)">FormalValidator</text>
+        <text class="n-sub" x="302" y="288">измерение 1 · 1 LLM</text>
+      </g>
+      <!-- icd -->
+      <g class="node" data-detail="ov-icd">
+        <rect class="box" x="480" y="238" width="165" height="58" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/>
+        <text class="stereo" x="492" y="256">«component»</text>
+        <text class="n-label" x="492" y="272" fill="var(--fg)">ICD-checker</text>
+        <text class="n-sub" x="492" y="288">измерение 2 · агент</text>
+      </g>
+      <!-- diagnosis -->
+      <g class="node" data-detail="ov-diag">
+        <rect class="box" x="670" y="238" width="180" height="58" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/>
+        <text class="stereo" x="682" y="256">«component»</text>
+        <text class="n-label" x="682" y="272" fill="var(--fg)">DiagnosisValidator</text>
+        <text class="n-sub" x="682" y="288">измерение 3 · 3 агента</text>
+      </g>
+      <!-- rag -->
+      <g class="node" data-detail="ov-rag">
+        <rect class="box" x="670" y="338" width="180" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/>
+        <text class="stereo" x="682" y="356">«component»</text>
+        <text class="n-label" x="682" y="372" fill="var(--fg)">RAG-ретривал</text>
+        <text class="n-sub" x="682" y="388">hybrid search</text>
+      </g>
+      <!-- ingest -->
+      <g class="node" data-detail="ov-ingest">
+        <rect class="box" x="288" y="430" width="200" height="52" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/>
+        <text class="stereo" x="300" y="448">«component» · офлайн</text>
+        <text class="n-label" x="300" y="466" fill="var(--fg)">reingest-pdfs.py</text>
+      </g>
+      <!-- excel -->
+      <g class="node" data-detail="ov-excel">
+        <rect class="box" x="635" y="432" width="150" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/>
+        <text class="stereo" x="647" y="450">«component»</text>
+        <text class="n-label" x="647" y="466" fill="var(--fg)">ExcelFormatter</text>
+        <text class="n-sub" x="647" y="482">БД → xlsx</text>
+      </g>
+      <!-- db cylinder -->
+      <g class="node" data-detail="ov-db">
+        <path class="box" d="M290 530 a125 15 0 0 0 250 0 v55 a125 15 0 0 1 -250 0 z" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/>
+        <ellipse class="box" cx="415" cy="530" rx="125" ry="15" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/>
+        <text class="n-label" x="415" y="556" fill="var(--fg)" text-anchor="middle">Postgres + pgvector</text>
+        <text class="n-sub" x="415" y="573" text-anchor="middle">docs · guidelines · done_cards · …</text>
+      </g>
+      <!-- self-hosted LLM -->
+      <g class="node" data-detail="ov-llm">
+        <rect class="box" x="1000" y="240" width="100" height="64" rx="9" fill="var(--llm-bg)" stroke="var(--llm)" stroke-width="1.8"/>
+        <text class="stereo" x="1012" y="258">«external»</text>
+        <text class="n-label" x="1012" y="274" fill="var(--fg)">self-hosted</text>
+        <text class="n-label" x="1012" y="290" fill="var(--fg)">LLM (vLLM)</text>
+      </g>
+      <!-- integrator -->
+      <g class="node" data-detail="ov-integrator">
+        <rect class="box" x="918" y="430" width="182" height="64" rx="9" fill="var(--actor-bg)" stroke="var(--actor)" stroke-width="1.8"/>
+        <circle cx="940" cy="452" r="6" fill="none" stroke="var(--actor)" stroke-width="1.6"/><path d="M934 472 q6 -10 12 0" fill="none" stroke="var(--actor)" stroke-width="1.6"/>
+        <text class="stereo" x="958" y="450">«actor»</text>
+        <text class="n-label" x="958" y="466" fill="var(--fg)">Интегрирующее</text>
+        <text class="n-label" x="958" y="482" fill="var(--fg)">приложение</text>
+      </g>
+      <!-- FTP -->
+      <g class="node" data-detail="ov-ftp">
+        <rect class="box" x="918" y="540" width="182" height="58" rx="9" fill="var(--ext-bg)" stroke="var(--ext)" stroke-width="1.8"/>
+        <text class="stereo" x="932" y="560">«external»</text>
+        <text class="n-label" x="932" y="576" fill="var(--fg)">FTP-сервер</text>
+        <text class="n-sub" x="932" y="591">приёмник xlsx</text>
+      </g>
+      <!-- ftp-upload comp inside -->
+      <g class="node" data-detail="ov-ftpup">
+        <rect class="box" x="640" y="544" width="145" height="52" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/>
+        <text class="stereo" x="652" y="562">«component»</text>
+        <text class="n-label" x="652" y="578" fill="var(--fg)">ftp.upload</text>
+      </g>
+      <!-- api component inside (real, placed left of ftp) -->
+      <g class="node" data-detail="ov-api">
+        <rect class="box" x="795" y="432" width="60" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/>
+        <text class="n-label" x="825" y="464" fill="var(--fg)" text-anchor="middle">pull</text>
+        <text class="n-sub" x="825" y="478" text-anchor="middle">API</text>
+      </g>
+
+      <!-- edge labels -->
+      <g id="elabels-overview">
+        <text class="elabel" x="214" y="132">JSON · Basic auth</text>
+        <text class="elabel" x="214" y="452">PDF+manifest</text>
+        <text class="elabel" x="548" y="512">read</text>
+        <text class="elabel" x="290" y="514">upsert done_cards</text>
+        <text class="elabel" x="700" y="330">HNSW cosine</text>
+        <text class="elabel" x="790" y="560">xlsx</text>
+        <text class="elabel" x="856" y="452">Bearer /cards/*</text>
+        <text class="elabel" x="960" y="258">JSON · structured</text>
+      </g>
+
+      <!-- flow dot -->
+      <circle class="flow-dot" id="dot-overview" r="6"/>
+    </svg>
+  </div>
+
+  <div class="factgrid">
+    <div class="fact"><h5>Дедупликация</h5><p><code>done_cards.card_guid</code> UNIQUE; перед прогоном грузятся все GUID организации, включая <b>ignored и broken</b> — они не переаудируются.</p></div>
+    <div class="fact"><h5>Два DB-стека</h5><p><b>psycopg3</b> — весь CRUD (<span class="path">storage/</span>); <b>asyncpg</b> — только векторный поиск (<span class="path">RAG/retrieval/vector_store.py</span>). Отдельные пулы к одной базе.</p></div>
+    <div class="fact"><h5>Excel пишет НЕ пайплайн</h5><p>Экспорт вынесен в <code>ExcelFormatter</code>, который читает готовые результаты из <code>done_cards</code>. Пайплайн только пишет в БД.</p></div>
+    <div class="fact"><h5>Возрастные пороги расходятся</h5><p>Formal считает ребёнком <code>age &lt; 18</code>, подбор клинреков/ICD — <code>age &le; 15</code>. Осознанно не выровнено.</p></div>
+    <div class="fact"><h5>ChineseDetector</h5><p>Некоторые модели галлюцинируют CJK-иероглифы в русском тексте; каждый issue проверяется регексом, «заражённые» чинятся отдельным LLM-вызовом.</p></div>
+    <div class="fact"><h5>Мультиарендность</h5><p>Организации Alenka/MDS; каждая <code>done_cards</code>-строка привязана к <code>organization_id</code>; все отчёты и API жёстко scoped по нему.</p></div>
+  </div>
+</section>
+
+<!-- ============ ПАЙПЛАЙН ============ -->
+<section class="tab" id="tab-pipeline">
+  <h2 class="sec">Пайплайн аудита одного прогона</h2>
+  <p class="lede"><code class="mono">AuditPipeline.run_batched()</code> оркестрирует аудит партии визитов: дедупликация, фильтрация, <b>три измерения</b>, запись в <code>done_cards</code>. Конкурентность — <code>asyncio.Semaphore(num_batches)</code> на визиты (внутри визита ещё до 3 параллельных diagnosis-агентов). Любое исключение в <code>_audit_visit</code> → <code>upsert_broken</code>, визит выпадает, батч продолжается. <b>Excel пайплайн не пишет.</b></p>
+
+  <div class="legend">
+    <div class="li"><span class="sw comp"></span> шаг обработки</div>
+    <div class="li"><span class="sw db"></span> запись в БД</div>
+    <div class="li"><span class="sw ext"></span> ветвление / ранний выход</div>
+    <div class="li"><span class="sw flowsw"></span> активный поток</div>
+  </div>
+
+  <div class="flowbar">
+    <button class="playbtn" data-flow="pipeline">▶ Запустить поток</button>
+    <div class="flowcap" id="cap-pipeline">Проигрывает судьбу одного прогона: фильтр → formal → icd → 3 чекера → done_cards → Excel/FTP, с ветвлениями ignored / нет-диагнозов / broken / suggested-код.</div>
+  </div>
+
+  <div class="diagram-wrap">
+    <svg id="svg-pipeline" viewBox="0 0 1120 700" role="img" aria-label="Диаграмма пайплайна аудита">
+      <defs>
+        <marker id="parr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--edge)"/></marker>
+      </defs>
+
+      <!-- diagnosis loop grouping box -->
+      <rect x="355" y="398" width="530" height="150" rx="12" fill="none" stroke="var(--accent2)" stroke-width="1.4" stroke-dasharray="6 5" opacity="0.7"/>
+      <text class="sys-label" x="368" y="416">ДЛЯ КАЖДОГО ДИАГНОЗА (измерение 3)</text>
+
+      <g id="edges-pipeline">
+        <path class="edge" id="pp-e1" data-endpoints="pp-filter pp-fetch" marker-end="url(#parr)" d="M190 118 H218"/>
+        <path class="edge" id="pp-e2" data-endpoints="pp-fetch pp-dedup" marker-end="url(#parr)" d="M390 118 H418"/>
+        <path class="edge" id="pp-e3" data-endpoints="pp-dedup pp-cardfilter" marker-end="url(#parr)" d="M590 118 H618"/>
+        <path class="edge" id="pp-e4" data-endpoints="pp-cardfilter pp-ignored" marker-end="url(#parr)" d="M710 146 V188"/>
+        <path class="edge" id="pp-e5" data-endpoints="pp-cardfilter pp-skipped" marker-end="url(#parr)" d="M800 118 H828"/>
+        <path class="edge" id="pp-e6" data-endpoints="pp-cardfilter pp-formal" marker-end="url(#parr)" d="M660 146 V220 H505 V298"/>
+        <path class="edge" id="pp-e7" data-endpoints="pp-formal pp-nodx" marker-end="url(#parr)" d="M420 326 H392"/>
+        <path class="edge" id="pp-e8" data-endpoints="pp-formal pp-icd" marker-end="url(#parr)" d="M590 326 H618"/>
+        <path class="edge" id="pp-e9" data-endpoints="pp-icd pp-clinrecs" marker-end="url(#parr)" d="M660 356 V420 H535"/>
+        <path class="edge" id="pp-e10" data-endpoints="pp-clinrecs pp-checkers" marker-end="url(#parr)" d="M540 465 H568"/>
+        <path class="edge" id="pp-e11" data-endpoints="pp-checkers pp-reaudit" marker-end="url(#parr)" d="M730 465 H748"/>
+        <path class="edge" id="pp-e11b" data-endpoints="pp-reaudit pp-checkers" marker-end="url(#parr)" d="M808 500 V520 H648 V502"/>
+        <path class="edge" id="pp-e12" data-endpoints="pp-checkers pp-upsert" marker-end="url(#parr)" d="M620 548 V574"/>
+        <path class="edge" id="pp-e13" data-endpoints="pp-upsert pp-broken" marker-end="url(#parr)" d="M470 602 H392"/>
+        <path class="edge" id="pp-e14" data-endpoints="pp-upsert pp-excel" marker-end="url(#parr)" d="M620 602 H658"/>
+        <path class="edge" id="pp-e15" data-endpoints="pp-excel pp-ftp" marker-end="url(#parr)" d="M810 602 H848"/>
+      </g>
+
+      <g class="node" data-detail="pp-filter"><rect class="box" x="30" y="90" width="160" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-sub" x="42" y="108">шаг 1</text><text class="n-label" x="42" y="126" fill="var(--fg)">CardFilter</text><text class="n-sub" x="42" y="140">из filterconfig.json</text></g>
+      <g class="node" data-detail="pp-fetch"><rect class="box" x="220" y="90" width="170" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-sub" x="232" y="108">шаг 2</text><text class="n-label" x="232" y="126" fill="var(--fg)">Кеш / 1С</text><text class="n-sub" x="232" y="140">data_snapshots · JSON</text></g>
+      <g class="node" data-detail="pp-dedup"><rect class="box" x="420" y="90" width="170" height="56" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-sub" x="432" y="108">шаг 3</text><text class="n-label" x="432" y="126" fill="var(--fg)">get_done_guids</text><text class="n-sub" x="432" y="140">дедуп (+ignored/broken)</text></g>
+      <g class="node" data-detail="pp-cardfilter"><rect class="box" x="620" y="90" width="180" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-sub" x="632" y="108">шаг 4</text><text class="n-label" x="632" y="126" fill="var(--fg)">CardFilter.filter()</text><text class="n-sub" x="632" y="140">pending / ignored / skip</text></g>
+      <g class="node" data-detail="pp-ignored"><rect class="box" x="620" y="188" width="180" height="48" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-label" x="632" y="210" fill="var(--fg)">upsert_ignored</text><text class="n-sub" x="632" y="226">ignored=TRUE</text></g>
+      <g class="node" data-detail="pp-skipped"><rect class="box" x="828" y="96" width="130" height="44" rx="8" fill="var(--ext-bg)" stroke="var(--ext)" stroke-width="1.6"/><text class="n-label" x="840" y="116" fill="var(--fg)">skipped_done</text><text class="n-sub" x="840" y="131">пропуск</text></g>
+
+      <g class="node" data-detail="pp-formal"><rect class="box" x="420" y="298" width="170" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-sub" x="432" y="316">шаг 5 · измерение 1</text><text class="n-label" x="432" y="334" fill="var(--fg)">FormalValidator</text><text class="n-sub" x="432" y="348">1 LLM-вызов</text></g>
+      <g class="node" data-detail="pp-nodx"><rect class="box" x="222" y="298" width="170" height="56" rx="8" fill="var(--ext-bg)" stroke="var(--ext)" stroke-width="1.6"/><text class="n-sub" x="234" y="316">шаг 6 · ветвление</text><text class="n-label" x="234" y="334" fill="var(--fg)">Нет диагнозов</text><text class="n-sub" x="234" y="348">только formal → выход</text></g>
+      <g class="node" data-detail="pp-icd"><rect class="box" x="620" y="298" width="180" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-sub" x="632" y="316">шаг 7 · измерение 2</text><text class="n-label" x="632" y="334" fill="var(--fg)">check_icd_codes</text><text class="n-sub" x="632" y="348">1 ReAct-агент на визит</text></g>
+
+      <g class="node" data-detail="pp-clinrecs"><rect class="box" x="385" y="440" width="155" height="52" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-label" x="397" y="462" fill="var(--fg)">ClinicRecs</text><text class="n-sub" x="397" y="478">МКБ → file_id</text></g>
+      <g class="node" data-detail="pp-checkers"><rect class="box" x="568" y="430" width="162" height="72" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="2"/><text class="n-label" x="580" y="452" fill="var(--fg)">3 чекера ∥</text><text class="n-sub" x="580" y="468">anamnesis</text><text class="n-sub" x="580" y="481">inspection</text><text class="n-sub" x="580" y="494">treatment</text></g>
+      <g class="node" data-detail="pp-reaudit"><rect class="box" x="748" y="440" width="120" height="52" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-label" x="760" y="462" fill="var(--fg)">re-audit</text><text class="n-sub" x="760" y="478">suggested_code</text></g>
+
+      <g class="node" data-detail="pp-upsert"><rect class="box" x="470" y="574" width="150" height="56" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-sub" x="482" y="592">шаг 10</text><text class="n-label" x="482" y="610" fill="var(--fg)">upsert done_card</text><text class="n-sub" x="482" y="624">3 JSONB + токены</text></g>
+      <g class="node" data-detail="pp-broken"><rect class="box" x="222" y="574" width="170" height="56" rx="8" fill="var(--ext-bg)" stroke="var(--ext)" stroke-width="1.6"/><text class="n-sub" x="234" y="592">исключение</text><text class="n-label" x="234" y="610" fill="var(--fg)">upsert_broken</text><text class="n-sub" x="234" y="624">broken + stacktrace</text></g>
+      <g class="node" data-detail="pp-excel"><rect class="box" x="658" y="574" width="152" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-sub" x="670" y="592">шаг 11</text><text class="n-label" x="670" y="610" fill="var(--fg)">ExcelFormatter</text><text class="n-sub" x="670" y="624">read БД → 9 колонок</text></g>
+      <g class="node" data-detail="pp-ftp"><rect class="box" x="848" y="574" width="130" height="56" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-sub" x="860" y="592">шаг 12 · опц.</text><text class="n-label" x="860" y="610" fill="var(--fg)">FTP</text><text class="n-sub" x="860" y="624">/ГГГГ/ММ/</text></g>
+
+      <g id="elabels-pipeline">
+        <text class="elabel" x="666" y="176">ignored</text>
+        <text class="elabel" x="620" y="212">pending</text>
+      </g>
+      <circle class="flow-dot" id="dot-pipeline" r="6"/>
+    </svg>
+  </div>
+
+  <h3 class="blk">Ветвления судьбы визита</h3>
+  <div class="factgrid">
+    <div class="fact"><h5>GUID уже в done_guids</h5><p>skip (<code>skipped_done</code>), не аудируется. Карты без GUID аудируются всегда (дедуп невозможен, warning).</p></div>
+    <div class="fact"><h5>Срезан стратегией</h5><p>Icd/KDL/Analysis → <code>upsert_ignored</code> (<code>ignored=TRUE</code>), не аудируется.</p></div>
+    <div class="fact"><h5>Нет диагнозов</h5><p>Только formal, ранний возврат — измерения 2 и 3 не запускаются.</p></div>
+    <div class="fact"><h5>Гайдлайн не найден</h5><p><code>guideline_file_id=None</code>, чекеры не запускаются: «Клинические рекомендации для данного кода не найдены».</p></div>
+    <div class="fact"><h5>Диагноз в IcdFilter</h5><p>Заглушка-issue «Диагноз пропущен фильтром МКБ» вместо клин-рек аудита.</p></div>
+    <div class="fact"><h5>Исключение</h5><p><code>upsert_broken</code>, выпадает из результата. <span class="tag warn">broken → в get_done_guids</span> — не переаудируется без ручного вмешательства.</p></div>
+  </div>
+</section>
+
+<!-- ============ RAG ============ -->
+<section class="tab" id="tab-rag">
+  <h2 class="sec">RAG: ингест клинреков и ретривал</h2>
+  <p class="lede">Тексты клинических рекомендаций (PDF) индексируются офлайн в таблицу <code>docs</code>, а в рантайме тулзы агентов ищут по ним гибридным поиском. <span class="tag warn">Reverse HyDE удалён</span> — никаких гипотетических вопросов и трёх колонок эмбеддингов; на чанк <b>один</b> эмбеддинг contextual text <code>"[секция]\nтело"</code>, колонка <code>embedding VECTOR(1024)</code> с HNSW-индексом.</p>
+
+  <div class="legend">
+    <div class="li"><span class="sw comp"></span> шаг обработки</div>
+    <div class="li"><span class="sw db"></span> таблица / хранилище</div>
+    <div class="li"><span class="sw ext"></span> входные файлы</div>
+    <div class="li"><span class="sw flowsw"></span> активный поток</div>
+  </div>
+
+  <h3 class="blk">Ингест (офлайн · <span class="path">scripts/reingest-pdfs.py</span>)</h3>
+  <div class="flowbar">
+    <button class="playbtn" data-flow="ragin">▶ Запустить поток</button>
+    <div class="flowcap" id="cap-ragin">PDF → PyMuPDF (TOC/таблицы) → нарезка на секции и чанки → эмбеддинг contextual text → docs + guidelines + ingest_runs.</div>
+  </div>
+  <div class="diagram-wrap">
+    <svg id="svg-ragin" viewBox="0 0 1120 300" role="img" aria-label="Диаграмма ингеста RAG">
+      <defs><marker id="rarr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--edge)"/></marker></defs>
+      <g id="edges-ragin">
+        <path class="edge" id="ri-e1" data-endpoints="ri-src ri-parse" marker-end="url(#rarr)" d="M185 145 H213"/>
+        <path class="edge" id="ri-e2" data-endpoints="ri-parse ri-chunk" marker-end="url(#rarr)" d="M383 145 H418"/>
+        <path class="edge" id="ri-e3" data-endpoints="ri-chunk ri-embed" marker-end="url(#rarr)" d="M593 145 H628"/>
+        <path class="edge" id="ri-e4" data-endpoints="ri-embed ri-docs" marker-end="url(#rarr)" d="M813 145 H852"/>
+      </g>
+      <g class="node" data-detail="ri-src"><rect class="box" x="30" y="108" width="155" height="74" rx="8" fill="var(--ext-bg)" stroke="var(--ext)" stroke-width="1.8"/><text class="stereo" x="42" y="128">входные файлы</text><text class="n-label" x="42" y="146" fill="var(--fg)">manifest.csv</text><text class="n-label" x="42" y="162" fill="var(--fg)">pdfs/&lt;ID&gt;.pdf</text></g>
+      <g class="node" data-detail="ri-parse"><rect class="box" x="213" y="108" width="170" height="74" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="225" y="128">PyMuPDF + tabula</text><text class="n-label" x="225" y="146" fill="var(--fg)">TOC → скип титула</text><text class="n-sub" x="225" y="162">детект таблиц (bbox)</text></g>
+      <g class="node" data-detail="ri-chunk"><rect class="box" x="418" y="108" width="175" height="74" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="430" y="128">нарезка</text><text class="n-label" x="430" y="146" fill="var(--fg)">секции → чанки</text><text class="n-sub" x="430" y="162">≤2000 симв · overlap 200</text></g>
+      <g class="node" data-detail="ri-embed"><rect class="box" x="628" y="108" width="185" height="74" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="2"/><text class="stereo" x="640" y="128">ключевой приём</text><text class="n-label" x="640" y="146" fill="var(--fg)">embed("[секция]</text><text class="n-label" x="640" y="162" fill="var(--fg)">\n тело")</text></g>
+      <g class="node" data-detail="ri-docs">
+        <path class="box" d="M852 130 a108 14 0 0 0 216 0 v42 a108 14 0 0 1 -216 0 z" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/>
+        <ellipse class="box" cx="960" cy="130" rx="108" ry="14" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/>
+        <text class="n-label" x="960" y="152" fill="var(--fg)" text-anchor="middle">docs · guidelines</text>
+        <text class="n-sub" x="960" y="168" text-anchor="middle">+ ingest_runs</text>
+      </g>
+      <circle class="flow-dot" id="dot-ragin" r="6"/>
+    </svg>
+  </div>
+  <p class="hint">Ключевой нюанс: эмбеддится текст <b>с префиксом секции</b>, а в <code>docs.chunk</code> пишется тело <b>без</b> префикса. Одноуровневые заголовки (<code>3 Лечение</code>) регуляркой ингеста не ловятся — их добирает subtree-фильтр ретривала.</p>
+
+  <h3 class="blk">Ретривал (рантайм · тулзы агентов)</h3>
+  <div class="flowbar">
+    <button class="playbtn" data-flow="ragout">▶ Запустить поток</button>
+    <div class="flowcap" id="cap-ragout">Запрос агента → embed → векторный HNSW-этап (file_id + секционный subtree-фильтр, кандидатов top_k×6) → BM25 по кандидатам → RRF k=50 → топ-4.</div>
+  </div>
+  <div class="diagram-wrap">
+    <svg id="svg-ragout" viewBox="0 0 1120 360" role="img" aria-label="Диаграмма ретривала RAG">
+      <defs><marker id="rarr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--edge)"/></marker></defs>
+      <g id="edges-ragout">
+        <path class="edge" id="ro-e1" data-endpoints="ro-query ro-embed" marker-end="url(#rarr2)" d="M180 118 H208"/>
+        <path class="edge" id="ro-e2" data-endpoints="ro-embed ro-vector" marker-end="url(#rarr2)" d="M348 118 H398"/>
+        <path class="edge" id="ro-e2b" data-endpoints="ro-vector ro-db" marker-end="url(#rarr2)" d="M490 162 V228"/>
+        <path class="edge" id="ro-e3" data-endpoints="ro-vector ro-bm25" marker-end="url(#rarr2)" d="M600 118 H628"/>
+        <path class="edge" id="ro-e4" data-endpoints="ro-bm25 ro-rrf" marker-end="url(#rarr2)" d="M790 118 H828"/>
+        <path class="edge" id="ro-e5" data-endpoints="ro-rrf ro-top" marker-end="url(#rarr2)" d="M895 150 V200 H735 V236"/>
+        <path class="edge" id="ro-e6" data-endpoints="ro-top ro-query" marker-end="url(#rarr2)" d="M630 266 H120 V150"/>
+      </g>
+      <g class="node" data-detail="ro-query"><rect class="box" x="30" y="86" width="150" height="64" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="42" y="106">от чекер-агента</text><text class="n-label" x="42" y="124" fill="var(--fg)">запрос</text><text class="n-sub" x="42" y="139">"обследования при J06.9?"</text></g>
+      <g class="node" data-detail="ro-embed"><rect class="box" x="208" y="86" width="140" height="64" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="n-label" x="220" y="118" fill="var(--fg)">embed(query)</text><text class="n-sub" x="220" y="134">Qwen3 · 1024</text></g>
+      <g class="node" data-detail="ro-vector"><rect class="box" x="398" y="76" width="202" height="84" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="2"/><text class="stereo" x="410" y="96">этап 1</text><text class="n-label" x="410" y="114" fill="var(--fg)">HNSW cosine</text><text class="n-sub" x="410" y="130">WHERE file_id + subtree</text><text class="n-sub" x="410" y="145">кандидатов = top_k×6</text></g>
+      <g class="node" data-detail="ro-bm25"><rect class="box" x="628" y="86" width="162" height="64" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="640" y="106">этап 2</text><text class="n-label" x="640" y="124" fill="var(--fg)">BM25 (Python)</text><text class="n-sub" x="640" y="139">natasha · по кандидатам</text></g>
+      <g class="node" data-detail="ro-rrf"><rect class="box" x="828" y="86" width="134" height="64" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="840" y="106">этап 3</text><text class="n-label" x="840" y="124" fill="var(--fg)">RRF слияние</text><text class="n-sub" x="840" y="139">Σ 1/(50+rank)</text></g>
+      <g class="node" data-detail="ro-top"><rect class="box" x="628" y="236" width="210" height="58" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="2"/><text class="n-label" x="640" y="260" fill="var(--fg)">топ-4 → _format_chunk</text><text class="n-sub" x="640" y="277">заголовок клинрека + МКБ + тело → агенту</text></g>
+      <g class="node" data-detail="ro-db">
+        <path class="box" d="M400 244 a90 12 0 0 0 180 0 v36 a90 12 0 0 1 -180 0 z" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/>
+        <ellipse class="box" cx="490" cy="244" rx="90" ry="12" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/>
+        <text class="n-label" x="490" y="264" fill="var(--fg)" text-anchor="middle">docs (asyncpg)</text>
+      </g>
+      <circle class="flow-dot" id="dot-ragout" r="6"/>
+    </svg>
+  </div>
+
+  <h3 class="blk">Секционный subtree-фильтр и scoped-поиск</h3>
+  <div class="factgrid">
+    <div class="fact"><h5>Subtree-фильтр</h5><p>Старый плоский <code>LIKE '%kw%'</code> расширен на номерное поддерево: <code>3 Лечение</code> → паттерны <code>['3 %','3.%']</code>. Запрос про лечение достаёт и подсекции без слова «лечен» (<code>3.4 Обезболивание</code>).</p></div>
+    <div class="fact"><h5>Scoped-функции</h5><p><code>search_anamnesis</code> → keyword <code>жалоб</code>; <code>search_inspection</code> → <code>исследов</code>; <code>search_treatment</code> → <code>лечен</code>. <code>TARGETED_TOP_K=4</code>, кандидатов 24.</p></div>
+    <div class="fact"><h5>BM25 в Python</h5><p>Полнотекстового tsvector-индекса по <code>docs</code> <b>нет</b>. BM25Okapi по кандидатам векторного этапа → lexical recall ограничен выдачей HNSW.</p></div>
+    <div class="fact"><h5>Эмбеддинги</h5><p>Провайдеры: <code>openai</code> (деф.), <code>st</code> (sentence-transformers), <code>fastembed</code> (ONNX Qwen3-0.6B). <code>EMBEDDING_DIM</code> деф. 1024, зашит литералом в SQL.</p></div>
+    <div class="fact"><h5>Исключение литературы</h5><p>Чанки с «Список литературы» исключаются WHERE-фильтром на векторном этапе; порогов по distance/rrf_score нет — просто топ-N.</p></div>
+    <div class="fact"><h5>Reingest planner</h5><p>Классификация work-list: <code>full</code> (нет записи / sha256 PDF изменился) · <code>metadata_only</code> · <code>skip</code>. <code>full</code>-реингест = атомарный <code>replace_by_file_id</code>.</p></div>
+  </div>
+</section>
+
+<!-- ============ LLM ============ -->
+<section class="tab" id="tab-llm">
+  <h2 class="sec">LLM-слой: карта вызовов на визит</h2>
+  <p class="lede">Все LLM-вызовы проекта идут через единый <code class="mono">LLMClient</code> (<span class="path">src/LLM/client.py</span>) — ретраи (до 3 попыток, температура +0.15 за попытку, cap 1.0), structured output (<code>response_format=json_schema</code>) и агентный враппер. Прямых вызовов <code>AsyncOpenAI</code> в аудиторском коде нет. Итог на визит: <b>2 + 3N + 3k</b> вызовов (N — диагнозов, k — с предложенным кодом), плюс decider/picker и chinese-repair. <span class="tag dead">VisitClassifier не вызывается</span> — тип визита определяет regex-эвристика.</p>
+
+  <div class="legend">
+    <div class="li"><span class="sw llm"></span> LLM-вызов / эндпоинт</div>
+    <div class="li"><span class="sw comp"></span> LLMClient (хаб)</div>
+    <div class="li"><span class="sw flowsw"></span> активный вызов</div>
+  </div>
+
+  <div class="flowbar">
+    <button class="playbtn" data-flow="llm">▶ Запустить поток</button>
+    <div class="flowcap" id="cap-llm">Последовательность вызовов на визит: formal (1) → ICD-агент (1) → decider/picker (0-1) → 3 чекера ∥ → re-audit suggested (+3) → chinese-repair (0..M). Все через LLMClient → self-hosted эндпоинт.</div>
+  </div>
+
+  <div class="diagram-wrap">
+    <svg id="svg-llm" viewBox="0 0 1120 540" role="img" aria-label="Карта LLM-вызовов">
+      <defs><marker id="larr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--edge)"/></marker></defs>
+      <g id="edges-llm">
+        <path class="edge" id="lm-e1" data-endpoints="lm-formal lm-client" marker-end="url(#larr)" d="M262 69 H340 V232 H418"/>
+        <path class="edge" id="lm-e2" data-endpoints="lm-icd lm-client" marker-end="url(#larr)" d="M262 149 H360 V248 H418"/>
+        <path class="edge" id="lm-e3" data-endpoints="lm-picker lm-client" marker-end="url(#larr)" d="M262 229 H400 V262 H418"/>
+        <path class="edge" id="lm-e4" data-endpoints="lm-checkers lm-client" marker-end="url(#larr)" d="M262 315 H400 V282 H418"/>
+        <path class="edge" id="lm-e5" data-endpoints="lm-reaudit lm-client" marker-end="url(#larr)" d="M262 409 H360 V300 H418"/>
+        <path class="edge" id="lm-e6" data-endpoints="lm-chinese lm-client" marker-end="url(#larr)" d="M262 489 H340 V314 H418"/>
+        <path class="edge" id="lm-e7" data-endpoints="lm-client lm-endpoint" marker-end="url(#larr)" d="M620 275 H818" marker-start="url(#larr)"/>
+      </g>
+      <g class="node" data-detail="lm-formal"><rect class="box" x="40" y="42" width="222" height="54" rx="8" fill="var(--llm-bg)" stroke="var(--llm)" stroke-width="1.8"/><text class="n-label" x="52" y="64" fill="var(--fg)">1× validate_visit</text><text class="n-sub" x="52" y="82">formal · temp 0.1 · _Findings</text></g>
+      <g class="node" data-detail="lm-icd"><rect class="box" x="40" y="122" width="222" height="54" rx="8" fill="var(--llm-bg)" stroke="var(--llm)" stroke-width="1.8"/><text class="n-label" x="52" y="144" fill="var(--fg)">1× check_icd_codes</text><text class="n-sub" x="52" y="162">ReAct-агент на визит · ≤25 шагов</text></g>
+      <g class="node" data-detail="lm-picker"><rect class="box" x="40" y="202" width="222" height="54" rx="8" fill="var(--llm-bg)" stroke="var(--llm)" stroke-width="1.8"/><text class="n-label" x="52" y="224" fill="var(--fg)">0-1× decide / prefix-pick</text><text class="n-sub" x="52" y="242">temp 0.4 · при неоднозначном коде</text></g>
+      <g class="node" data-detail="lm-checkers"><rect class="box" x="40" y="278" width="222" height="74" rx="8" fill="var(--llm-bg)" stroke="var(--llm)" stroke-width="2"/><text class="n-label" x="52" y="300" fill="var(--fg)">3× чекер-агенты ∥</text><text class="n-sub" x="52" y="318">anamnesis · inspection · treatment</text><text class="n-sub" x="52" y="334">ReAct ≤25 · structured CheckerOutput</text></g>
+      <g class="node" data-detail="lm-reaudit"><rect class="box" x="40" y="382" width="222" height="54" rx="8" fill="var(--llm-bg)" stroke="var(--llm)" stroke-width="1.8"/><text class="n-label" x="52" y="404" fill="var(--fg)">3k× re-audit suggested</text><text class="n-sub" x="52" y="422">ещё проход на предложенный код</text></g>
+      <g class="node" data-detail="lm-chinese"><rect class="box" x="40" y="462" width="222" height="54" rx="8" fill="var(--llm-bg)" stroke="var(--llm)" stroke-width="1.8"/><text class="n-label" x="52" y="484" fill="var(--fg)">0..M× repair_issue</text><text class="n-sub" x="52" y="502">ChineseDetector · temp 0.3 · CJK</text></g>
+      <g class="node" data-detail="lm-client"><rect class="box" x="418" y="205" width="202" height="140" rx="10" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="2.4"/><text class="stereo" x="432" y="228">«component» · хаб</text><text class="n-label" x="432" y="248" fill="var(--fg)">LLMClient</text><text class="n-sub" x="432" y="268">call() / call_agent()</text><text class="n-sub" x="432" y="286">ретраи + temp-бамп</text><text class="n-sub" x="432" y="304">structured output</text><text class="n-sub" x="432" y="322">_sum_agent_tokens</text></g>
+      <g class="node" data-detail="lm-endpoint"><rect class="box" x="818" y="230" width="222" height="90" rx="10" fill="var(--llm-bg)" stroke="var(--llm)" stroke-width="1.8"/><text class="stereo" x="830" y="252">«external»</text><text class="n-label" x="830" y="272" fill="var(--fg)">self-hosted LLM</text><text class="n-sub" x="830" y="290">OPENAI_BASE_URL · vLLM</text><text class="n-sub" x="830" y="306">OpenAI-совместимый API</text></g>
+      <circle class="flow-dot" id="dot-llm" r="6"/>
+    </svg>
+  </div>
+
+  <h3 class="blk">Тулзы агентов и промпты</h3>
+  <div class="factgrid">
+    <div class="fact"><h5>anamnesis-чекер</h5><p>Тулзы <code>SearchAnamnesisTool</code> + <code>SearchGuidelineTool</code> (file_id забит при создании). Промпт <code>anamnesis_checker.txt</code>.</p></div>
+    <div class="fact"><h5>inspection-чекер</h5><p>Тулзы <code>SearchInspectionTool</code> + <code>SearchGuidelineTool</code>. Промпт <code>inspection_checker.txt</code>.</p></div>
+    <div class="fact"><h5>treatment-чекер</h5><p><code>SearchTreatmentTool</code> + <code>SearchGuidelineTool</code> + <b><code>SearchMedicineTool</code></b> (реестры лекарств/БАД). Промпт <code>treatment_checker.txt</code>.</p></div>
+    <div class="fact"><h5>ICD-checker</h5><p>Тулзы <code>get_guideline_structure</code> + <code>read_guideline_section</code>; file_id агент выбирает сам из таблицы гайдлайнов. Structured <code>_IcdCheckerOutput</code>, порог уверенности ≥8.</p></div>
+    <div class="fact"><h5>Расхождение дефолтов модели</h5><p><code>base.py</code> → <code>openai/gpt-oss-20b</code>, <code>rag_agent.py</code> → <code>gpt-4o-mini</code>. При заданном <code>LLM_MODEL</code> оба берут одно значение.</p></div>
+    <div class="fact"><h5>Мёртвый код слоя</h5><p><span class="tag dead">visit_classifier.py</span> <span class="tag dead">rag_agent.retrieve</span> <span class="tag dead">tools.get_tools_for()</span> <span class="tag dead">ChineseDetector.check_*</span> <span class="tag dead">diagnosis_validator.txt</span> <span class="tag dead">instructor в requirements</span></p></div>
+  </div>
+</section>
+
+<!-- ============ БД ============ -->
+<section class="tab" id="tab-db">
+  <h2 class="sec">База данных: схема и связи</h2>
+  <p class="lede">Postgres + pgvector. Два стека к одной базе: <b>psycopg3</b> (весь CRUD, <span class="path">storage/</span>) и <b>asyncpg</b> (только векторный поиск по <code>docs</code>). Миграции 001–024 через <code>migrate.sh</code> с леджером <code>schema_migrations</code>. <span class="tag warn">Два файла 013</span> применяются оба в алфавитном порядке.</p>
+
+  <div class="legend">
+    <div class="li"><span class="sw db"></span> таблица</div>
+    <div class="li"><span class="sw comp"></span> вьюха</div>
+    <div class="li"><span class="sw flowsw"></span> подсветка FK</div>
+  </div>
+
+  <div class="flowbar">
+    <button class="playbtn" data-flow="db">▶ Показать FK-связи</button>
+    <div class="flowcap" id="cap-db">Проигрывает связи по внешним ключам: organizations → done_cards, organizations ↔ api_keys (M:M), guidelines → docs, guidelines ↔ ingest_runs, done_cards → вьюхи.</div>
+  </div>
+
+  <div class="diagram-wrap">
+    <svg id="svg-db" viewBox="0 0 1120 560" role="img" aria-label="ER-диаграмма БД">
+      <defs><marker id="darr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--edge)"/></marker></defs>
+      <g id="edges-db">
+        <path class="edge" id="db-e1" data-endpoints="db-orgs db-donecards" marker-end="url(#darr)" d="M240 96 H300 V150 H358"/>
+        <path class="edge" id="db-e2" data-endpoints="db-orgs db-apikeyorgs" marker-end="url(#darr)" d="M140 132 V338"/>
+        <path class="edge" id="db-e3" data-endpoints="db-apikeys db-apikeyorgs" marker-end="url(#darr)" d="M140 292 V338"/>
+        <path class="edge" id="db-e4" data-endpoints="db-guidelines db-docs" marker-end="url(#darr)" d="M876 142 V208"/>
+        <path class="edge" id="db-e5" data-endpoints="db-guidelines db-ingest" marker-end="url(#darr)" d="M760 106 H720 V360 H758" stroke-dasharray="5 4"/>
+        <path class="edge" id="db-e6" data-endpoints="db-donecards db-metrics" marker-end="url(#darr)" d="M478 222 V298"/>
+        <path class="edge" id="db-e7" data-endpoints="db-donecards db-broken" marker-end="url(#darr)" d="M420 222 V398"/>
+        <path class="edge" id="db-e8" data-endpoints="db-donecards db-chinese" marker-end="url(#darr)" d="M540 222 V398"/>
+      </g>
+
+      <g class="node" data-detail="db-orgs"><rect class="box" x="40" y="60" width="200" height="72" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-label" x="52" y="82" fill="var(--fg)">organizations</text><text class="n-sub" x="52" y="99">id PK · name · created_at</text><text class="n-sub" x="52" y="115">миграция 008</text></g>
+      <g class="node" data-detail="db-apikeys"><rect class="box" x="40" y="210" width="200" height="82" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-label" x="52" y="232" fill="var(--fg)">api_keys</text><text class="n-sub" x="52" y="249">key_hash SHA-256 · key_prefix</text><text class="n-sub" x="52" y="265">revoked_at · partial-unique</text><text class="n-sub" x="52" y="281">015→016→017</text></g>
+      <g class="node" data-detail="db-apikeyorgs"><rect class="box" x="40" y="338" width="200" height="72" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-label" x="52" y="360" fill="var(--fg)">api_key_organizations</text><text class="n-sub" x="52" y="377">M:M PK · ON DELETE CASCADE</text><text class="n-sub" x="52" y="393">018</text></g>
+
+      <g class="node" data-detail="db-donecards"><rect class="box" x="358" y="80" width="240" height="142" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="2.4"/><text class="n-label" x="372" y="102" fill="var(--fg)">done_cards</text><text class="n-sub" x="372" y="119">card_guid UNIQUE · card_data</text><text class="n-sub" x="372" y="135">formal/diag/icd_check JSONB</text><text class="n-sub" x="372" y="151">token_count · time_ms</text><text class="n-sub" x="372" y="167">ignored · broken+stacktrace</text><text class="n-sub" x="372" y="183">organization_id FK · updated_at</text><text class="n-sub" x="372" y="203" fill="var(--db)">004·005·009·012·013×2·014·022</text></g>
+
+      <g class="node" data-detail="db-metrics"><rect class="box" x="358" y="298" width="240" height="66" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.6" stroke-dasharray="5 4"/><text class="stereo" x="372" y="316">«view»</text><text class="n-label" x="372" y="334" fill="var(--fg)">done_cards_metrics</text><text class="n-sub" x="372" y="350">wall_clock_sec (merge интервалов)</text></g>
+      <g class="node" data-detail="db-broken"><rect class="box" x="358" y="398" width="115" height="60" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.6" stroke-dasharray="5 4"/><text class="stereo" x="370" y="416">«view»</text><text class="n-label" x="370" y="434" fill="var(--fg)">broken_cards</text><text class="n-sub" x="370" y="450">012</text></g>
+      <g class="node" data-detail="db-chinese"><rect class="box" x="483" y="398" width="115" height="60" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.6" stroke-dasharray="5 4"/><text class="stereo" x="495" y="416">«view»</text><text class="n-label" x="495" y="434" fill="var(--fg)">done_cards_chinese</text><text class="n-sub" x="495" y="450">006 · DBA-tool</text></g>
+
+      <g class="node" data-detail="db-guidelines"><rect class="box" x="760" y="60" width="232" height="82" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-label" x="772" y="82" fill="var(--fg)">guidelines</text><text class="n-sub" x="772" y="99">file_id PK · name · mkb[] (GIN)</text><text class="n-sub" x="772" y="115">age_category[] · developer · …</text><text class="n-sub" x="772" y="131">019 · зеркало manifest.csv</text></g>
+      <g class="node" data-detail="db-docs"><rect class="box" x="760" y="208" width="232" height="92" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-label" x="772" y="230" fill="var(--fg)">docs</text><text class="n-sub" x="772" y="247">id PK · file_id FK · chunk</text><text class="n-sub" x="772" y="263">metadata JSONB · embedding VECTOR(1024)</text><text class="n-sub" x="772" y="279">HNSW cosine · GIN</text><text class="n-sub" x="772" y="295">002·003·020·021·024</text></g>
+      <g class="node" data-detail="db-ingest"><rect class="box" x="760" y="360" width="232" height="64" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-label" x="772" y="382" fill="var(--fg)">ingest_runs</text><text class="n-sub" x="772" y="399">file_id PK · status · content_hash</text><text class="n-sub" x="772" y="415">error · updated_at · 023</text></g>
+      <g class="node" data-detail="db-drugs"><rect class="box" x="760" y="450" width="112" height="70" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-label" x="772" y="472" fill="var(--fg)">drugs</text><text class="n-sub" x="772" y="489">trade/inn</text><text class="n-sub" x="772" y="505">pg_trgm · 010</text></g>
+      <g class="node" data-detail="db-supplements"><rect class="box" x="880" y="450" width="112" height="70" rx="8" fill="var(--db-bg)" stroke="var(--db)" stroke-width="1.8"/><text class="n-label" x="892" y="472" fill="var(--fg)">dietary_</text><text class="n-label" x="892" y="488" fill="var(--fg)">supplements</text><text class="n-sub" x="892" y="505">tsvector · 010</text></g>
+
+      <g id="elabels-db">
+        <text class="elabel" x="252" y="112">1─* org_id</text>
+        <text class="elabel" x="148" y="230">M:M</text>
+        <text class="elabel" x="884" y="180">1─* file_id (FK 021)</text>
+        <text class="elabel" x="640" y="352">1─1 без FK</text>
+      </g>
+      <circle class="flow-dot" id="dot-db" r="6"/>
+    </svg>
+  </div>
+
+  <h3 class="blk">Storage-классы (<span class="path">src/storage/</span>, psycopg3, паттерн BaseStorage)</h3>
+  <div class="factgrid">
+    <div class="fact"><h5>DoneCardsStorage</h5><p>Все пути — upsert по <code>card_guid</code>: <code>upsert</code> (форсит ignored=FALSE, снимает broken), <code>upsert_ignored</code>, <code>upsert_broken</code>, <code>get_done_guids</code> (включая ignored/broken, NULL-safe).</p></div>
+    <div class="fact"><h5>DocsStorage</h5><p>Свой пул (max 3) + pgvector. <code>replace_by_file_id</code> атомарно, <code>get</code> с LEFT JOIN guidelines (денормализует name/mkb/age_category в <code>Doc</code>).</p></div>
+    <div class="fact"><h5>GuidelinesStorage</h5><p><code>find_by_code</code> (<code>= ANY(mkb)</code>), <code>find_by_prefix</code> (unnest+split_part), <code>all</code>, <code>upsert_many</code>.</p></div>
+    <div class="fact"><h5>ApiKeysStorage</h5><p><code>create_key</code>, <code>revoke_key</code>, <code>is_key_authorized_for_org</code>, <code>is_valid_key</code>. Сырой ключ не хранится — только SHA-256.</p></div>
+    <div class="fact"><h5>drugs / dietary_supplements</h5><p>Изолированные справочники для <code>search_medicine</code>: триграммы (drugs) + full-text tsvector (supplements). Наполнение <code>seed-reference-lists.sh</code>.</p></div>
+    <div class="fact"><h5>Модели — датаклассы</h5><p>Не ORM. <code>result.py</code>: <code>Result</code>, <code>FormalStructureResult</code>, <code>DiagnosisResult</code>, <code>IcdCodingIssue</code> — сериализуются в JSONB-колонки done_cards.</p></div>
+  </div>
+</section>
+
+<!-- ============ API ============ -->
+<section class="tab" id="tab-api">
+  <h2 class="sec">API и интеграции</h2>
+  <p class="lede">Два контура выдачи, оба читают одну таблицу <code>done_cards</code> и общий парсер <code>reporting/result_parser.py</code>. <b>Push:</b> 1С → аудит → done_cards → Excel на диске → FTP. <b>Pull:</b> внешнее интегрирующее приложение по HTTP тянет из done_cards (Bearer-ключ + <code>?org=</code>), трафик — приватный WireGuard-туннель. Браузерного контура нет (нет CORS).</p>
+
+  <div class="legend">
+    <div class="li"><span class="sw actor"></span> актор</div>
+    <div class="li"><span class="sw comp"></span> компонент</div>
+    <div class="li"><span class="sw db"></span> БД</div>
+    <div class="li"><span class="sw ext"></span> внешняя система</div>
+    <div class="li"><span class="sw flowsw"></span> активный поток</div>
+  </div>
+
+  <div class="flowbar">
+    <button class="playbtn" data-flow="api">▶ Запустить поток</button>
+    <div class="flowcap" id="cap-api">Push: 1С → аудит → done_cards → Excel → FTP. Pull: интегратор → аутентификация (401/403/404) → роутер /cards/* → done_cards → xlsx-байты обратно.</div>
+  </div>
+
+  <div class="diagram-wrap">
+    <svg id="svg-api" viewBox="0 0 1120 560" role="img" aria-label="Диаграмма API и интеграций">
+      <defs><marker id="aarr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--edge)"/></marker></defs>
+      <text class="sys-label" x="30" y="30">PUSH-КОНТУР</text>
+      <text class="sys-label" x="30" y="410">PULL-КОНТУР (WireGuard)</text>
+      <g id="edges-api">
+        <path class="edge" id="ap-e1" data-endpoints="ap-1c ap-audit" marker-end="url(#aarr)" d="M180 80 H218"/>
+        <path class="edge" id="ap-e2" data-endpoints="ap-audit ap-donecards" marker-end="url(#aarr)" d="M390 80 H430 V236"/>
+        <path class="edge" id="ap-e3" data-endpoints="ap-donecards ap-excel" marker-end="url(#aarr)" d="M670 260 H700 V80 H728"/>
+        <path class="edge" id="ap-e4" data-endpoints="ap-excel ap-ftpup" marker-end="url(#aarr)" d="M805 110 V148"/>
+        <path class="edge" id="ap-e5" data-endpoints="ap-ftpup ap-ftpsrv" marker-end="url(#aarr)" d="M880 174 H905 V92 H928"/>
+        <path class="edge" id="ap-e6" data-endpoints="ap-integrator ap-auth" marker-end="url(#aarr)" d="M180 473 H208"/>
+        <path class="edge" id="ap-e7" data-endpoints="ap-auth ap-router" marker-end="url(#aarr)" d="M390 473 H438"/>
+        <path class="edge" id="ap-e8" data-endpoints="ap-router ap-donecards" marker-end="url(#aarr)" d="M545 440 V334"/>
+        <path class="edge" id="ap-e9" data-endpoints="ap-router ap-formatter" marker-end="url(#aarr)" d="M650 466 H718"/>
+        <path class="edge" id="ap-e10" data-endpoints="ap-formatter ap-integrator" marker-end="url(#aarr)" d="M810 506 V538 H105 V510"/>
+      </g>
+
+      <g class="node" data-detail="ap-1c"><rect class="box" x="30" y="50" width="150" height="60" rx="9" fill="var(--actor-bg)" stroke="var(--actor)" stroke-width="1.8"/><text class="stereo" x="42" y="70">«actor»</text><text class="n-label" x="42" y="88" fill="var(--fg)">1С МИС</text><text class="n-sub" x="42" y="103">Alenka · MDS</text></g>
+      <g class="node" data-detail="ap-audit"><rect class="box" x="220" y="50" width="170" height="60" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="232" y="70">«component»</text><text class="n-label" x="232" y="88" fill="var(--fg)">audit-one-c-period</text><text class="n-sub" x="232" y="103">AuditPipeline</text></g>
+      <g class="node" data-detail="ap-excel"><rect class="box" x="728" y="50" width="150" height="60" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="740" y="70">«component»</text><text class="n-label" x="740" y="88" fill="var(--fg)">ExcelFormatter</text><text class="n-sub" x="740" y="103">export_period</text></g>
+      <g class="node" data-detail="ap-ftpup"><rect class="box" x="728" y="148" width="150" height="52" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="740" y="166">«component»</text><text class="n-label" x="740" y="184" fill="var(--fg)">ftp.upload</text></g>
+      <g class="node" data-detail="ap-ftpsrv"><rect class="box" x="928" y="52" width="160" height="60" rx="9" fill="var(--ext-bg)" stroke="var(--ext)" stroke-width="1.8"/><text class="stereo" x="940" y="72">«external»</text><text class="n-label" x="940" y="90" fill="var(--fg)">FTP-сервер</text><text class="n-sub" x="940" y="105">/ГГГГ/ММ/</text></g>
+
+      <g class="node" data-detail="ap-donecards">
+        <path class="box" d="M430 250 a120 14 0 0 0 240 0 v70 a120 14 0 0 1 -240 0 z" fill="var(--db-bg)" stroke="var(--db)" stroke-width="2"/>
+        <ellipse class="box" cx="550" cy="250" rx="120" ry="14" fill="var(--db-bg)" stroke="var(--db)" stroke-width="2"/>
+        <text class="n-label" x="550" y="278" fill="var(--fg)" text-anchor="middle">done_cards</text>
+        <text class="n-sub" x="550" y="296" text-anchor="middle">scoped organization_id</text>
+        <text class="n-sub" x="550" y="311" text-anchor="middle">ignored=FALSE AND broken=FALSE</text>
+      </g>
+
+      <g class="node" data-detail="ap-integrator"><rect class="box" x="30" y="440" width="150" height="66" rx="9" fill="var(--actor-bg)" stroke="var(--actor)" stroke-width="1.8"/><text class="stereo" x="42" y="460">«actor»</text><text class="n-label" x="42" y="478" fill="var(--fg)">Интегрирующее</text><text class="n-label" x="42" y="493" fill="var(--fg)">приложение</text></g>
+      <g class="node" data-detail="ap-auth"><rect class="box" x="210" y="430" width="180" height="86" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="222" y="450">«component» · auth.py</text><text class="n-label" x="222" y="468" fill="var(--fg)">Bearer + ?org</text><text class="n-sub" x="222" y="485">SHA-256 · scope M:M</text><text class="n-sub" x="222" y="501">401 плохой · 403 чужая</text><text class="n-sub" x="222" y="513">404 неизвестная org</text></g>
+      <g class="node" data-detail="ap-router"><rect class="box" x="440" y="440" width="210" height="66" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="452" y="460">«component» · routes/cards.py</text><text class="n-label" x="452" y="478" fill="var(--fg)">/cards/check|pull|export</text><text class="n-sub" x="452" y="495">FastAPI · префикс /cards</text></g>
+      <g class="node" data-detail="ap-formatter"><rect class="box" x="720" y="440" width="180" height="66" rx="8" fill="var(--comp-bg)" stroke="var(--comp)" stroke-width="1.8"/><text class="stereo" x="732" y="460">«component»</text><text class="n-label" x="732" y="478" fill="var(--fg)">ApiFormatter</text><text class="n-sub" x="732" y="495">make_xlsx · export · check</text></g>
+
+      <g id="elabels-api">
+        <text class="elabel" x="185" y="72">JSON · Basic</text>
+        <text class="elabel" x="398" y="176">xlsx</text>
+        <text class="elabel" x="185" y="465">Bearer + ?org</text>
+        <text class="elabel" x="450" y="392">SQL scoped</text>
+        <text class="elabel" x="330" y="533">xlsx / сырые строки (pull/export)</text>
+      </g>
+      <circle class="flow-dot" id="dot-api" r="6"/>
+    </svg>
+  </div>
+
+  <h3 class="blk">Эндпоинты (<span class="path">src/api/routes/cards.py</span>, префикс <code>/cards</code>)</h3>
+  <div class="factgrid">
+    <div class="fact"><h5>GET /cards/check</h5><p><code>date</code> (ISO), <code>org</code> → <code>{date, count}</code> — число аудированных (не ignored/broken) карт за дату визита. 401/403/404 auth, 422.</p></div>
+    <div class="fact"><h5>GET /cards/pull</h5><p><code>date</code>, <code>org</code> → xlsx-байты (тот же layout, что дисковые отчёты). <span class="tag warn">404 если карт нет</span>; 401/403/422.</p></div>
+    <div class="fact"><h5>GET /cards/export</h5><p><code>since</code>, <code>limit</code> (0=∞), <code>cursor</code> (OFFSET), <code>org</code> → сырые строки для реплики engine. Сортировка по <code>updated_at, card_guid</code>; контракт закреплён тестом (token_count/org_id исключены).</p></div>
+    <div class="fact"><h5>Аутентификация</h5><p>Ключ <code>medkard_&lt;token_urlsafe(32)&gt;</code>, в БД только SHA-256 + prefix. Резолв org case-insensitive → 404; scope не совпал → 403; невалиден/отозван → 401.</p></div>
+    <div class="fact"><h5>Деплой Docker</h5><p>python:3.11-slim + uv + <code>requirements-api.txt</code> (без LLM/RAG). CMD <code>uvicorn api.app:create_app --factory</code>. В образе <b>только pull-API</b> — аудит/ингест/миграции вне контейнера.</p></div>
+    <div class="fact"><h5>WireGuard</h5><p>Порт <code>${WG_BIND_IP}:8000:8000</code> — только на WG-интерфейсе. Postgres внешний. <span class="tag warn">POSTGRES_HOST=localhost из контейнера не достучится</span> до хостового Postgres.</p></div>
+  </div>
+  <div class="note info"><b>ЕГИСЗ:</b> документ <code>egisz-mis-upload-guide.md</code> — доменное исследование (РЭМД/СЭМД/СМЭВ), <b>не спецификация</b> этого API. Реализована приватная pull-интеграция поверх WireGuard, минуя контур ЕГИСЗ.</div>
+</section>
+
+</main>
+
+<div class="overlay" id="overlay"></div>
+<aside class="panel" id="panel" aria-hidden="true">
+  <div class="panel-head">
+    <span class="kind comp" id="pKind">компонент</span>
+    <h3 id="pTitle">—</h3>
+    <button class="close" id="pClose" title="Закрыть">×</button>
+  </div>
+  <div class="panel-body" id="pBody"></div>
+</aside>
+
+<script>
+"use strict";
+
+/* ---------- DETAILS registry ---------- */
+const DETAILS = {};
+function D(id, kind, title, body){ DETAILS[id] = {kind, title, body}; }
+/*DETAILS-HERE*/
+
+/* ===== ОБЗОР ===== */
+D('ov-onec','actor','1С МИС (источник визитов)',`
+<p>Медицинская информационная система на базе 1С — <b>источник записей о визитах</b>. Две организации: <b>Alenka</b> и <b>MDS</b>.</p>
+<h4>Как отдаёт данные</h4>
+<ul>
+<li>HTTP GET c <b>Basic-auth</b> (<code>base64(login:password)</code>), <code>Accept: application/json</code>.</li>
+<li>Query-параметры <code>datebegin</code>/<code>dateend</code> в формате <code>DD.MM.YYYY</code>.</li>
+<li>Ответ — JSON <code>{"appointments":[…]}</code> или голый список. Данные приходят <b>обезличенными</b>.</li>
+</ul>
+<h4>Клиенты</h4>
+<p><span class="path">src/integrations/one_c.py</span>: <span class="klass">OneCClient</span> (базовый), <span class="klass">AlenkaOneCClient</span> (<code>ALENKA_ONE_C_*</code>, пароль обязателен), <span class="klass">MdsOneCClient</span> (<code>MDS_ONE_C_*</code>, <code>requires_password=False</code>). Таймаут из env (деф. 15 c). Сетевые ошибки → <code>RuntimeError</code>.</p>
+<p class="hint">Диагностика: <code>scripts/check-one-c-curl.sh {Alenka|MDS} FROM TO</code> воспроизводит запрос curl'ом с теми же env.</p>`);
+
+D('ov-operator','actor','Оператор / cron',`
+<p>Эксплуатация системы. На проде боевые прогоны аудита запускаются <b>по cron</b> (crontab на стенде; в репозитории конфигурации расписания нет). Оператор запускает скрипты вручную (ингест, разовые прогоны), снимает метрики.</p>
+<p class="hint">Повторный запуск за тот же период безопасен: дедуп по <code>done_guids</code> + кеш <code>data_snapshots/</code> + идемпотентная дозапись Excel.</p>
+<h4>Типичные команды</h4>
+<pre>python scripts/audit-one-c-period.py Alenka --days 1
+python scripts/reingest-pdfs.py
+python scripts/metrics.py Alenka --csv
+python scripts/create-api-key.py "label" --orgs Alenka MDS</pre>
+<p>Аудит, ингест и миграции запускаются <b>вне Docker-контейнера</b> — в образе только pull-API.</p>`);
+
+D('ov-mz','ext','Минздрав: клинические рекомендации',`
+<p>Источник текстов клинических рекомендаций (PDF) и справочника <code>manifest.csv</code> (ID, название, коды МКБ, возрастные категории).</p>
+<h4>Как попадает в систему</h4>
+<ul>
+<li>PDF складываются в <code>pdfs/&lt;ID&gt;.pdf</code>, метаданные — в <code>resources/manifest.csv</code>.</li>
+<li><code>scripts/reingest-pdfs.py</code> индексирует их в таблицу <code>docs</code> (RAG) и <code>guidelines</code>.</li>
+</ul>
+<p>Правила формальной структуры выведены из приказов МЗ <b>274н / 203н</b> и лежат в <code>rules.json</code>.</p>`);
+
+D('ov-script','comp','audit-one-c-period.py — боевой прогон',`
+<p>Точка входа боевого аудита за период. <span class="path">scripts/audit-one-c-period.py</span></p>
+<p>На проде запускается <b>по cron</b> (crontab стенда, вне репозитория); повторные запуски за тот же период безопасны (дедуп + кеш + идемпотентный Excel).</p>
+<pre>audit-one-c-period.py {Alenka,MDS} [--days N | --date DD.MM.YYYY]
+   [-y] [--excel PATH] [--num-batches N] [--ftpcreds FILE]
+   [--legacy-report] [--format NAME]</pre>
+<h4>Шаги</h4>
+<ol>
+<li><code>load_card_filter(org)</code>; резолв <code>org_id</code> по имени.</li>
+<li>Кеш <code>data_snapshots/one_c_&lt;ORG&gt;_&lt;from&gt;_to_&lt;to&gt;.json</code>: есть — читается, нет — <code>fetch_json_for_period</code> + запись. <code>--date</code> перепроигрывает закешированный день.</li>
+<li><code>AuditPipeline(org_id, card_filter).run_batched(payload, num_batches)</code>.</li>
+<li><code>ExcelFormatter.export_period(...)</code> — всегда, весь период из БД (end-инклюзивно: +1 день).</li>
+<li><code>--ftpcreds</code> → FTP-загрузка (ошибки не фатальны).</li>
+</ol>
+<p class="hint">Имя отчёта по умолчанию: <code>report_&lt;org&gt;_&lt;from&gt;_to_&lt;to&gt;.xlsx</code>. Логи: <code>logs/audit-one-c-period_&lt;ts&gt;.log</code>.</p>
+<p>Другие входы: <b>audit-file.py</b> (локальный JSON, <code>org_id=None</code>, потом <code>export_guids</code>); <b>mock-run-today.py</b> (смоук без <code>async with</code> → записей в БД нет, но LLM/чтения БД настоящие).</p>`);
+
+D('ov-pipeline','comp','AuditPipeline — оркестратор',`
+<p>Оркестрирует аудит партии визитов. <span class="path">src/audit/pipeline.py</span></p>
+<pre>async with AuditPipeline(org_id, card_filter) as p:
+    pairs = await p.run_batched(payload, num_batches=5)
+    # list[tuple[Result, ms]]</pre>
+<h4>run_batched(raw_input, num_batches=5, done_guids=None)</h4>
+<ul>
+<li><code>done_guids</code> не переданы → <code>get_done_guids(org_id)</code> (включая ignored/broken).</li>
+<li><code>AppointmentParser.split</code> → визиты; <code>CardFilter.filter</code> → pending / ignored / skipped_done / skipped_strategy.</li>
+<li><code>ignored_visits</code> апсертятся как <code>ignored=TRUE</code>.</li>
+<li><code>asyncio.Semaphore(num_batches)</code> — лимит одновременных <b>визитов</b> (внутри визита ещё до 3 diagnosis-агентов; глобального лимита на LLM нет).</li>
+<li>Все pending — одним <code>asyncio.gather</code>; упавшие (<code>None</code>) отфильтровываются.</li>
+</ul>
+<h4>Обработка ошибок</h4>
+<p>Ретраев на уровне пайплайна нет (они в LLMClient). Любое исключение в <code>_audit_visit</code> → <code>upsert_broken</code> (broken=TRUE + stacktrace + started_at), визит выпадает, батч продолжается.</p>
+<p class="note"><b>Excel пайплайн не пишет</b> — экспорт вынесен в <code>ExcelFormatter</code> и вызывается точками входа отдельно. Без <code>async with</code> <code>_done_cards is None</code> — записи в БД не делаются.</p>`);
+
+D('ov-formal','comp','FormalValidator — измерение 1',`
+<p>Формальная структура записи против <code>rules.json</code>. <span class="path">src/audit/formal_structure/validator.py</span> (класс <span class="klass">FormalValidator</span>; имени <code>FormalStructureValidator</code> в коде нет).</p>
+<h4>Определение типа визита</h4>
+<p><code>get_visit_types(visit)</code> — <b>полностью детерминировано, LLM не участвует</b>. Каждая услуга классифицируется по <code>NMU_RE</code> (<code>A*</code>→лаб, <code>B04</code>→профилактика, <code>B01.070.001</code>→первичный, <code>011/012</code>→повторный), фолбэк по названию (повторн/первичн/профилактическ), иначе <code>OTHER</code>.</p>
+<h4>validate(visit) → (findings, tokens)</h4>
+<ol>
+<li>Фильтрация правил по типу+возрасту (<b>ребёнок = age &lt; 18</b>), дедуп по <code>flag_code</code>.</li>
+<li><b>Единственный LLM-вызов</b>: <code>validate_visit</code> через <code>LLMClient.call(temperature=0.1, response_model=_Findings)</code>.</li>
+<li><b>Chinese repair</b> каждого finding с CJK.</li>
+<li><code>_enrich_flags</code>: цепляет <code>source</code>; неизвестный флаг фаззи-матчится (Левенштейн ≤3 → замена, &gt;3 → finding отбрасывается).</li>
+<li><code>_check_nmu_keyword_contradiction</code> — детерминированный <code>NMU_CODE_CONTRADICTION</code>.</li>
+</ol>
+<p class="hint"><span class="tag dead">VisitClassifier</span> импортируется, но не используется — мёртвый импорт.</p>`);
+
+D('ov-icd','comp','ICD-checker — измерение 2',`
+<p>Проверка корректности кодирования МКБ-10. <span class="path">src/audit/icd_check/validator.py</span></p>
+<h4>check_icd_codes(patient, diagnoses, manifest_rows, inspection_data)</h4>
+<ul>
+<li><b>Один ReAct-агент на весь визит</b> — видит все диагнозы сразу плюс таблицу доступных гайдлайнов (уже отфильтрованных по возрасту).</li>
+<li>Тулзы: <code>get_guideline_structure</code>, <code>read_guideline_section</code> (file_id агент выбирает сам из таблицы).</li>
+<li>Structured output <code>_IcdCheckerOutput{findings:[{dx_index, correct, confidence, suggested_code, comment, sources}]}</code>.</li>
+<li>Фильтр находок: <code>correct=False</code> И <code>confidence ≥ 8</code> И непустые suggested_code/comment И валидный dx_index.</li>
+</ul>
+<p>Результат → <code>done_cards.icd_check_result</code>, Excel-колонка «Проверка кодирования МКБ», и триггер <b>повторного</b> diagnosis-аудита предложенного кода.</p>`);
+
+D('ov-diag','comp','DiagnosisValidator — измерение 3',`
+<p>Проверка одного диагноза против клинического гайдлайна тремя <b>параллельными</b> LangGraph ReAct-агентами. <span class="path">src/audit/diagnosis/validator.py</span></p>
+<h4>validate_diagnosis(diagnosis) → (DiagnosisAuditResult, tokens)</h4>
+<ol>
+<li><code>ClinicRecs().pick_recs</code> → file_id гайдлайна. Не найден → пустой результат (<code>guideline_file_id=None</code>), чекеры не запускаются.</li>
+<li>Строится <code>human_message</code>: Пациент · Диагноз · <b>Клинический контекст записи</b> (весь клинически релевантный визит, не только ДанныеОсмотра).</li>
+<li>3 чекера параллельно (<code>asyncio.gather</code>) через <code>LLMClient.call_agent</code> (structured <code>CheckerOutput</code>, recursion_limit=25).</li>
+</ol>
+<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0">
+<tr><td style="padding:3px 6px"><b>anamnesis</b></td><td>SearchAnamnesisTool + SearchGuidelineTool</td></tr>
+<tr><td style="padding:3px 6px"><b>inspection</b></td><td>SearchInspectionTool + SearchGuidelineTool</td></tr>
+<tr><td style="padding:3px 6px"><b>treatment</b></td><td>+ <b>SearchMedicineTool</b> (реестры лекарств/БАД)</td></tr>
+</table>
+<p>Формат: <code>CheckerIssue(issue, sources:[CheckerSource(doc_title, section, cite)])</code>; <code>cite</code> — дословная цитата. Пайплайн уплощает в <code>DiagnosisResult</code> → <code>done_cards.diag_result</code>.</p>
+<p class="hint">Re-audit предложенного кода живёт в <code>pipeline.py</code>; сам DiagnosisValidator о нём не знает.</p>`);
+
+D('ov-rag','comp','RAG-ретривал (hybrid search)',`
+<p>Гибридный поиск по чанкам клинреков в рантайме из тулзов агентов. <span class="path">src/RAG/retrieval/</span></p>
+<h4>Этапы (vector + BM25 + RRF)</h4>
+<ol>
+<li>Векторный этап: HNSW cosine (<code>embedding &lt;=&gt; $1</code>), <code>WHERE file_id</code> + секционный subtree-фильтр, кандидатов = <code>top_k × 6</code> (<code>CANDIDATES_FACTOR=6</code>).</li>
+<li>BM25 (Python, natasha-токенизация) по этим кандидатам.</li>
+<li>RRF-слияние: <code>score = Σ 1/(50 + rank)</code> (<code>RRF_K=50</code>).</li>
+<li>Топ-4 (<code>TARGETED_TOP_K=4</code>) → форматирование с заголовком.</li>
+</ol>
+<p>Пул — <b>asyncpg</b> (отдельный от psycopg3-пула storage). Чанки «Список литературы» исключаются WHERE-фильтром. Подробнее — вкладка <b>RAG</b>.</p>`);
+
+D('ov-ingest','comp','reingest-pdfs.py — офлайн-ингест',`
+<p>Основной операционный путь наполнения RAG. <span class="path">scripts/reingest-pdfs.py</span></p>
+<ul>
+<li>Строит worklist через <code>reingest_planner</code> + <code>ingest_runs</code>.</li>
+<li>Флаги: <code>--only-failed</code>, <code>--file-id</code>, <code>--force-all</code> (весь корпус — для смены модели эмбеддинга), <code>--dry-run</code>.</li>
+<li><code>full</code>-реингест = чанкинг → эмбеддинги → <code>replace_by_file_id</code> (<b>атомарный</b> DELETE+INSERT в транзакции) → upsert guidelines → <code>mark_done(sha256)</code>.</li>
+<li>Ошибка файла → <code>mark_failed</code>, прогон продолжается.</li>
+</ul>
+<p class="hint">Первичный <code>ingest-pdfs.py</code> пропускает уже загруженные file_id; при прерывании удаляет частичные чанки. Подробнее — вкладка <b>RAG</b>.</p>`);
+
+D('ov-excel','comp','ExcelFormatter — БД → Excel',`
+<p>Отдельный async-CM: читает <code>done_cards</code>, парсит JSON-колонки через <code>reporting/result_parser.py</code>, пишет через <code>parsers/excel.AuditExcelWriter</code>. <span class="path">src/audit/excel_formatter.py</span></p>
+<h4>Методы</h4>
+<ul>
+<li><code>export_period(date_from, date_to, org_id)</code> — <code>org_id</code> обязателен; дата визита из <code>card_data->'Прием'->>'DATE'</code>; <code>ignored</code>/<code>broken</code> исключаются.</li>
+<li><code>export_guids(guids)</code> — для audit-file.py.</li>
+<li>Идемпотентность: GUID, уже присутствующие в файле, пропускаются.</li>
+</ul>
+<h4>9 колонок нового формата</h4>
+<p>Специализация · Дата приёма · Данные карты · Данные осмотра · Услуги · Диагнозы · <b>Проверка по приказам МЗ</b> (formal) · <b>Проверка по клин.рекомендациям</b> (diagnosis) · <b>Проверка кодирования МКБ</b> (icd_check). Legacy (<code>--legacy-report</code>) — 3 колонки.</p>
+<p class="note"><b>Excel пишет НЕ пайплайн</b> — экспорт полностью вынесен сюда и читает готовые результаты из БД.</p>`);
+
+D('ov-db','db','Postgres + pgvector',`
+<p>Единая база под двумя стеками: <b>psycopg3</b> (весь CRUD, <span class="path">storage/</span>) и <b>asyncpg</b> (только векторный поиск по <code>docs</code>, <span class="path">RAG/retrieval/vector_store.py</span>). Отдельные пулы, независимо собираемый DSN.</p>
+<h4>Ключевые таблицы</h4>
+<ul>
+<li><code>done_cards</code> — центральная таблица аудита (результаты + дедуп + токены/тайминги).</li>
+<li><code>docs</code> — чанки клинреков + <code>embedding VECTOR(1024)</code>, HNSW.</li>
+<li><code>guidelines</code> — справочник клинреков (file_id, name, mkb[], age_category[]).</li>
+<li><code>ingest_runs</code> — resume-состояние реингеста.</li>
+<li><code>drugs</code> / <code>dietary_supplements</code> — реестры для проверки назначений.</li>
+<li><code>organizations</code> / <code>api_keys</code> / <code>api_key_organizations</code> — мультиарендность и доступ к API.</li>
+</ul>
+<p>Вьюха <code>done_cards_metrics</code> — агрегаты по дням/организациям. Подробнее — вкладка <b>База данных</b>.</p>`);
+
+D('ov-llm','llm','Self-hosted LLM (vLLM)',`
+<p>Self-hosted OpenAI-совместимый эндпоинт (vLLM и т.п.), заданный через <code>OPENAI_BASE_URL</code>. Обслуживает и LLM-вызовы, и эмбеддинги (для openai-провайдера — <code>EMBEDDING_BASE_URL</code>).</p>
+<h4>Как используется</h4>
+<ul>
+<li>Все LLM-вызовы идут через <code>LLMClient</code> с ретраями и structured output (<code>response_format=json_schema</code>).</li>
+<li><code>reasoning_effort</code> → <code>extra_body</code> (для gpt-oss <code>low</code> экономит контекст).</li>
+</ul>
+<p class="hint">Дефолт модели расходится: <code>base.py</code> → <code>openai/gpt-oss-20b</code>, <code>rag_agent.py</code> → <code>gpt-4o-mini</code>. При заданном <code>LLM_MODEL</code> оба берут одно значение.</p>`);
+
+D('ov-integrator','actor','Интегрирующее приложение',`
+<p><b>Единственный внешний клиент</b> pull-API. Забирает готовые отчёты и сырые строки для аналитической реплики engine.</p>
+<h4>Контур</h4>
+<ul>
+<li>HTTP по приватному <b>WireGuard</b>-туннелю (браузерного контура нет, CORS отсутствует).</li>
+<li>Аутентификация: <code>Authorization: Bearer medkard_…</code> + обязательный <code>?org=</code>.</li>
+<li><code>/cards/pull</code> отдаёт сырые байты xlsx — клиент прогоняет через свой ingestion; <code>/cards/export</code> — инкрементальная выгрузка для реплики.</li>
+</ul>`);
+
+D('ov-ftp','ext','FTP-сервер',`
+<p>Приёмник готовых Excel-отчётов. <span class="path">src/integrations/ftp.py</span></p>
+<ul>
+<li>Пассивный обычный FTP (без TLS), креды из файла <code>key=value</code> (<code>ip, port, username, password</code>).</li>
+<li><code>upload(local, filename, creds)</code> → путь <code>/YYYY/MM/&lt;filename&gt;</code> по <b>текущей дате запуска</b> (org — только в имени файла).</li>
+<li>Вызывают: <code>audit-one-c-period.py --ftpcreds</code> и <code>scripts/send_report_ftp.py</code>.</li>
+</ul>`);
+
+D('ov-ftpup','comp','ftp.upload',`
+<p>Функция загрузки отчёта на FTP. Ошибки FTP <b>не фатальны</b> для прогона аудита.</p>
+<p>См. также актор <b>FTP-сервер</b> и вкладку <b>API и интеграции</b>.</p>`);
+
+D('ov-api','comp','pull-API (FastAPI)',`
+<p>FastAPI-сервис в Docker, публикуется только на WireGuard-IP. <span class="path">src/api/</span></p>
+<ul>
+<li><code>GET /cards/check?date=&org=</code> → <code>{date, count}</code>.</li>
+<li><code>GET /cards/pull?date=&org=</code> → xlsx-байты (404 если карт нет).</li>
+<li><code>GET /cards/export?since=&limit=&cursor=&org=</code> → сырые строки done_cards (инкрементально по <code>updated_at</code>).</li>
+</ul>
+<p>Подробнее — вкладка <b>API и интеграции</b>.</p>`);
+
+/* ===== ПАЙПЛАЙН ===== */
+D('pp-filter','comp','CardFilter (из filterconfig.json)',`
+<p>Контейнер стратегий фильтрации. <span class="path">src/audit/filters.py</span> + <code>filterconfig.json</code> (корень репо). Собирается через <code>parsers/filter_config.py:load_card_filter(org)</code>.</p>
+<p>Карта скипается, если <b>любая</b> стратегия сказала skip. Дедуп по <code>Прием.GUID</code> (lower-нормализация) включён всегда.</p>
+<p><b>Набор фильтров настраивается на организацию</b>: в <code>filterconfig.json</code> для каждой org перечислены стратегии с флагом <code>is_active</code> и аргументами (<code>args</code>, напр. список кодов МКБ). Неизвестная стратегия → <code>ValueError</code>; org не в конфиге → пустой фильтр.</p>
+<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0">
+<tr><td style="padding:3px 6px"><b>IcdFilter(codes)</b></td><td>ВСЕ диагнозы в списке кодов; также точечный skip диагноза на этапе клин-рек</td><td>Alenka: Z11.1, Z11.8</td></tr>
+<tr><td style="padding:3px 6px"><b>KDLFilter</b></td><td>ВСЕ услуги оканчиваются на «(КДЛ)» или код <code>\\d+\\.\\d+\\.[бук]\\d+\\.\\d+</code></td><td>MDS</td></tr>
+<tr><td style="padding:3px 6px"><b>AnalysisFilter</b></td><td>ВСЕ услуги имеют код <code>[AА]\\d{2,}\\.\\d{2,}\\.\\d{3,}</code></td><td>MDS</td></tr>
+</table>`);
+
+D('pp-fetch','comp','Кеш / 1С — JSON визитов',`
+<p>Получение JSON визитов за период. Кеш реализован в <code>scripts/audit-one-c-period.py</code> (не в клиенте 1С).</p>
+<ul>
+<li><code>data_snapshots/one_c_&lt;ORG&gt;_&lt;from&gt;_to_&lt;to&gt;.json</code>: есть → читается, нет → запрос к 1С + запись.</li>
+<li><code>--date</code> перепроигрывает закешированный день.</li>
+<li><code>AppointmentParser.split(raw_input)</code> достаёт визиты — принимает <code>str</code> (JSON), <code>list</code> или <code>dict</code> с ключом <code>appointments</code>.</li>
+</ul>
+<p class="hint"><code>parse()</code>/<code>ParsedAppointment</code> фактически не используются — валидаторы читают русские ключи визита напрямую (<code>Пациент</code>, <code>Диагнозы</code>, <code>ДанныеОсмотра</code>, <code>Услуги</code>, <code>Прием</code>).</p>`);
+
+D('pp-dedup','db','get_done_guids — дедупликация',`
+<p><code>DoneCardsStorage.get_done_guids(org_id)</code> — все ненулевые GUID организации.</p>
+<p class="note"><b>Включает ignored и broken карты</b> — они повторно не аудируются (NULL-safe <code>IS NOT DISTINCT FROM</code>). Как следствие, упавшая (broken) карта не переаудируется без ручного вмешательства.</p>
+<p>Дедуп-ключ — <code>done_cards.card_guid</code> UNIQUE. Карты без GUID — всегда новая строка (дедуп невозможен, warning).</p>`);
+
+D('pp-cardfilter','comp','CardFilter.filter()',`
+<p>Разбивает визиты на четыре корзины: <code>(pending, ignored_visits, skipped_done, skipped_strategy)</code>.</p>
+<ul>
+<li><b>pending</b> → в аудит.</li>
+<li><b>skipped_done</b> → GUID уже в БД, пропуск.</li>
+<li><b>ignored</b> → срезаны стратегией (Icd/KDL/Analysis), апсертятся как <code>ignored=TRUE</code>.</li>
+</ul>
+<p class="hint">Параметра <code>ignore_icd</code> у пайплайна нет — фильтрация по МКБ живёт в <code>CardFilter</code>/<code>IcdFilter</code>.</p>`);
+
+D('pp-ignored','db','upsert_ignored',`
+<p>Карты, срезанные фильтр-стратегией, пишутся в <code>done_cards</code> как <code>ignored=TRUE</code> (только guid + card_data). Параллельно, через <code>asyncio.gather</code>.</p>
+<p>Констрейнт 014: <code>CHECK (NOT (ignored AND broken))</code>. Эти карты попадают в <code>get_done_guids</code> и не переаудируются.</p>`);
+
+D('pp-skipped','ext','skipped_done',`
+<p>Ветвление: GUID визита уже присутствует в <code>done_guids</code> → карта пропускается (не аудируется, в БД не пишется повторно).</p>`);
+
+D('pp-formal','comp','FormalValidator — измерение 1',`
+<p>Первый шаг аудита визита: формальная структура записи. <b>1 LLM-вызов</b> (temp 0.1, structured <code>_Findings</code>).</p>
+<p>Тип визита определяется детерминированно (regex по НМУ-кодам), правила из <code>rules.json</code> фильтруются по типу+возрасту (<b>ребёнок = age &lt; 18</b>).</p>
+<p>Полное описание — элемент «FormalValidator» на вкладке <b>Обзор</b> и вкладка <b>LLM-слой</b>.</p>`);
+
+D('pp-nodx','ext','Ветвление: нет диагнозов',`
+<p>Если <code>Диагнозы</code> пуст → сохраняется <b>только</b> formal-результат, ранний return. Измерения 2 (ICD) и 3 (клинреки) не запускаются.</p>
+<p>Это одно из ветвлений судьбы визита; см. таблицу ниже под диаграммой.</p>`);
+
+D('pp-icd','comp','check_icd_codes — измерение 2',`
+<p>ОДИН ReAct-агент на весь визит: верно ли закодированы диагнозы. Видит таблицу доступных гайдлайнов (отфильтрованных по возрасту) и читает клинреки посекционно.</p>
+<ul>
+<li><code>guidelines = GuidelinesStorage().all()</code>, фильтр по возрасту в Python.</li>
+<li>Результат: <code>icd_issues</code> + <code>icd_lookup: dx_index → IcdCodingIssue</code>.</li>
+<li>Если для диагноза есть <code>suggested_code</code> → триггер повторного diagnosis-аудита.</li>
+</ul>
+<p>Structured <code>_IcdCheckerOutput</code>, порог уверенности ≥8. Подробнее — вкладка <b>LLM-слой</b>.</p>`);
+
+D('pp-clinrecs','comp','ClinicRecs — МКБ → file_id',`
+<p>Мапит код МКБ-10 диагноза в <code>file_id</code> клинического гайдлайна. <span class="path">src/audit/diagnosis/clinic_recs.py</span>. Источник данных — таблица <b><code>guidelines</code></b> (не manifest.csv).</p>
+<h4>pick_recs(patient, diagnosis) — порядок</h4>
+<ol>
+<li>Нормализация кода. Пустой или из <code>_SKIP_CODES={Z00.1}</code> → <code>(None, 0)</code>.</li>
+<li>Точный матч <code>find_by_code</code> (<code>= ANY(mkb)</code>) + возрастной фильтр.</li>
+<li>Префиксный фолбэк (<code>J20.9</code>→<code>J20</code>) → <code>find_by_prefix</code> → <code>IcdPrefixPicker.pick</code> (LLM, temp 0.4).</li>
+<li>Один точный кандидат → без LLM (0 токенов).</li>
+<li>Несколько точных → скоринг по пересечению токенов названий; ничья → <code>decide_file_id</code> (LLM-тайбрейкер, temp 0.4).</li>
+</ol>
+<p class="note"><b>Возрастной фильтр:</b> <code>is_child = age &le; 15</code> (<code>_ADULT_THRESHOLD=15</code>). Расходится с formal (<code>age &lt; 18</code>) — пациент 16–17 лет здесь считается взрослым.</p>`);
+
+D('pp-checkers','comp','3 чекера — измерение 3',`
+<p>Три <b>параллельных</b> LangGraph ReAct-агента (<code>asyncio.gather</code>), каждый через <code>LLMClient.call_agent</code> (structured <code>CheckerOutput</code>, recursion_limit=25).</p>
+<ul>
+<li><b>anamnesis</b> — полнота анамнеза vs гайдлайн (<code>жалоб</code>-секции).</li>
+<li><b>inspection</b> — обследование vs гайдлайн (<code>исследов</code>-секции).</li>
+<li><b>treatment</b> — лечение/назначения vs гайдлайн (<code>лечен</code>-секции) + обязательный <code>SearchMedicineTool</code>.</li>
+</ul>
+<p><code>SearchMedicineTool</code>: поиск по <code>drugs</code> (триграммы ≥0.85, сначала точный МНН) с фолбэком на БАДы (<code>dietary_supplements</code>, full-text).</p>
+<p>Каждый issue с CJK чинится <code>ChineseDetector.repair_issue</code>. Результат — <code>DiagnosisAuditResult</code> → уплощается в <code>DiagnosisResult</code>.</p>`);
+
+D('pp-reaudit','comp','re-audit предложенного кода',`
+<p>Если ICD-checker предложил для диагноза исправленный <code>suggested_code</code>, пайплайн вызывает <code>validate_diagnosis</code> <b>повторно</b> для копии диагноза с этим кодом.</p>
+<p>В отчёте будет <b>две строки</b> клин-рек: исходный код + предложенный. Логика — в <code>pipeline.py</code>; сам <code>DiagnosisValidator</code> об этом не знает.</p>`);
+
+D('pp-upsert','db','upsert done_card',`
+<p>Финальная запись результата успешного аудита. <code>_upsert_done_card(...)</code>.</p>
+<ul>
+<li><code>card_data</code> + <code>formal_result</code> + <code>diag_result</code> + <code>icd_check_result</code> (3 JSONB).</li>
+<li><code>token_count</code> (formal + icd + Σ diag + suggested), <code>time_ms</code>, <code>started_at</code>, <code>finished_at</code>, <code>organization_id</code>.</li>
+<li><code>upsert()</code> форсирует <code>ignored=FALSE</code>, при апдейте и <code>broken=FALSE</code> (переаудит снимает «сломанность»).</li>
+</ul>`);
+
+D('pp-broken','ext','upsert_broken — исключение',`
+<p>Любое исключение на любом шаге <code>_audit_visit</code> ловится → <code>upsert_broken</code>: <code>broken=TRUE</code> + <code>stacktrace</code> + <code>started_at</code>. Визит выпадает из результата, батч продолжается.</p>
+<p class="note">broken-карты попадают в <code>get_done_guids</code> → упавшая карта не переаудируется без ручного вмешательства.</p>`);
+
+D('pp-excel','comp','ExcelFormatter.export_period',`
+<p>После прогона всегда вызывается экспорт всего периода из БД (end-инклюзивно: +1 день). Читает <code>done_cards</code>, исключает <code>ignored</code>/<code>broken</code>.</p>
+<p>9 колонок: данные визита + три колонки проверок. Дозапись идемпотентна по GUID. Подробнее — элемент «ExcelFormatter» на вкладке <b>Обзор</b>.</p>`);
+
+D('pp-ftp','comp','FTP-загрузка (опция)',`
+<p><code>--ftpcreds</code> → загрузка отчёта на FTP в <code>/ГГГГ/ММ/</code> по текущей дате запуска. Ошибки FTP не фатальны.</p>
+<p>См. вкладку <b>API и интеграции</b>.</p>`);
+
+/* ===== RAG ===== */
+D('ri-src','ext','Входные файлы: manifest.csv + PDF',`
+<p>Источник ингеста: справочник <code>resources/manifest.csv</code> (ID, название, коды МКБ, возрастные категории, разработчик…) и файлы <code>pdfs/&lt;ID&gt;.pdf</code>.</p>
+<p><code>load_documents(exceptions, only)</code> (<span class="path">src/RAG/ingestion/data_loader.py</span>) — генератор по строкам манифеста.</p>
+<p class="hint"><code>seed-guidelines.py</code> заливает manifest.csv в таблицу <code>guidelines</code> (идемпотентный upsert), обязателен до миграции 021 (FK) на непустой <code>docs</code>.</p>`);
+
+D('ri-parse','comp','PyMuPDF + tabula — парсинг',`
+<p>Парсинг PDF: <b>PyMuPDF (fitz)</b> — текст, TOC, <code>find_tables</code>; <b>tabula</b> — содержимое таблиц. Tika/pypdf не используются.</p>
+<ul>
+<li>TOC → скип front-matter; детект таблиц по bbox, текст страниц берётся без табличных полос (clip).</li>
+<li>Срез всего до 2-го вхождения «Список сокращений».</li>
+</ul>`);
+
+D('ri-chunk','comp','Секции → чанки',`
+<p>Нарезка на секции по regex номерных заголовков (<code>1.1 Название</code>, 2–3 уровня; требует букву после номера; отбрасывает строки с <code>..</code> — защита от печатного оглавления).</p>
+<ul>
+<li><code>RecursiveCharacterTextSplitter</code> (2000 симв., overlap 200) внутри секции.</li>
+<li>Таблицы: строки батчами по 8 → JSON-чанки.</li>
+<li>metadata текстового чанка: <code>{section, content_type:"text", chunk_index}</code>; табличного: <code>+ page, table_index</code>. Манифестные поля в metadata <b>не хранятся</b> (миграция 020).</li>
+</ul>
+<p class="hint">Одноуровневые заголовки (<code>3 Лечение</code>) регуляркой ингеста не ловятся — их добирает subtree-фильтр ретривала.</p>`);
+
+D('ri-embed','comp','Эмбеддинг contextual text',`
+<p><b>Ключевой приём:</b> <code>embed_text(chunk) → f"[{section}]\\n{body}"</code>. Эмбеддится текст <b>с префиксом секции</b>, а в <code>docs.chunk</code> пишется тело <b>без</b> префикса.</p>
+<p class="note"><b>Reverse HyDE удалён.</b> Раньше LLM генерировал по 3 гипотетических вопроса на чанк и эмбеддились они; теперь эмбеддинг один и это сам чанк с префиксом секции. Колонок эмбеддинга — одна (<code>VECTOR(1024)</code>).</p>
+<p><code>process_chunk → Doc(...)</code> с вектором (ошибка эмбеддинга → None, чанк пропускается); <code>process_batch</code> — <code>asyncio.gather</code>.</p>`);
+
+D('ri-docs','db','docs · guidelines · ingest_runs',`
+<p>Результат ингеста пишется в три таблицы:</p>
+<ul>
+<li><code>docs(file_id, chunk, metadata, embedding VECTOR(1024))</code> — HNSW-индекс cosine (m=16, ef_construction=64) + GIN по metadata.</li>
+<li><code>guidelines</code> — строка манифеста (upsert).</li>
+<li><code>ingest_runs(file_id, status, content_hash)</code> — resume/идемпотентность (<code>content_hash</code> = sha256 PDF, пишется только в <code>mark_done</code>).</li>
+</ul>
+<p>Размерность 1024 зашита литералом в SQL; программной проверки <code>len(vec)==EMBEDDING_DIM</code> нет — несовпадение поймает Postgres при вставке.</p>`);
+
+D('ro-query','comp','Запрос чекер-агента',`
+<p>Точка входа ретривала — поисковый запрос от чекер-агента, напр. «какие обследования обязательны при J06.9?». Вход у всех поисковых тулзов — <code>_QueryInput{query: str}</code>.</p>
+<p>Отформатированные топ-4 чанка возвращаются агенту (заголовок клинрека + МКБ + возрастная категория + секция + тело). Пустая выдача → «Ничего не найдено. Не повторяй этот запрос…».</p>`);
+
+D('ro-embed','comp','embed(query)',`
+<p>Асинхронное эмбеддирование запроса через настроенный провайдер. <span class="path">src/RAG/retrieval/embeddings.py</span></p>
+<ul>
+<li><code>EMBEDDING_PROVIDER</code>: <code>openai</code> (деф.; <code>dimensions</code> не передаётся) · <code>st</code> (sentence-transformers, CPU, normalize) · <code>fastembed</code> (ONNX Qwen3-Embedding-0.6B, mean-pooling, normalize).</li>
+<li><code>EMBEDDING_MODEL</code> деф. <code>Qwen/Qwen3-Embedding-0.6B</code>, <code>EMBEDDING_DIM</code> деф. 1024.</li>
+<li>Адаптер — синглтон через <code>@lru_cache</code>.</li>
+</ul>
+<p class="hint">Cosine-оператор корректен на нормализованных векторах; для openai-провайдера нормализация — на совести модели.</p>`);
+
+D('ro-vector','comp','Векторный этап — HNSW cosine',`
+<p>Первый этап гибридного поиска. <span class="path">vector_store.py</span>, пул <b>asyncpg</b>.</p>
+<ul>
+<li>HNSW cosine (<code>embedding &lt;=&gt; $1</code>), <code>limit = top_k × 6</code> (<code>CANDIDATES_FACTOR=6</code>).</li>
+<li><code>_vector_search_filtered(embedding, file_id, limit, section_filter)</code> — <code>WHERE file_id = $2</code> + секционный фильтр.</li>
+<li>Чанки «Список литературы» исключаются WHERE-фильтром.</li>
+</ul>
+<h4>Секционный subtree-фильтр</h4>
+<p>Плоский <code>LIKE '%kw%'</code> расширен на <b>номерное поддерево</b>: <code>_section_anchor_sections</code> находит секции, чей заголовок матчит keyword; <code>_section_like_patterns</code> строит паттерны (<code>3 Лечение</code> → <code>['3 %','3.%']</code>, точка — литерал). Итог: <code>lower(section) LIKE '%kw%' OR section LIKE ANY(patterns)</code>. Запрос про лечение достаёт и подсекции без слова «лечен» (<code>3.4 Обезболивание</code>).</p>`);
+
+D('ro-bm25','comp','BM25 (Python)',`
+<p>Второй этап: лексический поиск BM25Okapi <b>по кандидатам векторного этапа</b> (не по всей таблице).</p>
+<ul>
+<li>Токенизация — natasha.</li>
+<li>Полнотекстового tsvector-индекса по <code>docs</code> <b>нет</b> — BM25 целиком в Python.</li>
+<li>Lexical recall ограничен выдачей HNSW (кандидаты уже отобраны вектором).</li>
+</ul>`);
+
+D('ro-rrf','comp','RRF-слияние',`
+<p>Третий этап: Reciprocal Rank Fusion двух ранжирований (вектор + BM25).</p>
+<pre>score(d) = Σ 1/(RRF_K + rank),  RRF_K = 50</pre>
+<p>Топ <code>top_k</code> по <code>rrf_score</code>; результат — <code>{id, chunk, metadata, rrf_score}</code>. Порогов по distance/rrf_score нет — просто топ-N.</p>`);
+
+D('ro-top','comp','Топ-4 → _format_chunk',`
+<p>Финал: топ-4 (<code>TARGETED_TOP_K=4</code>, кандидатов 24) форматируются <code>Doc._format_chunk()</code> — заголовок «название клинрека + МКБ + возрастная категория + секция» (поля из JOIN с <code>guidelines</code>) + тело чанка.</p>
+<h4>Scoped-функции (searches.py)</h4>
+<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0">
+<tr><td style="padding:2px 6px"><code>search_by_file_id</code></td><td>—</td><td>search_guideline</td></tr>
+<tr><td style="padding:2px 6px"><code>search_anamnesis</code></td><td>жалоб</td><td>anamnesis</td></tr>
+<tr><td style="padding:2px 6px"><code>search_inspection</code></td><td>исследов</td><td>inspection</td></tr>
+<tr><td style="padding:2px 6px"><code>search_treatment</code></td><td>лечен</td><td>treatment</td></tr>
+<tr><td style="padding:2px 6px"><code>get_sections_for_file</code></td><td>оглавление</td><td>ICD-checker</td></tr>
+<tr><td style="padding:2px 6px"><code>get_section_chunks</code></td><td>чанки секции</td><td>ICD-checker</td></tr>
+</table>`);
+
+D('ro-db','db','docs (asyncpg-пул)',`
+<p>Векторный этап читает таблицу <code>docs</code> через <b>отдельный asyncpg-пул</b> (min 2 / max 5), независимый от psycopg3-пула storage.</p>
+<ul>
+<li>Регистрация pgvector: <code>pgvector.asyncpg</code> в <code>init=</code>.</li>
+<li><code>close_pool()</code> на shutdown.</li>
+</ul>
+<p><code>hybrid_search(query_text, embedding, top_k=10)</code> — по всей таблице (используется только generic-тулом <code>retrieve</code>, который не подключён к агентам); основной путь — scoped-поиск.</p>`);
+
+/* ===== LLM ===== */
+D('lm-formal','llm','validate_visit (formal)',`
+<p>Единственный LLM-вызов формального измерения. <span class="path">src/LLM/validations.py</span></p>
+<ul>
+<li><code>LLMClient.call(temperature=0.1, response_model=_Findings)</code> — structured output <code>json_schema</code>.</li>
+<li>Толерантный JSON-парсер на выходе.</li>
+<li>Промпт <code>formal_structure_validator.txt</code> (<code>{rules}</code> рендерится из rules.json), ответ — массив <code>[{flag, issue, comment}]</code>.</li>
+</ul>`);
+
+D('lm-icd','llm','check_icd_codes (агент)',`
+<p>Агентный ReAct-вызов на весь визит (≤25 шагов). <span class="path">src/audit/icd_check/validator.py</span></p>
+<ul>
+<li>Промпт <code>icd_checker.txt</code>; тулзы <code>get_guideline_structure</code>, <code>read_guideline_section</code>.</li>
+<li>Structured <code>_IcdCheckerOutput</code>, порог уверенности ≥8.</li>
+<li>Через <code>LLMClient.call_agent</code> — агент пересоздаётся на каждый ретрай.</li>
+</ul>`);
+
+D('lm-picker','llm','decider / prefix-picker',`
+<p>Ноль или один LLM-вызов на диагноз — только при неоднозначном подборе гайдлайна (temp 0.4).</p>
+<ul>
+<li><code>IcdPrefixPicker.pick</code> (<span class="path">icd_prefix_picker.py</span>) — выбор из префиксных кандидатов; ответ — голый <code>file_id</code> или <code>none</code>. Промпт <code>icd_prefix_picker.txt</code>.</li>
+<li><code>decide_file_id</code> (<span class="path">decider.py</span>) — тайбрейкер при нескольких точных кандидатах; промпт зашит инлайн в код.</li>
+</ul>`);
+
+D('lm-checkers','llm','3 чекер-агента',`
+<p>Три параллельных ReAct-агента на диагноз (≤25 шагов каждый), structured <code>CheckerOutput</code>.</p>
+<ul>
+<li>Промпты <code>anamnesis_checker.txt</code> / <code>inspection_checker.txt</code> / <code>treatment_checker.txt</code>.</li>
+<li>Формат ответа: <code>{"issues":[{issue, sources:[{doc_title, section, cite}]}]}</code>, <code>cite</code> — дословная цитата.</li>
+<li>Фабрики тулзов: <code>get_anamnesis_tools_for</code> / <code>get_inspection_tools_for</code> / <code>get_treatment_tools_for</code> (последняя ещё <code>search_medicine</code>).</li>
+</ul>
+<p>Парсинг <code>_parse_issues</code>: принимает и Pydantic <code>CheckerOutput</code> (основной путь), и сырую строку (fallback). Ошибка парсинга → пустой список.</p>`);
+
+D('lm-reaudit','llm','re-audit suggested_code',`
+<p>Для диагноза, которому ICD-checker предложил исправленный код, выполняется ещё один полный проход <code>validate_diagnosis</code> — это +3 агентных вызова (<code>3k</code> в формуле).</p>
+<p>Логика в <code>pipeline.py</code>; в отчёте появляется вторая строка клин-рек (исходный код + предложенный).</p>`);
+
+D('lm-chinese','llm','ChineseDetector.repair_issue',`
+<p>Ноль..M вызовов: только когда в конкретном issue обнаружены CJK-иероглифы (temp 0.3). <span class="path">src/LLM/chinese_detector.py</span></p>
+<ul>
+<li>Детект <code>_CJK_RE</code> по Unicode-диапазонам (<code>check_str</code>).</li>
+<li><code>repair_issue</code> — доп. LLM-вызов «замени иероглифы русским по контексту».</li>
+<li>Применяется в formal, ICD и diagnosis — <b>до</b> записи в БД.</li>
+</ul>
+<p class="hint">Адаптеры <code>check_findings/check_visit_label/check_file_id/check_hypothetical_queries/check_raw_content</code> — <span class="tag dead">мёртвые</span>. Не путать с вьюхой <code>done_cards_chinese</code> (чистка задним числом).</p>`);
+
+D('lm-client','comp','LLMClient — единая точка вызовов',`
+<p>Все LLM-вызовы проекта идут через <code>LLMClient</code>. <span class="path">src/LLM/client.py</span>. Прямых вызовов <code>AsyncOpenAI</code> в аудиторском коде нет.</p>
+<pre>LLMClient(model=MODEL, max_retries=2, temp_bump=0.15)</pre>
+<h4>call(messages, temperature, response_model=None, reasoning_effort=None) → (str, int)</h4>
+<ul>
+<li><code>response_model</code> (Pydantic) → <code>response_format={"type":"json_schema",…}</code>.</li>
+<li><b>Ретраи:</b> до 3 попыток (2 ретрая). Триггер — <code>finish_reason != "stop"</code> или <code>APIError</code>. На каждом ретрае температура <b>+0.15</b> (cap 1.0) + notice в messages. Исчерпание → возвращается контент последней попытки как есть (не исключение).</li>
+</ul>
+<h4>call_agent(system_prompt, tools, human_message, response_format=None)</h4>
+<ul>
+<li>LangGraph ReAct через <code>create_checker_agent</code> (<code>create_react_agent</code>, <code>ChatOpenAI(temperature=0.7)</code>).</li>
+<li><code>recursion_limit = AGENT_MAX_STEPS</code> (env, деф. <b>25</b>).</li>
+<li>Агент пересоздаётся на каждый ретрай; токены — сумма <code>usage_metadata.total_tokens</code> по всем AIMessage (<code>_sum_agent_tokens</code>).</li>
+</ul>
+<p class="hint"><code>instructor</code> из старой архитектуры не используется нигде (остался в requirements.txt).</p>`);
+
+D('lm-endpoint','llm','self-hosted LLM (vLLM)',`
+<p>Self-hosted OpenAI-совместимый эндпоинт. Синглтон <code>AsyncOpenAI</code> + <code>MODEL</code> в <span class="path">src/LLM/base.py</span> (глушит логгеры openai/httpx).</p>
+<ul>
+<li><code>OPENAI_BASE_URL</code> — адрес эндпоинта (vLLM и т.п.).</li>
+<li>Legacy <code>guided_json</code> мигрирован на <code>json_schema</code> (этот vLLM-билд молча игнорировал guided_json).</li>
+<li><code>RAG_AGENT_TOP_K</code> (деф. 5) — top_k общего <code>retrieve</code>-тула.</li>
+</ul>`);
+
+/* ===== БД ===== */
+D('db-orgs','db','organizations',`
+<p>Мультиарендность. Миграция 008.</p>
+<ul>
+<li><code>id UUID PK</code> · <code>name TEXT</code> (уникальность имени БД не enforce'ит) · <code>created_at</code>.</li>
+</ul>
+<p>Storage: <code>OrganizationsStorage</code> — <code>get_id_by_name</code>, <code>get_id_by_name_ci</code> (API, case-insensitive), <code>get_name_by_id</code>. Имена в скриптах фиксированы <code>choices=("Alenka","MDS")</code>.</p>`);
+
+D('db-apikeys','db','api_keys',`
+<p>API-ключи. Миграции 015→016→017.</p>
+<ul>
+<li><code>id UUID PK</code> · <code>label</code> · <code>key_hash</code> (SHA-256, сырой ключ не хранится) · <code>key_prefix</code> (первые 8 символов, для логов) · <code>created_at</code> · <code>revoked_at</code>.</li>
+<li>Partial-unique <code>key_hash WHERE revoked_at IS NULL</code> (отозванный хеш переиспользуем).</li>
+</ul>
+<p>Формат ключа: <code>medkard_&lt;token_urlsafe(32)&gt;</code>. Storage: <code>ApiKeysStorage</code> (<code>create_key</code>, <code>revoke_key</code>, <code>is_key_authorized_for_org</code>, <code>is_valid_key</code>).</p>`);
+
+D('db-apikeyorgs','db','api_key_organizations',`
+<p>M:M-связь ключей и организаций. Миграция 018.</p>
+<ul>
+<li><code>(api_key_id, organization_id)</code> PK, <code>ON DELETE CASCADE</code>.</li>
+<li>«≥1 организации на ключ» enforce'ится приложением (<code>create-api-key.py --orgs</code>).</li>
+</ul>
+<p>Это и есть <b>scope</b> ключа: ключ = доверенное приложение, ограниченное списком организаций.</p>`);
+
+D('db-donecards','db','done_cards — центральная таблица',`
+<p>Результат аудита карты. Миграции 004·005·009·012·013×2·014·022.</p>
+<table style="width:100%;border-collapse:collapse;font-size:12px;margin:6px 0">
+<tr><td style="padding:2px 6px"><code>card_guid</code></td><td>TEXT UNIQUE (nullable) — дедуп; без GUID = новая строка</td></tr>
+<tr><td style="padding:2px 6px"><code>card_data</code></td><td>JSONB — сырой визит</td></tr>
+<tr><td style="padding:2px 6px"><code>formal/diag/icd_check_result</code></td><td>JSONB — три измерения</td></tr>
+<tr><td style="padding:2px 6px"><code>token_count, time_ms</code></td><td>INTEGER</td></tr>
+<tr><td style="padding:2px 6px"><code>ignored</code></td><td>BOOL — срезано стратегией</td></tr>
+<tr><td style="padding:2px 6px"><code>broken, stacktrace</code></td><td>упавший аудит (012)</td></tr>
+<tr><td style="padding:2px 6px"><code>started_at, finished_at</code></td><td>TIMESTAMPTZ (005)</td></tr>
+<tr><td style="padding:2px 6px"><code>organization_id</code></td><td>UUID FK (009, nullable)</td></tr>
+<tr><td style="padding:2px 6px"><code>updated_at</code></td><td>TIMESTAMPTZ — триггер now() (022); курсор /cards/export</td></tr>
+</table>
+<p>Констрейнт 014: <code>CHECK (NOT (ignored AND broken))</code>.</p>
+<h4>Жизненный цикл (все пути — upsert по card_guid)</h4>
+<ul>
+<li><code>upsert()</code> — успешный аудит (форсит ignored=FALSE, снимает broken).</li>
+<li><code>upsert_ignored()</code> — guid+card_data+ignored=TRUE.</li>
+<li><code>upsert_broken()</code> — broken+stacktrace+started_at.</li>
+<li><code>get_done_guids(org_id)</code> — все ненулевые GUID, включая ignored и broken.</li>
+</ul>`);
+
+D('db-metrics','comp','done_cards_metrics (вьюха)',`
+<p>Агрегаты per (organization_name, visit_date). Миграции 007 → 011 → 013.</p>
+<ul>
+<li><code>total/ignored/broken/audited_cards</code>, <code>total_tokens</code>, <code>avg_tokens</code>, <code>wall_clock_sec</code>, <code>avg_time_sec</code>.</li>
+<li><code>wall_clock_sec</code> — <b>слияние перекрывающихся интервалов</b> started/finished (не max-min и не сумма time_ms — карты аудируются параллельно).</li>
+</ul>
+<p>Читает <code>scripts/metrics.py ORG [--csv]</code>.</p>`);
+
+D('db-broken','comp','broken_cards (вьюха)',`
+<p>Админский список упавших карт: org, дата визита, stacktrace. Миграция 012.</p>`);
+
+D('db-chinese','comp','done_cards_chinese (вьюха)',`
+<p>Ручной DBA-инструмент зачистки CJK-галлюцинаций <b>задним числом</b>. Миграция 006 + <code>delete_chinese_done_cards()</code>. Из кода не вызывается.</p>
+<p class="hint">Не путать с <code>ChineseDetector</code>, который чинит иероглифы <b>до</b> записи в БД.</p>`);
+
+D('db-guidelines','db','guidelines',`
+<p>Справочник клинреков, канонический источник (зеркало <code>manifest.csv</code>). Миграция 019.</p>
+<ul>
+<li><code>file_id TEXT PK</code> (= имя PDF) · <code>name</code> · <code>mkb TEXT[]</code> (GIN) · <code>age_category TEXT[]</code> · <code>developer</code> · <code>nps_status</code> · <code>published_at TEXT</code> · <code>usage_status</code>.</li>
+</ul>
+<p>Storage: <code>GuidelinesStorage</code> — <code>find_by_code</code> (<code>= ANY(mkb)</code>), <code>find_by_prefix</code> (unnest+split_part), <code>all</code>, <code>upsert_many</code>. Эти строки (по возрасту) пайплайн отдаёт ICD-checker-агенту как таблицу доступных гайдлайнов.</p>`);
+
+D('db-docs','db','docs',`
+<p>Чанки клинреков. Миграции 002·003·020·021·024.</p>
+<ul>
+<li><code>id UUID PK</code> · <code>file_id TEXT</code> (FK → guidelines, 021) · <code>chunk TEXT</code> · <code>metadata JSONB</code> (только chunk-intrinsic) · <code>embedding VECTOR(1024)</code> (единственная колонка после 024 — HyDE-колонки удалены).</li>
+<li>Индексы: <code>docs_embedding_idx</code> HNSW cosine (m=16, ef=64), <code>docs_metadata_idx</code> GIN.</li>
+</ul>
+<p>Storage: <code>DocsStorage</code> — <b>свой пул</b> (max 3) + pgvector; <code>replace_by_file_id</code> (атомарно), <code>get</code> (LEFT JOIN guidelines → денормализует name/mkb/age_category в <code>Doc</code>).</p>`);
+
+D('db-ingest','db','ingest_runs',`
+<p>Resume-состояние реингеста. Миграция 023.</p>
+<ul>
+<li><code>file_id PK</code> · <code>status</code> (<code>pending|done|failed</code>) · <code>content_hash</code> (sha256 PDF — пишется <b>только</b> в mark_done) · <code>error</code> · <code>updated_at</code>.</li>
+</ul>
+<p>Storage: <code>IngestRunsStorage</code> — <code>get_all</code>, <code>upsert_pending</code>, <code>mark_done</code>, <code>mark_failed</code>. Связь с guidelines — 1:1 по file_id, без FK.</p>`);
+
+D('db-drugs','db','drugs',`
+<p>Реестр лекарств для <code>search_medicine</code>. Миграция 010.</p>
+<ul>
+<li><code>trade_name, inn_name, dosage_form, dosage, patient_exclusions</code>.</li>
+<li>GIN + pg_trgm индексы по trade_name/inn_name (триграммный поиск).</li>
+</ul>
+<p>Storage: <code>DrugsStorage</code> — <code>search</code> (similarity ≥ threshold, порог 0.85), <code>search_by_inn</code> (точно, CI). Наполнение — <code>seed-reference-lists.sh</code>.</p>`);
+
+D('db-supplements','db','dietary_supplements',`
+<p>Реестр БАД (фолбэк <code>search_medicine</code>). Миграция 010.</p>
+<ul>
+<li>Рег. данные + <code>product_name_tsv</code> GENERATED tsvector('russian') с GIN-индексом (full-text).</li>
+</ul>
+<p>Storage: <code>DietarySupplementsStorage</code> — <code>search</code> (plainto_tsquery + ts_rank).</p>
+<p class="hint">Второй CSV в рабочей копии сейчас отсутствует — <code>seed-reference-lists.sh</code> упадёт на проверке наличия.</p>`);
+
+/* ===== API ===== */
+D('ap-1c','actor','1С МИС',`
+<p>Источник визитов push-контура. HTTP GET c Basic-auth, <code>datebegin</code>/<code>dateend</code> в <code>DD.MM.YYYY</code>, ответ JSON.</p>
+<h4>Формат входного визита</h4>
+<pre>{
+ "Прием":   {"GUID":"…","DATE":"DD.MM.YYYY"},
+ "Пациент": {"AGE"/"Возраст":45,"SEX":"…"},
+ "Врач":    {"SPECIALIZATION":"…"},
+ "Диагнозы":[{"КодМКБ":"J06.9","НаименованиеМКБ":"…",
+             "Детализация":"…","ВыявленВпервые":"…"}],
+ "ДанныеОсмотра":[{"Параметр":"…","Значение":"…"}],
+ "Услуги":  [{"Наименование":"…","Код":"B01.058.001",…}]
+}</pre>
+<p>Клиенты — <span class="path">src/integrations/one_c.py</span>. Данные обезличены.</p>`);
+
+D('ap-audit','comp','audit-one-c-period → AuditPipeline',`
+<p>Push-контур: скрипт тянет визиты из 1С (кеш data_snapshots), гоняет <code>AuditPipeline.run_batched</code>, пишет результаты в <code>done_cards</code>.</p>
+<p>Подробнее — элементы «audit-one-c-period.py» и «AuditPipeline» на вкладке <b>Обзор</b>, вся механика — вкладка <b>Пайплайн аудита</b>.</p>`);
+
+D('ap-excel','comp','ExcelFormatter',`
+<p>Дисковый экспорт push-контура: <code>ExcelFormatter.export_period</code> читает <code>done_cards</code> (scoped org, без ignored/broken) → <code>.xlsx</code> (9 колонок).</p>
+<p><code>guideline_meta</code> (название/дата/возраст гайдлайна) подтягивается из <code>GuidelinesStorage</code> на экспорте, в БД не хранится.</p>`);
+
+D('ap-ftpup','comp','ftp.upload',`
+<p>Загрузка отчёта на FTP. <span class="path">src/integrations/ftp.py</span></p>
+<ul>
+<li>Пассивный обычный FTP (без TLS), креды из файла <code>key=value</code>.</li>
+<li>Путь <code>/YYYY/MM/&lt;filename&gt;</code> по текущей дате запуска.</li>
+<li>Вызывают: <code>audit-one-c-period.py --ftpcreds</code>, <code>scripts/send_report_ftp.py</code>.</li>
+</ul>`);
+
+D('ap-ftpsrv','ext','FTP-сервер',`
+<p>Приёмник готовых Excel-отчётов, конечная точка push-контура. Отчёт кладётся в <code>/ГГГГ/ММ/report_&lt;org&gt;_&lt;from&gt;_to_&lt;to&gt;.xlsx</code>.</p>`);
+
+D('ap-donecards','db','done_cards (общая таблица)',`
+<p>Оба контура читают одну таблицу. Push пишет сюда результаты аудита, pull читает через API.</p>
+<ul>
+<li>Все отчётные/API-запросы жёстко scoped по <code>organization_id</code> и <code>ignored=FALSE AND broken=FALSE</code>.</li>
+<li><code>updated_at</code> (триггер) — курсор инкрементального <code>/cards/export</code>.</li>
+</ul>
+<p>Полная схема — вкладка <b>База данных</b>.</p>`);
+
+D('ap-integrator','actor','Интегрирующее приложение',`
+<p>Единственный внешний клиент pull-API. Тянет отчёты и сырые строки для аналитической реплики engine по приватному WireGuard-туннелю.</p>
+<ul>
+<li><code>pull</code> отдаёт сырые байты xlsx — клиент прогоняет через свой ingestion.</li>
+<li><code>check</code> — дешёвая сверка числа строк.</li>
+<li><code>export</code> — инкрементальная выгрузка (реплика engine).</li>
+</ul>`);
+
+D('ap-auth','comp','Аутентификация (auth.py)',`
+<p><code>Authorization: Bearer &lt;ключ&gt;</code> + обязательный <code>?org=&lt;имя&gt;</code>. <span class="path">src/api/auth.py</span></p>
+<ol>
+<li>Резолв организации case-insensitive → нет → <b>404</b> <code>Unknown organization</code>.</li>
+<li><code>is_key_authorized_for_org(raw, org_id)</code> — ключ активен И заскоуплен на org.</li>
+<li>Не прошло: ключ валиден, но не для этой org → <b>403</b>; невалиден/отозван → <b>401</b>.</li>
+</ol>
+<p>В БД — только SHA-256 (<code>key_hash</code>) + <code>key_prefix</code>. Управление: <code>create-api-key.py "label" --orgs Alenka MDS</code> (печатает ключ один раз), <code>revoke-api-key.py &lt;uuid|ключ&gt;</code> (мягкий revoke).</p>`);
+
+D('ap-router','comp','Роутер /cards (FastAPI)',`
+<p><span class="path">src/api/routes/cards.py</span>, префикс <code>/cards</code>. <code>create_app()</code> подключает единственный роутер.</p>
+<table style="width:100%;border-collapse:collapse;font-size:12px;margin:6px 0">
+<tr><td style="padding:2px 6px"><code>GET /cards/check</code></td><td>date, org → {date, count}</td></tr>
+<tr><td style="padding:2px 6px"><code>GET /cards/pull</code></td><td>date, org → xlsx-байты (404 если нет)</td></tr>
+<tr><td style="padding:2px 6px"><code>GET /cards/export</code></td><td>since, limit(0=∞), cursor, org → сырые строки</td></tr>
+</table>
+<p><code>export</code> сортирует по <code>updated_at, card_guid</code> и фильтрует <code>updated_at &gt; since</code>; контракт закреплён тестом (token_count/org_id исключены). Браузерного контура нет (нет CORS).</p>`);
+
+D('ap-formatter','comp','ApiFormatter · result_parser',`
+<p>Формирование ответов API. <span class="path">src/reporting/</span></p>
+<ul>
+<li><code>api_formatter.py</code>: <code>check</code> (count по дате визита), <code>make_xlsx</code> (workbook в памяти, тот же layout, что дисковые отчёты), <code>export</code> (курсорная выгрузка по updated_at). Всё жёстко scoped <code>organization_id</code> и <code>ignored=FALSE AND broken=FALSE</code>.</li>
+<li><code>result_parser.py</code> — <b>единственное</b> место маппинга JSONB-колонок done_cards → датаклассы (<code>parse_formal</code>, <code>parse_diagnosis</code>, <code>parse_icd_check</code>, <code>build_manifest_meta</code>). Общий для Excel-экспорта и API.</li>
+</ul>
+<h4>Деплой</h4>
+<p>Dockerfile: python:3.11-slim + uv + <code>requirements-api.txt</code> (без LLM/RAG). CMD <code>uvicorn api.app:create_app --factory --port 8000</code>. docker-compose: порт <code>\${WG_BIND_IP}:8000:8000</code> — только на WireGuard. В образе только pull-API.</p>`);
+
+
+/* ---------- Theme ---------- */
+const root = document.documentElement;
+document.getElementById('themeBtn').addEventListener('click', () => {
+  const cur = root.getAttribute('data-theme');
+  let next;
+  if(cur === 'dark') next = 'light';
+  else if(cur === 'light') next = 'dark';
+  else { // no explicit: flip relative to system
+    next = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark';
+  }
+  root.setAttribute('data-theme', next);
+});
+
+/* ---------- Tabs ---------- */
+const tabs = document.getElementById('tabs');
+tabs.addEventListener('click', e => {
+  const b = e.target.closest('button[data-tab]');
+  if(!b) return;
+  stopAllFlows();
+  document.querySelectorAll('nav.tabs button').forEach(x => x.classList.toggle('active', x === b));
+  const id = b.dataset.tab;
+  document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + id));
+  window.scrollTo({top:0, behavior:'smooth'});
+});
+
+/* ---------- Side panel ---------- */
+const overlay = document.getElementById('overlay');
+const panel = document.getElementById('panel');
+const pKind = document.getElementById('pKind');
+const pTitle = document.getElementById('pTitle');
+const pBody = document.getElementById('pBody');
+const KIND_LABEL = {comp:'компонент', actor:'актор', db:'база данных', ext:'внешняя система', llm:'LLM'};
+
+function openPanel(id){
+  const d = DETAILS[id];
+  if(!d) return;
+  pKind.className = 'kind ' + d.kind;
+  pKind.textContent = KIND_LABEL[d.kind] || d.kind;
+  pTitle.textContent = d.title;
+  pBody.innerHTML = d.body;
+  panel.classList.add('open');
+  overlay.classList.add('open');
+  panel.setAttribute('aria-hidden', 'false');
+  pBody.scrollTop = 0;
+}
+function closePanel(){
+  panel.classList.remove('open');
+  overlay.classList.remove('open');
+  panel.setAttribute('aria-hidden', 'true');
+}
+document.getElementById('pClose').addEventListener('click', closePanel);
+overlay.addEventListener('click', closePanel);
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closePanel(); });
+
+/* ---------- Node click + hover highlight ---------- */
+document.querySelectorAll('svg').forEach(svg => {
+  svg.querySelectorAll('.node[data-detail]').forEach(node => {
+    const detail = node.dataset.detail;
+    node.addEventListener('click', () => openPanel(detail));
+    node.addEventListener('mouseenter', () => highlightFor(svg, detail));
+    node.addEventListener('mouseleave', () => clearHighlight(svg));
+  });
+});
+
+function highlightFor(svg, detail){
+  svg.querySelectorAll('.edge').forEach(edge => {
+    const ep = (edge.dataset.endpoints || '').split(/\s+/);
+    if(ep.includes(detail)){
+      edge.classList.add('hl');
+      // highlight matching edge label if any (best-effort by proximity omitted)
+      // dim non-connected nodes
+    }
+  });
+  svg.querySelectorAll('.node[data-detail]').forEach(n => {
+    const isConn = [...svg.querySelectorAll('.edge')].some(edge => {
+      const ep = (edge.dataset.endpoints || '').split(/\s+/);
+      return ep.includes(detail) && ep.includes(n.dataset.detail);
+    });
+    if(n.dataset.detail !== detail && !isConn) n.classList.add('dim');
+  });
+}
+function clearHighlight(svg){
+  svg.querySelectorAll('.edge.hl').forEach(e => e.classList.remove('hl'));
+  svg.querySelectorAll('.node.dim').forEach(n => n.classList.remove('dim'));
+}
+
+/* ---------- Flow animations ---------- */
+const FLOWS = {
+  overview: [
+    {edge:'ov-e1', node:'ov-script', text:'1С МИС → audit-one-c-period.py: JSON визитов за период (HTTPS Basic, обезличено)'},
+    {edge:'ov-e3', node:'ov-pipeline', text:'Скрипт кеширует снапшот (data_snapshots) и передаёт payload в AuditPipeline'},
+    {edge:'ov-e6', node:'ov-formal', text:'Измерение 1: FormalValidator — 1 LLM-вызов по rules.json'},
+    {edge:'ov-e7', node:'ov-icd', text:'Измерение 2: ICD-checker — ReAct-агент на весь визит'},
+    {edge:'ov-e8', node:'ov-diag', text:'Измерение 3: DiagnosisValidator — 3 параллельных чекер-агента'},
+    {edge:'ov-e9', node:'ov-rag', text:'Чекеры обращаются к RAG-ретривалу (hybrid search) через тулзы'},
+    {edge:'ov-e10', node:'ov-db', text:'Векторный поиск по docs (HNSW cosine) в Postgres'},
+    {edge:'ov-e11', node:'ov-db', text:'Результаты аудита: upsert в done_cards (3 JSONB + токены)'},
+    {edge:'ov-e12', node:'ov-excel', text:'ExcelFormatter читает done_cards и строит xlsx (9 колонок) — НЕ пайплайн'},
+    {edge:'ov-e13', node:'ov-ftpup', text:'Отчёт передаётся в ftp.upload'},
+    {edge:'ov-e18', node:'ov-ftp', text:'FTP-сервер принимает xlsx в /ГГГГ/ММ/'},
+    {edge:'ov-e19', node:'ov-integrator', text:'Параллельно: интегрирующее приложение тянет отчёты pull-API (Bearer + ?org)'}
+  ],
+  pipeline: [
+    {edge:'pp-e1', node:'pp-fetch', text:'CardFilter собран из filterconfig.json; тянем JSON визитов (кеш/1С)'},
+    {edge:'pp-e2', node:'pp-dedup', text:'get_done_guids — GUID уже аудированных карт (включая ignored и broken)'},
+    {edge:'pp-e3', node:'pp-cardfilter', text:'CardFilter.filter → pending / ignored / skipped_done'},
+    {edge:'pp-e4', node:'pp-ignored', text:'Срезанные стратегией (Icd/KDL/Analysis) → upsert_ignored (ignored=TRUE)'},
+    {edge:'pp-e6', node:'pp-formal', text:'pending: FormalValidator — измерение 1, 1 LLM-вызов'},
+    {edge:'pp-e7', node:'pp-nodx', text:'Ветвление: нет диагнозов → только formal, ранний выход'},
+    {edge:'pp-e8', node:'pp-icd', text:'check_icd_codes — 1 ReAct-агент на весь визит (измерение 2)'},
+    {edge:'pp-e9', node:'pp-clinrecs', text:'На каждый диагноз: ClinicRecs подбирает file_id гайдлайна'},
+    {edge:'pp-e10', node:'pp-checkers', text:'3 параллельных чекера: anamnesis / inspection / treatment (измерение 3)'},
+    {edge:'pp-e11', node:'pp-reaudit', text:'ICD предложил другой код? → повторный аудит диагноза (вторая строка отчёта)'},
+    {edge:'pp-e12', node:'pp-upsert', text:'upsert done_card: card_data + 3 JSONB + токены + тайминги'},
+    {edge:'pp-e14', node:'pp-excel', text:'ExcelFormatter.export_period читает БД → xlsx (9 колонок)'},
+    {edge:'pp-e15', node:'pp-ftp', text:'Опционально: FTP-загрузка отчёта в /ГГГГ/ММ/'}
+  ],
+  ragin: [
+    {edge:'ri-e1', node:'ri-parse', text:'manifest.csv + PDF → PyMuPDF: TOC, скип титула, детект таблиц (bbox)'},
+    {edge:'ri-e2', node:'ri-chunk', text:'Нарезка на номерные секции → чанки ≤2000 симв (overlap 200); таблицы → tabula'},
+    {edge:'ri-e3', node:'ri-embed', text:'Эмбеддинг contextual text "[секция]\\nтело" — ключевой приём'},
+    {edge:'ri-e4', node:'ri-docs', text:'docs (embedding VECTOR 1024, HNSW) + guidelines + ingest_runs'}
+  ],
+  ragout: [
+    {edge:'ro-e1', node:'ro-embed', text:'Запрос чекер-агента → embed(query)'},
+    {edge:'ro-e2', node:'ro-vector', text:'Векторный этап: HNSW cosine, WHERE file_id + секционный subtree-фильтр'},
+    {edge:'ro-e2b', node:'ro-db', text:'Кандидатов top_k×6 из docs (отдельный asyncpg-пул)'},
+    {edge:'ro-e3', node:'ro-bm25', text:'BM25 (Python, natasha) ПО КАНДИДАТАМ векторного этапа'},
+    {edge:'ro-e4', node:'ro-rrf', text:'RRF-слияние двух ранжирований: score = Σ 1/(50+rank)'},
+    {edge:'ro-e5', node:'ro-top', text:'Топ-4 чанка → _format_chunk (заголовок клинрека + МКБ + возраст + тело)'},
+    {edge:'ro-e6', node:'ro-query', text:'Отформатированные чанки возвращаются агенту'}
+  ],
+  llm: [
+    {edge:'lm-e1', node:'lm-client', text:'formal validate_visit (temp 0.1, structured _Findings) → LLMClient'},
+    {edge:'lm-e2', node:'lm-client', text:'check_icd_codes — агентный ReAct (≤25 шагов)'},
+    {edge:'lm-e3', node:'lm-client', text:'decide_file_id / IcdPrefixPicker (temp 0.4) — только при неоднозначном коде'},
+    {edge:'lm-e4', node:'lm-client', text:'3 чекер-агента параллельно (anamnesis/inspection/treatment)'},
+    {edge:'lm-e5', node:'lm-client', text:'re-audit предложенного кода — ещё +3 агентных вызова'},
+    {edge:'lm-e6', node:'lm-client', text:'ChineseDetector.repair_issue (temp 0.3) — только при CJK в issue'},
+    {edge:'lm-e7', node:'lm-endpoint', text:'Все вызовы через LLMClient → self-hosted vLLM-эндпоинт (ретраи, temp-бамп +0.15)'}
+  ],
+  db: [
+    {edge:'db-e1', node:'db-donecards', text:'organizations 1─* done_cards (organization_id, nullable)'},
+    {edge:'db-e2', node:'db-apikeyorgs', text:'organizations *─* api_keys через api_key_organizations (M:M)'},
+    {edge:'db-e3', node:'db-apikeyorgs', text:'api_keys участвует в M:M — scope ключа на организации'},
+    {edge:'db-e4', node:'db-docs', text:'guidelines 1─* docs (file_id, FK с миграции 021)'},
+    {edge:'db-e5', node:'db-ingest', text:'guidelines 1─1 ingest_runs (по file_id, без FK)'},
+    {edge:'db-e6', node:'db-metrics', text:'done_cards → вьюха done_cards_metrics (агрегаты по дням/организациям)'},
+    {edge:'db-e7', node:'db-broken', text:'done_cards → broken_cards (админский список упавших карт)'},
+    {edge:'db-e8', node:'db-chinese', text:'done_cards → done_cards_chinese (ручная DBA-зачистка CJK)'}
+  ],
+  api: [
+    {edge:'ap-e1', node:'ap-audit', text:'PUSH: 1С → audit-one-c-period (JSON, Basic auth)'},
+    {edge:'ap-e2', node:'ap-donecards', text:'AuditPipeline пишет результаты в done_cards'},
+    {edge:'ap-e3', node:'ap-excel', text:'ExcelFormatter читает done_cards → xlsx'},
+    {edge:'ap-e4', node:'ap-ftpup', text:'Отчёт → ftp.upload'},
+    {edge:'ap-e5', node:'ap-ftpsrv', text:'FTP-сервер: /ГГГГ/ММ/report_<org>_<date>.xlsx'},
+    {edge:'ap-e6', node:'ap-auth', text:'PULL: интегратор → аутентификация (Bearer + обязательный ?org)'},
+    {edge:'ap-e7', node:'ap-router', text:'Прошло auth (иначе 401/403/404) → роутер /cards/*'},
+    {edge:'ap-e8', node:'ap-donecards', text:'Роутер читает done_cards (жёстко scoped organization_id, ignored=FALSE)'},
+    {edge:'ap-e9', node:'ap-formatter', text:'ApiFormatter формирует ответ: xlsx (pull) / count (check) / сырые строки (export)'},
+    {edge:'ap-e10', node:'ap-integrator', text:'Ответ возвращается интегрирующему приложению'}
+  ]
+};
+
+let activeFlow = null; // {svg, timer, raf, steps, idx, dot, cap}
+function stopAllFlows(){
+  if(activeFlow){
+    clearTimeout(activeFlow.timer);
+    cancelAnimationFrame(activeFlow.raf);
+    const svg = activeFlow.svg;
+    svg.querySelectorAll('.edge.active').forEach(e => e.classList.remove('active'));
+    svg.querySelectorAll('.node.active').forEach(n => n.classList.remove('active'));
+    if(activeFlow.dot) activeFlow.dot.classList.remove('on');
+    activeFlow = null;
+  }
+  document.querySelectorAll('.playbtn.stop').forEach(b => {
+    b.classList.remove('stop');
+    b.textContent = '▶ ' + (b.dataset.flow === 'db' ? 'Показать FK-связи' : 'Запустить поток');
+  });
+}
+
+document.querySelectorAll('.playbtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.flow;
+    const wasRunning = activeFlow && activeFlow.key === key;
+    stopAllFlows();
+    if(wasRunning) return;
+    btn.classList.add('stop');
+    btn.textContent = '■ Стоп';
+    startFlow(key, btn);
+  });
+});
+
+function startFlow(key, btn){
+  const svg = document.getElementById('svg-' + key);
+  const dot = document.getElementById('dot-' + key);
+  const cap = document.getElementById('cap-' + key);
+  const steps = FLOWS[key];
+  activeFlow = {key, svg, dot, cap, steps, idx:0, timer:null, raf:null, btn};
+  runStep();
+}
+
+function runStep(){
+  if(!activeFlow) return;
+  const {svg, steps, idx, dot, cap} = activeFlow;
+  if(idx >= steps.length){
+    // loop after a pause
+    activeFlow.timer = setTimeout(() => {
+      if(!activeFlow) return;
+      activeFlow.idx = 0;
+      svg.querySelectorAll('.node.active').forEach(n => n.classList.remove('active'));
+      svg.querySelectorAll('.edge.active').forEach(e => e.classList.remove('active'));
+      runStep();
+    }, 1400);
+    return;
+  }
+  const step = steps[idx];
+  const edge = document.getElementById(step.edge);
+  const node = svg.querySelector('.node[data-detail="' + step.node + '"]');
+  // clear previous edge active (keep node trail lightly)
+  svg.querySelectorAll('.edge.active').forEach(e => e.classList.remove('active'));
+  if(edge) edge.classList.add('active');
+  // caption
+  cap.innerHTML = '<span class="step-n">' + (idx+1) + '</span>' + step.text;
+  // animate dot along edge
+  const DUR = 1150;
+  if(edge && dot){
+    const len = edge.getTotalLength();
+    dot.classList.add('on');
+    const t0 = performance.now();
+    const tick = (now) => {
+      if(!activeFlow) return;
+      const p = Math.min(1, (now - t0) / DUR);
+      const pt = edge.getPointAtLength(p * len);
+      dot.setAttribute('cx', pt.x);
+      dot.setAttribute('cy', pt.y);
+      if(p < 1){
+        activeFlow.raf = requestAnimationFrame(tick);
+      } else {
+        if(node) node.classList.add('active');
+        dot.classList.remove('on');
+        activeFlow.timer = setTimeout(() => {
+          if(!activeFlow) return;
+          activeFlow.idx++;
+          runStep();
+        }, 620);
+      }
+    };
+    activeFlow.raf = requestAnimationFrame(tick);
+  } else {
+    if(node) node.classList.add('active');
+    activeFlow.timer = setTimeout(() => { if(activeFlow){ activeFlow.idx++; runStep(); } }, 900);
+  }
+}
+</script>
+</body>
+</html>

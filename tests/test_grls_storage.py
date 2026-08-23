@@ -121,15 +121,15 @@ async def test_similarity_threshold_guc_is_compatible_with_inn_fuzzy_threshold()
 async def test_search_by_inn_composite_and_substance_filter():
     async with GrlsStorage() as s:
         await s.replace_all(_fixture_records(), _import())
-        # Пробелы вокруг «+» нормализация не трогает, поэтому запрос врача не
-        # равен записи реестра посимвольно и уровень получается нечётким —
-        # в отчёте это «препарат не опознан» на ровном месте. См. техдолг.
-        got, kind = await s.search_by_inn("амоксициллин + клавулановая кислота")
-        assert kind is MatchKind.FUZZY
-        assert {r.reg_number for r in got} == {"ЛП-000001", "ЛП-000002", "ЛП-000003"}
-        exact, kind = await s.search_by_inn("амоксициллин+клавулановая кислота")
-        assert kind is MatchKind.EXACT
-        assert {r.reg_number for r in exact} == {"ЛП-000001", "ЛП-000002", "ЛП-000003"}
+        # Обе записи составного МНН — одно и то же: пробелы вокруг «+»
+        # нормализация убирает. Раньше вариант врача давал уровень «похоже»,
+        # то есть «препарат не опознан» из-за двух пробелов.
+        for spelling in ("амоксициллин + клавулановая кислота",
+                         "амоксициллин+клавулановая кислота",
+                         "Амоксициллин  +  Клавулановая кислота"):
+            got, kind = await s.search_by_inn(spelling)
+            assert kind is MatchKind.EXACT, spelling
+            assert {r.reg_number for r in got} == {"ЛП-000001", "ЛП-000002", "ЛП-000003"}
         # «Амоксициллин» входит в составное МНН — это уровень CONTAINS, и раньше
         # он терялся: similarity 0.394 ниже порога 0.6, поиск по МНН отдавал
         # пусто, и запрос проваливался в торговые наименования и БАДы.

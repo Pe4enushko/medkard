@@ -101,3 +101,27 @@ def test_normalize_query():
     assert n.normalize_query("Ёлкин\tчай") == "елкин чай"
     assert n.normalize_query("Аспирин™ 500") == "аспирин 500"
     assert n.normalize_query("~") == ""
+
+
+def test_spaces_around_plus_are_removed():
+    """Врач пишет с пробелами, реестр хранит без — это должна быть одна строка.
+
+    Иначе составное МНН опознавалось как «похожее»: разница ровно в двух
+    пробелах, а в отчёте это выглядит как «препарат не опознан».
+    """
+    canonical = "амоксициллин+клавулановая кислота"
+    for spelling in ("Амоксициллин + Клавулановая кислота",
+                     "амоксициллин+клавулановая кислота",
+                     "Амоксициллин  +  Клавулановая кислота",
+                     "Амоксициллин +Клавулановая кислота"):
+        assert n.normalize_query(spelling) == canonical, spelling
+
+
+def test_non_breaking_space_collapses_like_a_normal_one():
+    """Зеркало SQL: `\\s+` в Postgres неразрывный пробел не схлопывает.
+
+    Парность проверяется на живой БД (`test_grls_norm_parity_with_python`);
+    здесь закреплена питоновская половина контракта.
+    """
+    assert n.normalize_query("A B") == "a b"
+    assert n.normalize_query("Витамин D") == "витамин d"
