@@ -1,4 +1,12 @@
-"""GrlsStorage — async psycopg3 interface for grls_registry / grls_imports (migration 028)."""
+"""GrlsStorage — async psycopg3 interface for grls_registry / grls_imports.
+
+Поиск идёт по хранимым нормализованным колонкам `inn_norm` / `trade_norm`
+(миграция 029), а не по выражению `grls_norm(...)`. Причина в замере
+`docs/grls-search-cost-2026-08-23.md`: индекс по выражению спасает только те
+запросы, которые планировщик сумел через него провести, а любой оставшийся
+пересчитывал нормализацию на всех 39 тыс. строк — 98 % стоимости такого
+запроса приходилось на translate+regexp_replace, а не на поиск.
+"""
 from __future__ import annotations
 
 import logging
@@ -7,7 +15,8 @@ from datetime import date
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from grls.match import FUZZY_THRESHOLD, MIN_CONTAINED_LEN, MatchKind, discriminator_tokens
+from grls.match import (FUZZY_THRESHOLD, MIN_CONTAINED_LEN, MatchKind,
+                        discriminator_tokens, like_pattern)
 from grls.normalize import normalize_query
 from grls.status import LIVE_STATUSES, STATUS_RANK
 from storage.base import BaseStorage
@@ -42,7 +51,7 @@ _GUARD = sql.SQL(
 # Вхождение в обе стороны: врач пишет и короче реестра («Метопролол» при
 # «Метопролола сукцинат»), и длиннее («Левотироксин натрия» при «Левотироксин»).
 _CONTAINS = sql.SQL(
-    "((length(%(q)s) >= {min_len} AND position(%(q)s in {col}) > 0) "
+    "((length(%(q)s) >= {min_len} AND {col} LIKE %(like)s) "
     " OR (length({col}) >= {min_len} AND position({col} in %(q)s) > 0))"
 )
 # `%%` дополнительно ограничен GUC pg_trgm.similarity_threshold (по умолчанию
@@ -125,7 +134,7 @@ class GrlsStorage(BaseStorage):
         Возвращает записи и уровень, на котором они нашлись. Уровень обязан
         доехать до ответа: нечёткое совпадение — это «похоже», а не «это оно».
         """
-        return await self._search(sql.SQL("grls_norm(inn_name)"), query,
+        return await self._search(sql.SQL("inn_norm"), query,
                                   limit=limit, include_substances=include_substances,
                                   fuzzy=FUZZY_THRESHOLD)
 
@@ -133,7 +142,7 @@ class GrlsStorage(BaseStorage):
                                    include_substances: bool = False,
                                    ) -> tuple[list[GrlsRecord], MatchKind | None]:
         """То же по торговому наименованию; триграммный порог тут строже."""
-        return await self._search(sql.SQL("grls_norm(trade_name)"), query,
+        return await self._search(sql.SQL("trade_norm"), query,
                                   limit=limit, include_substances=include_substances,
                                   fuzzy=_TRADE_FUZZY_THRESHOLD)
 
@@ -143,7 +152,8 @@ class GrlsStorage(BaseStorage):
         q = normalize_query(query)
         if not q:
             return [], None
-        params = {"q": q, "fuzzy": fuzzy, "tokens": discriminator_tokens(q),
+        params = {"q": q, "like": like_pattern(q), "fuzzy": fuzzy,
+                  "tokens": discriminator_tokens(q),
                   "inc": include_substances, "limit": limit}
         for kind in MatchKind:
             stmt = sql.SQL(
@@ -172,17 +182,18 @@ class GrlsStorage(BaseStorage):
         q = normalize_query(query)
         if not q:
             return {}, 0
-        column = sql.SQL("grls_norm(inn_name)")
+        column = sql.SQL("inn_norm")
         stmt = sql.SQL(
             "SELECT status, count(*) AS n, "
-            "       count(*) FILTER (WHERE %(on)s IS NOT NULL "
-            "                          AND COALESCE(annulled_at, expires_at) >= %(on)s"
+            "       count(*) FILTER (WHERE %(on)s::date IS NOT NULL "
+            "                          AND COALESCE(annulled_at, expires_at) >= %(on)s::date"
             "                       ) AS valid_at_visit "
             "FROM grls_registry "
             "WHERE {pred} AND (%(inc)s OR NOT is_substance) GROUP BY status"
         ).format(pred=_tier_predicate(column, kind))
         async with self._pool.connection() as conn:
-            cur = await conn.execute(stmt, {"q": q, "fuzzy": FUZZY_THRESHOLD,
+            cur = await conn.execute(stmt, {"q": q, "like": like_pattern(q),
+                                            "fuzzy": FUZZY_THRESHOLD,
                                             "tokens": discriminator_tokens(q),
                                             "on": on, "inc": include_substances})
             rows = await cur.fetchall()

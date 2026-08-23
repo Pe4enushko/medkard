@@ -59,6 +59,16 @@ def discriminators_agree(query: str, candidate: str) -> bool:
     return all(token in candidate_tokens for token in discriminator_tokens(query))
 
 
+def like_pattern(query: str) -> str:
+    """Запрос как шаблон LIKE для поиска вхождения.
+
+    Экранирование обязательно: `_` и `%` внутри названия иначе становятся
+    подстановочными знаками и превращают точный поиск в маску.
+    """
+    escaped = normalize_query(query).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 def contains(query: str, candidate: str) -> bool:
     """Одна нормализованная строка входит в другую, в любую сторону.
 
