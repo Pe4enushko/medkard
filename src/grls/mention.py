@@ -77,7 +77,37 @@ _VITAMIN_RE = re.compile(r"\b(?:вит|витамин)\.?\s*([a-zа-я]|[a-zа-�
 _VITAMIN_LETTERS = {"a": "а", "а": "a", "b": "в", "в": "b", "c": "с", "с": "c",
                     "d": "д", "д": "d", "e": "е", "е": "e", "k": "к", "к": "k"}
 
+# Граница между названием и назначением. Врач пишет строку целиком — «Нольпаза
+# 20 мг 1 таб на ночь», «Эуфиллин 2,4% 5,0мл на 15,0 мл физраствора в/в струйно
+# № 5-10», — и название всегда стоит В НАЧАЛЕ. Всё от первого признака дозировки,
+# пути введения или схемы приёма — уже не название.
+#
+# Резать по «любому токену с цифрой» нельзя: «Омега 3», «Витамин D3» и
+# «Мабелль-плюс» потеряли бы имя. Поэтому цифра считается границей только вместе
+# с единицей измерения или формой выпуска.
+_UNITS = r"мг|мкг|мл|гр?|ме|ед|таб|табл|капс|амп|шт|доз|%"
+_CUT_RE = re.compile(
+    r"\b\d+(?:[.,]\d+)?\s*(?:" + _UNITS + r")\b"          # 20 мг, 1таб, 2,4%
+    r"|№\s*\d+"                                             # № 5-10
+    r"|\b(?:в/в|в/м|п/к|в/к|per\s*os|внутрь|наружно|местно)\b"
+    r"|\b(?:по|курс|курсом|однократно|ежедневно|длительно)\b"
+    r"|\b\d+\s*(?:р|раз)[/\s]"                              # 3 р/день, 1 раз
+    r"|\b(?:дней|дня|нед|недели|недель|мес|месяц|месяца|сут|сутки)\b",
+    re.IGNORECASE,
+)
+
+# «эторикоксиб/аркоксиа», «троксерутин/флебодиа»: врач пишет МНН и торговое через
+# косую — это два имени одного назначения, оба годятся для поиска.
+_SLASH_RE = re.compile(r"(?<=[а-яёa-z])\s*/\s*(?=[а-яёa-z])", re.IGNORECASE)
+
 _MIN_QUERY_LEN = 3
+
+
+def _cut_prescription(text: str) -> str:
+    """Отрезать дозировку и схему приёма: название препарата стоит в начале."""
+    match = _CUT_RE.search(text)
+    head = text[: match.start()] if match else text
+    return head.strip() or text
 
 
 def _vitamin_forms(text: str) -> list[str]:
@@ -96,6 +126,7 @@ def _vitamin_forms(text: str) -> list[str]:
 
 def _strip_noise(text: str) -> str:
     """Убрать дозировку, назначение, форму выпуска и класс. Название остаётся."""
+    text = _cut_prescription(text)
     text = _DOSAGE_RE.sub(" ", text)
     text = _PURPOSE_RE.sub(" ", text)
     text = _GLUED_DOT_RE.sub(" ", text)
@@ -127,8 +158,12 @@ def search_candidates(as_written: str) -> list[str]:
     ]
     whole = normalize_query(as_written)
 
+    alternatives = [normalize_query(part) for part in _SLASH_RE.split(stripped)] \
+        if _SLASH_RE.search(stripped) else []
+
     out: list[str] = []
-    for candidate in (*_vitamin_forms(stripped), stripped, *parens, outside, whole):
+    for candidate in (*_vitamin_forms(stripped), stripped, *alternatives,
+                      *parens, outside, whole):
         if len(candidate) >= _MIN_QUERY_LEN and candidate not in out:
             out.append(candidate)
     return out

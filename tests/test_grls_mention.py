@@ -143,3 +143,38 @@ def test_vitamin_rule_does_not_touch_ordinary_names() -> None:
     assert search_candidates("Далацин гель 1%") == ["далацин", "далацин гель 1%"]
     assert search_candidates("Метронидазол") == ["метронидазол"]
     assert search_candidates("L-тироксин") == ["l-тироксин"]
+
+
+@pytest.mark.parametrize(
+    ("as_written", "expected_first"),
+    [
+        ("Нольпаза 20 мг 1 таб на ночь", "нольпаза"),
+        ("Эуфиллин 2,4% 5,0мл на 15,0 мл физраствора в/в струйно № 5-10", "эуфиллин"),
+        ("Дулоксетин 60мг №28 1 р/с 0,5 таб на ночь при хронической боли", "дулоксетин"),
+        ("Дипроспан 1 амп в/м однократно", "дипроспан"),
+        ("Вэссел ду эф 2 мл", "вэссел ду эф"),
+        ("ребамипид  СЗ  100мг", "ребамипид сз"),
+    ],
+)
+def test_prescription_tail_is_cut_off(as_written: str, expected_first: str) -> None:
+    """Врач пишет строку назначения целиком, название стоит в начале.
+
+    На прогоне 2026-08-23 19:13 такие строки дали 33% промахов: «нольпаза 1 на
+    ночь» в реестре не найдётся никогда.
+    """
+    assert search_candidates(as_written)[0] == expected_first
+
+
+def test_digits_that_belong_to_the_name_survive_the_cut() -> None:
+    """Цифра — граница только вместе с единицей измерения или формой выпуска.
+    Резать по «любому токену с цифрой» значило бы потерять эти имена."""
+    assert search_candidates("Омега 3")[0] == "омега 3"
+    assert search_candidates("Витамин D3")[0] == "витамин d3"
+    assert search_candidates("Мабелль-плюс")[0] == "мабелль-плюс"
+
+
+def test_slash_holds_two_names_of_one_prescription() -> None:
+    """«эторикоксиб/аркоксиа» — МНН и торговое через косую, оба годятся."""
+    candidates = search_candidates("эторикоксиб/аркоксиа 60 мг по 1 таб/сут")
+
+    assert candidates[:3] == ["эторикоксиб/аркоксиа", "эторикоксиб", "аркоксиа"]
