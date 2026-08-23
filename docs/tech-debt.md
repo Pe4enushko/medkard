@@ -60,3 +60,4 @@
 | `sum(pg_column_size(done_cards.*))` детоастит JSONB: дорого, и это распакованный размер, а не занятый на диске | `src/storage/stats_storage.py:42–58` |
 | `GRAPH_TRACE_PATH` по умолчанию относительный — трейс уезжает в CWD процесса | `src/audit/graph_trace.py:81` |
 | `Result` не содержит `icd_check`, поэтому `audit.completed.output` в трейсе показывает только formal и diagnosis | `src/audit/pipeline.py:556–561` |
+| Латиница против кириллицы в названии не чинится: «L-тироксин» из карты не находит «Л-Тироксин» в реестре. Транслитерация без замера — угадывание; это работа триграммного слоя, а он на боевом прогоне 2026-08-23 не сработал ни разу из 63 обращений (диагностика — `grls-fuzzy-probe.sql`) | `src/grls/mention.py`, `src/grls/match.py:97` |

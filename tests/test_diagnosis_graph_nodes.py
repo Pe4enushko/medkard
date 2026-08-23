@@ -302,7 +302,7 @@ async def test_generate_questions_raises_when_fallback_has_no_diagnosis(
 async def test_extract_drugs_degrades_on_schema_error() -> None:
     update = await extract_drugs(
         {"visit_context": "Назначен амоксициллин"},
-        client=_Client('{"items":[{"as_written":"Амоксициллин"}]}', tokens=5),
+        client=_Client('{"items":[{"нет такого поля": 1}]}', tokens=5),
     )
 
     assert update["drug_mentions"] == []
@@ -331,29 +331,29 @@ async def test_lookup_drugs_passes_visit_date_and_formats_one_context(
         {
             "visit_date": date(2025, 3, 10),
             "drug_mentions": [
-                {"as_written": "Амоксиклав", "normalized": "амоксиклав"},
-                {"as_written": "Ксизал", "normalized": "ксизал"},
+                {"as_written": "Амоксиклав"},
+                {"as_written": "Ксизал"},
             ],
         },
         lookup=lookup,
     )
 
     assert calls == [
-        ("амоксиклав", date(2025, 3, 10)),
-        ("ксизал", date(2025, 3, 10)),
+        ("Амоксиклав", date(2025, 3, 10)),
+        ("Ксизал", date(2025, 3, 10)),
     ]
     assert "Дата визита: 2025-03-10" in update["drug_context"]
-    assert "- Амоксиклав → found амоксиклав" in update["drug_context"]
+    assert "- Амоксиклав → found Амоксиклав" in update["drug_context"]
     retrieved = [
         fields for event, fields in trace_events if event == "medicine.retrieved"
     ]
-    assert [item["mention"]["normalized"] for item in retrieved] == [
-        "амоксиклав",
-        "ксизал",
+    assert [item["mention"]["as_written"] for item in retrieved] == [
+        "Амоксиклав",
+        "Ксизал",
     ]
     assert [item["result"] for item in retrieved] == [
-        "found амоксиклав",
-        "found ксизал",
+        "found Амоксиклав",
+        "found Ксизал",
     ]
 
 
@@ -403,7 +403,7 @@ async def test_lookup_drugs_degrades_when_grls_is_unavailable() -> None:
     update = await lookup_drugs(
         {
             "drug_mentions": [
-                {"as_written": "Амоксиклав", "normalized": "амоксиклав"}
+                {"as_written": "Амоксиклав"}
             ]
         },
         lookup=lookup,
@@ -576,3 +576,87 @@ async def test_judge_aspect_degrades_on_invalid_json_without_losing_tokens() -> 
     assert update["issues"] == {"inspection": []}
     assert update["tokens"] == 17
     assert update["errors"][0].startswith("judge_inspection:")
+
+
+class _SequenceClient:
+    """Отдаёт заготовленные ответы по очереди — для проверки второго захода."""
+
+    def __init__(self, responses: list[str], tokens: int = 7) -> None:
+        self.responses = list(responses)
+        self.tokens = tokens
+        self.calls: list[list[dict]] = []
+
+    async def call(self, messages, **kwargs):
+        self.calls.append(messages)
+        return self.responses.pop(0), self.tokens
+
+
+async def test_extract_drugs_keeps_only_what_is_in_the_record() -> None:
+    """Модель обязана вернуть написание из карты, а не своё представление о нём.
+
+    Случай с прогона 2026-08-23: врач написал «Армолипид» (БАД), модель выдала
+    «Армолипин» — торговое название амлодипина. Поиск по выдуманному имени
+    ничего не находит, и промах засчитывается реестру, а не модели.
+    """
+    client = _SequenceClient([
+        '{"items":[{"as_written":"Армолипин"},{"as_written":"Омега 3"}]}',
+        '{"items":[{"as_written":"Армолипид"},{"as_written":"Омега 3"}]}',
+    ])
+
+    update = await extract_drugs(
+        {"visit_context": "Назначено: Армолипид, Омега 3"},
+        client=client,
+    )
+
+    assert update["drug_mentions"] == [
+        {"as_written": "Армолипид"},
+        {"as_written": "Омега 3"},
+    ]
+    assert len(client.calls) == 2
+    assert update["tokens"] == 14
+
+
+async def test_extract_drugs_reproach_names_the_offending_strings() -> None:
+    """Второй заход — не «то же самое ещё раз»: без перечня непрошедших строк
+    модель повторяет ту же выдумку."""
+    client = _SequenceClient([
+        '{"items":[{"as_written":"элюцин"}]}',
+        '{"items":[{"as_written":"Эльжина"}]}',
+    ])
+
+    await extract_drugs({"visit_context": "Свечи Эльжина на ночь"}, client=client)
+
+    reproach = client.calls[1][-1]["content"]
+    assert "элюцин" in reproach
+    assert client.calls[1][:2] == client.calls[0]
+
+
+async def test_extract_drugs_drops_invention_that_survives_the_second_try() -> None:
+    """Упорную выдумку выбрасываем, а не тащим в поиск: карта остаётся, справка
+    строится по тому, что в тексте действительно есть."""
+    client = _SequenceClient([
+        '{"items":[{"as_written":"Уросан"},{"as_written":"Гепамерц"}]}',
+        '{"items":[{"as_written":"Уросан"},{"as_written":"Гепамерц"}]}',
+    ])
+
+    update = await extract_drugs(
+        {"visit_context": "Принимает Уросо, Гепамерц"},
+        client=client,
+    )
+
+    assert update["drug_mentions"] == [{"as_written": "Гепамерц"}]
+    assert len(client.calls) == 2
+
+
+async def test_extract_drugs_verbatim_check_ignores_case_and_line_breaks() -> None:
+    """Врач переносит строки и пишет как придётся — придираться к этому нельзя,
+    иначе проверка начнёт выбрасывать верные упоминания."""
+    client = _SequenceClient(['{"items":[{"as_written":"Далацин гель 1%"}]}'])
+
+    update = await extract_drugs(
+        {"visit_context": "Наружно:\n  ДАЛАЦИН   гель\n1% дважды в день"},
+        client=client,
+    )
+
+    assert update["drug_mentions"] == [{"as_written": "Далацин гель 1%"}]
+    assert len(client.calls) == 1

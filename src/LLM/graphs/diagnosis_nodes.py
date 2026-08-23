@@ -210,6 +210,31 @@ async def generate_questions(
         return update
 
 
+def _flatten(text: str) -> str:
+    """Для сверки дословности: регистр и переносы строк расхождением не считаем."""
+    return " ".join(text.lower().split())
+
+
+_VERBATIM_REPROACH = (
+    "Этих фрагментов нет в записи дословно: {bad}. Ты их изменил или придумал. "
+    "Верни список заново, беря только те строки, которые есть в тексте символ "
+    "в символ, вместе с опечатками врача."
+)
+
+
+def _verbatim(items: list[Any], context: str) -> tuple[list[str], list[str]]:
+    """Разделить упоминания на найденные в тексте и выдуманные."""
+    flat = _flatten(context)
+    good: list[str] = []
+    bad: list[str] = []
+    for item in items:
+        written = item.as_written.strip()
+        if not written:
+            continue
+        (good if _flatten(written) in flat else bad).append(written)
+    return good, bad
+
+
 async def extract_drugs(
     state: DiagnosisState,
     *,
@@ -224,31 +249,44 @@ async def extract_drugs(
     client = client or _default_client()
     tokens = 0
     try:
-        raw, tokens = await client.call(
-            [
-                {"role": "system", "content": _load_prompt("diagnosis_drugs.txt")},
-                {"role": "user", "content": state.get("visit_context", "—")},
-            ],
-            temperature=0.0,
-            response_model=DrugList,
-            reasoning_effort="low",
-            metadata={
-                "node": "extract_drugs",
-                "card_guid": state.get("card_guid"),
-                "correlation_id": state.get("correlation_id"),
-                "dx_code": state.get("dx_code"),
-            },
-        )
-        output = _validated_output(raw, DrugList)
-        assert isinstance(output, DrugList)
-        mentions = [
-            {
-                "as_written": item.as_written.strip(),
-                "normalized": item.normalized.strip(),
-            }
-            for item in output.items
-            if item.as_written.strip() and item.normalized.strip()
+        context = state.get("visit_context", "—")
+        messages = [
+            {"role": "system", "content": _load_prompt("diagnosis_drugs.txt")},
+            {"role": "user", "content": context},
         ]
+        # Второй заход — не «ещё раз то же самое», а разбор с перечнем
+        # непрошедших строк: без него модель повторяет ту же выдумку.
+        for attempt in range(2):
+            raw, spent = await client.call(
+                messages,
+                temperature=0.0,
+                response_model=DrugList,
+                reasoning_effort="low",
+                metadata={
+                    "node": "extract_drugs",
+                    "card_guid": state.get("card_guid"),
+                    "correlation_id": state.get("correlation_id"),
+                    "dx_code": state.get("dx_code"),
+                    "attempt": attempt + 1,
+                },
+            )
+            tokens += spent
+            output = _validated_output(raw, DrugList)
+            assert isinstance(output, DrugList)
+            good, bad = _verbatim(output.items, context)
+            if not bad or attempt:
+                break
+            trace_emit(
+                "medicine.extraction.not_verbatim",
+                dx_code=state.get("dx_code"),
+                invented=bad,
+                kept=good,
+            )
+            messages = [*messages, {"role": "user",
+                                    "content": _VERBATIM_REPROACH.format(bad=", ".join(bad))}]
+        if bad:
+            logger.warning("[extract_drugs] выдуманные упоминания отброшены: %s", bad)
+        mentions = [{"as_written": written} for written in good]
         update = {"drug_mentions": mentions, "tokens": tokens}
         trace_emit(
             "graph.node.completed",
@@ -321,7 +359,7 @@ async def lookup_drugs(
     try:
         lines = []
         for mention in mentions:
-            result = await lookup(mention["normalized"], on=state.get("visit_date"))
+            result = await lookup(mention["as_written"], on=state.get("visit_date"))
             trace_emit(
                 "medicine.retrieved",
                 dx_code=state.get("dx_code"),

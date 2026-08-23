@@ -17,7 +17,6 @@ class Question(TypedDict):
 
 class DrugMention(TypedDict):
     as_written: str
-    normalized: str
 
 
 class Chunk(TypedDict):
@@ -69,8 +68,9 @@ class QuestionSet(BaseModel):
 
 
 class DrugMentionOutput(BaseModel):
+    """Только дословное написание из карты: нормализацию делает grls.mention."""
+
     as_written: str
-    normalized: str
 
 
 class DrugList(BaseModel):

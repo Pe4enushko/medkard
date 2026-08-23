@@ -132,7 +132,8 @@ queries, completion = await client.chat.completions.create_with_completion(
 `LLM/graphs/diagnosis_nodes.py` вызывает `LLMClient.call` без tools:
 
 - `generate_questions` → `QuestionSet`;
-- `extract_drugs` → `DrugList`;
+- `extract_drugs` → `DrugList` (только `as_written`, дословно из карты; при
+  непрохождении сверки — второй заход с перечнем непрошедших строк);
 - `judge_anamnesis`, `judge_inspection`, `judge_treatment`, `judge_criteria`
   → `JudgeOutput` с числовыми `chunk_refs`.
 
