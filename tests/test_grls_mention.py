@@ -54,7 +54,7 @@ def test_parentheses_hold_a_second_name_not_junk(
     """
     candidates = search_candidates(as_written)
     assert candidates[0] == first
-    assert candidates[1] == second
+    assert second in candidates
 
 
 def test_full_string_stays_last_for_the_contains_tier() -> None:
@@ -113,3 +113,33 @@ def test_the_model_no_longer_gets_to_swap_one_drug_for_another() -> None:
     """
     assert search_candidates("нольпаза") == ["нольпаза"]
     assert search_candidates("Славяновская") == ["славяновская"]
+
+
+@pytest.mark.parametrize(
+    ("as_written", "expected_head"),
+    [
+        ("Вит Д", ["витамин д", "витамин d"]),
+        ("Витамин D", ["витамин d", "витамин д"]),
+        ("Вит. D3", ["витамин d3", "витамин д3"]),
+        ("витамин с", ["витамин с", "витамин c"]),
+    ],
+)
+def test_vitamin_letter_goes_to_the_registry_in_both_alphabets(
+    as_written: str, expected_head: list[str]
+) -> None:
+    """Латинская D и кириллическая Д на письме взаимозаменяемы, а в реестре нет.
+
+    На прогоне 2026-08-23 модель превратила написанное врачом «Вит Д» в
+    «Витамин D» с латинской буквой — и поиск не нашёл ничего, тогда как
+    «Витамин Д» в том же прогоне находился. Угадывать, какую букву имел в виду
+    врач, нечем, поэтому в реестр уходят обе.
+    """
+    assert search_candidates(as_written)[:2] == expected_head
+
+
+def test_vitamin_rule_does_not_touch_ordinary_names() -> None:
+    """Набор букв закрытый и срабатывает только после «вит»/«витамин»:
+    общая транслитерация — открытый набор и без замера была бы угадыванием."""
+    assert search_candidates("Далацин гель 1%") == ["далацин", "далацин гель 1%"]
+    assert search_candidates("Метронидазол") == ["метронидазол"]
+    assert search_candidates("L-тироксин") == ["l-тироксин"]

@@ -150,8 +150,13 @@ def format_medicine_lookup(lookup: MedicineLookup) -> str:
         return "\n".join(lines)
     if lookup.trade_records:
         recs = lookup.trade_records[:MAX_TRADE_RECORDS]
-        head = f"Найдено в ГРЛС ({len(recs)}; {_registry_note(lookup)}):"
-        if lookup.trade_match is MatchKind.FUZZY:
+        head = (f"Точное совпадение с торговым наименованием "
+                f"({len(recs)}; {_registry_note(lookup)}):")
+        if lookup.trade_match is MatchKind.CONTAINS:
+            head = (f"Точного совпадения с торговым наименованием нет: написанное врачом и "
+                    f"наименование из реестра входят одно в другое ({len(recs)}; "
+                    f"{_registry_note(lookup)}). Карточки подходят предположительно:")
+        elif lookup.trade_match is MatchKind.FUZZY:
             head = (f"Точного совпадения с торговым наименованием нет; по написанию похожи "
                     f"({len(recs)}; {_registry_note(lookup)}). Препарат не опознан:")
         lines = [head + "\n"]

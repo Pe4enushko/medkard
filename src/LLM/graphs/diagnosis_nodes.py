@@ -317,6 +317,18 @@ async def extract_drugs(
         return update
 
 
+# Реестр ищется по написанию из карты, а совпадение написаний — не опознание
+# препарата. Судья обязан видеть это как посылку, а не догадываться по формулировке
+# отдельной карточки: на прогоне 2026-08-23 карточка Но-шпы (дротаверин) уехала в
+# контекст как справка о Нольпазе (пантопразол) — совпадение было точным, неверным
+# был запрос.
+_REGISTRY_CAVEAT = (
+    "Справка из ГРЛС подобрана по написанию препарата в карте. Совпадение строк — "
+    "не опознание препарата: уровень совпадения указан у каждой записи, и всё, что "
+    "не помечено точным, считай предположительным.\n"
+)
+
+
 async def _default_medicine_lookup(query: str, on: date | None = None) -> str:
     from grls.format import format_medicine_lookup
     from grls.lookup import lookup_medicine
@@ -384,7 +396,7 @@ async def lookup_drugs(
 
     visit_date = state.get("visit_date")
     prefix = f"Дата визита: {visit_date.isoformat()}\n" if visit_date else ""
-    update = {"drug_context": prefix + "\n".join(lines)}
+    update = {"drug_context": prefix + _REGISTRY_CAVEAT + "\n".join(lines)}
     trace_emit(
         "graph.node.completed",
         node="lookup_drugs",

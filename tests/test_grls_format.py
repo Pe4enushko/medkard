@@ -79,8 +79,10 @@ def test_inn_branch_warns_when_nothing_live():
 
 
 def test_trade_branch_header_and_blocks():
-    text = format_medicine_lookup(_lookup(trade_records=[_rec(st.STATUS_ACTIVE), _rec(st.STATUS_EXPIRED, expires_at="31.12.2025")]))
-    assert text.startswith("Найдено в ГРЛС (2; реестр от 2026-08-17):")
+    text = format_medicine_lookup(_lookup(
+        trade_records=[_rec(st.STATUS_ACTIVE), _rec(st.STATUS_EXPIRED, expires_at="31.12.2025")],
+        trade_match=MatchKind.EXACT))
+    assert text.startswith("Точное совпадение с торговым наименованием (2; реестр от 2026-08-17):")
     assert "--- 1 ---" in text and "--- 2 ---" in text
     assert "Статус РУ: Действующий (РУ ЛП-000001, бессрочно)" in text
 
@@ -120,7 +122,12 @@ def test_inn_headline_states_the_match_level():
 def test_fuzzy_trade_match_does_not_claim_a_find():
     recs = [_rec(st.STATUS_ACTIVE)]
     exact = format_medicine_lookup(_lookup(trade_records=recs, trade_match=MatchKind.EXACT))
-    assert exact.startswith("Найдено в ГРЛС (1;")
+    assert exact.startswith("Точное совпадение с торговым наименованием (1;")
+
+    # Вхождение — не находка: «Славяновская» вошла в МНН «Вода» на боевых данных.
+    contains = format_medicine_lookup(_lookup(trade_records=recs, trade_match=MatchKind.CONTAINS))
+    assert "Точного совпадения с торговым наименованием нет" in contains
+    assert "предположительно" in contains
 
     fuzzy = format_medicine_lookup(_lookup(trade_records=recs, trade_match=MatchKind.FUZZY))
     assert fuzzy.startswith("Точного совпадения с торговым наименованием нет")
