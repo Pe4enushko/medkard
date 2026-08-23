@@ -48,17 +48,30 @@ _FORM_WORDS = frozenset({
     "пластырь", "настойка", "шампунь", "сбор", "концентрат", "лиофилизат",
 })
 
-# Не название препарата, а вид изделия: «ВМС «Мирена»».
-_DEVICE_WORDS = frozenset({"вмс", "спираль", "пластырь"})
+# Не название препарата, а вид изделия или класс, которым врач его обозначил:
+# «ВМС «Мирена»», «КОК «Джес»», «НПВС свечи «Индометацин»», «Препараты Йода».
+_DEVICE_WORDS = frozenset({
+    "вмс", "спираль", "кок", "нпвс", "ипп", "бад", "препарат", "препараты",
+    "комплекс", "комплексы",
+})
+
+# «Таб.Юнидокс-солютаб», «таб.фолиевая кислота»: врач лепит сокращение формы к
+# названию через точку, и без разлепления в реестр уходит несуществующее слово.
+_GLUED_DOT_RE = re.compile(r"(?<=[а-яёa-z])\.(?=[а-яёa-z])", re.IGNORECASE)
 
 _MIN_QUERY_LEN = 3
 
 
 def _strip_noise(text: str) -> str:
-    """Убрать дозировку, назначение и форму выпуска. Название остаётся."""
+    """Убрать дозировку, назначение, форму выпуска и класс. Название остаётся."""
     text = _DOSAGE_RE.sub(" ", text)
     text = _PURPOSE_RE.sub(" ", text)
-    words = [w for w in text.split() if w not in _FORM_WORDS and w not in _DEVICE_WORDS]
+    text = _GLUED_DOT_RE.sub(" ", text)
+    words = [
+        word
+        for word in (w.strip(".,;") for w in text.split())
+        if word and word not in _FORM_WORDS and word not in _DEVICE_WORDS
+    ]
     return " ".join(words)
 
 
@@ -73,8 +86,13 @@ def search_candidates(as_written: str) -> list[str]:
     """
     outside = normalize_query(_PAREN_RE.sub(" ", as_written))
     stripped = _strip_noise(outside)
-    parens = [normalize_query(_strip_noise(normalize_query(p)))
-              for p in _PAREN_RE.findall(as_written)]
+    # В скобках бывает перечень: «Препараты Йода (Йодомарин, Калия йодид)» —
+    # это два разных препарата, а не одно название с запятой.
+    parens = [
+        normalize_query(_strip_noise(normalize_query(part)))
+        for group in _PAREN_RE.findall(as_written)
+        for part in group.split(",")
+    ]
     whole = normalize_query(as_written)
 
     out: list[str] = []
