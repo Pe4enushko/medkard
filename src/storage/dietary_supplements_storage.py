@@ -2,8 +2,22 @@
 DietarySupplementsStorage — async psycopg3 interface for the dietary_supplements lookup table.
 """
 
+import logging
+
 from .base import BaseStorage
 from .models.dietary_supplement import DietarySupplement
+
+logger = logging.getLogger(__name__)
+
+_BATCH = 1000
+_REPLACE_COLS = (
+    "registration_number", "status", "product_name", "manufacturer_name",
+    "country_of_manufacture", "scope_of_application", "label_info", "registered_at",
+)
+_REPLACE_SQL = (
+    "INSERT INTO dietary_supplements (" + ", ".join(_REPLACE_COLS) + ") VALUES ("
+    + ", ".join(f"%({c})s" for c in _REPLACE_COLS) + ")"
+)
 
 
 def _row_to_supplement(row: dict) -> DietarySupplement:
@@ -126,3 +140,36 @@ class DietarySupplementsStorage(BaseStorage):
             )
             row = await cur.fetchone()
         return _row_to_supplement(row) if row else None
+
+    async def replace_all(self, supplements: list[DietarySupplement]) -> int:
+        """Полная замена реестра в одной транзакции. Возвращает число строк после.
+
+        DELETE, а не TRUNCATE — как в grls_storage: TRUNCATE берёт ACCESS
+        EXCLUSIVE и блокирует читателей, а по этой таблице в это время может
+        идти справка по назначению.
+
+        Пустой список не принимается: он почти всегда означает сбой разбора
+        выгрузки, а не «реестр отменили». Вычистить справочник и оставить
+        аудит без БАД — худший исход, поэтому отказываемся до DELETE.
+        """
+        if not supplements:
+            raise ValueError(
+                "нечего писать: разбор выгрузки не дал ни одной записи — "
+                "реестр не трогаем, чтобы не вычистить справочник"
+            )
+        async with self._pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM dietary_supplements")
+                async with conn.cursor() as cur:
+                    for i in range(0, len(supplements), _BATCH):
+                        batch = supplements[i:i + _BATCH]
+                        await cur.executemany(
+                            _REPLACE_SQL,
+                            [{c: getattr(s, c) for c in _REPLACE_COLS} for s in batch],
+                        )
+                cur2 = await conn.execute("SELECT count(*) AS n FROM dietary_supplements")
+                rows = (await cur2.fetchone())["n"]
+        if rows != len(supplements):
+            logger.info("SGR replace_all: %d records in, %d rows after insert",
+                        len(supplements), rows)
+        return rows
