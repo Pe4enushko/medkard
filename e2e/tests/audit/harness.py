@@ -18,12 +18,22 @@ The run happens in two stages:
   validator, the ICD checker and DiagnosisValidator against the live LLM,
   exactly as production does.
 
-Stage 2 asserts the **complete** set of formal flags equals the one expected
-flag.  That is deliberate and it is stricter than the presence-only rule in
-docs/superpowers/specs/2026-08-20-e2e-full-suite-design.md: because every
-fixture carries exactly one defect, a rule that fires indiscriminately shows
-up as an extra flag on the other nineteen fixtures and fails them.  A
+By default stage 2 asserts the **complete** set of formal flags equals the one
+expected flag.  That is deliberate and it is stricter than the presence-only
+rule in docs/superpowers/specs/2026-08-20-e2e-full-suite-design.md: because a
+sterile fixture carries exactly one defect, a rule that fires indiscriminately
+shows up as an extra flag on the other fixtures and fails them.  A
 presence-only assert could never catch that.
+
+A case built on a card taken from production cannot be sterile, so it sets
+`only=False` and asserts its flag alone.  What the exact-set assert bought is
+then bought back by pairing it with `present=False` cases — the same card
+without the defect, where the flag must not appear.  Without such a pair a
+presence-only case proves nothing about a rule that always fires.
+
+`Case.expect` may also name a flag that code raises rather than a rules.json
+rule (НЕЗАПОЛНЕНЫ_ПОЛЯ_ШАБЛОНА, NMU_CODE_CONTRADICTION).  Such a flag never
+reaches the prompt, so stage 1 asks the check itself instead of get_rules.
 
 Nothing is persisted.  `_audit_visit` calls `_upsert_done_card`, but that
 returns immediately while `self._done_cards is None`, and it is only set by
@@ -58,7 +68,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
-from audit.formal_structure.validator import FormalValidator, VisitType  # noqa: E402
+from audit.formal_structure.validator import _RULES, FormalValidator, VisitType  # noqa: E402
 from audit.graph_trace import new_correlation_id, trace_context  # noqa: E402
 from audit.pipeline import AuditPipeline  # noqa: E402
 
@@ -67,12 +77,27 @@ _OK, _BAD = "  \033[32mok\033[0m    ", "  \033[31mПРОВАЛ\033[0m"
 
 @dataclass(frozen=True)
 class Case:
-    """One fixture card and the single flag its single defect must raise."""
+    """One fixture card and the flag the case is about.
+
+    Defaults describe the sterile fixture this suite was built for: the card
+    carries exactly one defect, the flag comes from rules.json, and the audit
+    must return that flag and nothing else.
+
+    `present=False` — the flag must NOT appear. A negative case is how a
+    presence-only check still catches a rule that fires indiscriminately, and
+    it is the only shape available to cases built on real cards.
+
+    `only=False` — assert the flag alone, not the full set. Required for cards
+    taken from production: they are not sterile, and every unrelated defect in
+    them would fail an exact-set assert forever.
+    """
 
     name: str
     visit: dict[str, Any]
     expect: str
     visit_types: set[VisitType]
+    present: bool = True
+    only: bool = True
 
 
 class _Report:
@@ -88,6 +113,21 @@ class _Report:
                 print(f"          {line}")
             self.failures.append(label)
         return ok
+
+
+_RULE_FLAGS: set[str] = {rule["flag_code"] for rule in _RULES}
+
+
+def _code_flags(validator: FormalValidator, visit: dict[str, Any], types: set[VisitType]) -> set[str]:
+    """Флаги, которые ставит код, а не модель по правилу из rules.json."""
+    produced = set()
+    for finding in (
+        validator._check_nmu_keyword_contradiction(visit),  # noqa: SLF001
+        validator._check_missing_required_fields(visit, types),  # noqa: SLF001
+    ):
+        if finding:
+            produced.add(finding["flag"])
+    return produced
 
 
 def _flags(result: Any) -> set[str]:
@@ -169,10 +209,23 @@ async def _stage_one(cases: list[Case], report: _Report) -> None:
         icd = [d["КодМКБ"] for d in visit["Диагнозы"]]
         rules = validator.get_rules(got_types, age, icd, visit)
         selected = [r["flag_code"] for r in rules]
+
+        if case.expect in _RULE_FLAGS:
+            report.check(
+                f"[{case.name}] правило {case.expect} попало в промпт ({len(rules)} правил)",
+                case.expect in selected,
+                "в наборе: " + ", ".join(selected),
+            )
+            continue
+
+        # Флаг ставит код, а не правило из rules.json, — в промпт ему попадать
+        # неоткуда. Тогда этап 1 спрашивает у самой проверки, и мис-собранная
+        # фикстура падает здесь, до первого токена, ровно как задумано.
+        produced = _code_flags(validator, visit, got_types)
         report.check(
-            f"[{case.name}] правило {case.expect} попало в промпт ({len(rules)} правил)",
-            case.expect in selected,
-            "в наборе: " + ", ".join(selected),
+            f"[{case.name}] код {'ставит' if case.present else 'не ставит'} {case.expect}",
+            (case.expect in produced) is case.present,
+            "код поставил: " + (", ".join(sorted(produced)) or "(ничего)"),
         )
 
 
@@ -219,13 +272,21 @@ async def _stage_two(cases: list[Case], report: _Report) -> None:
             continue
 
         got = _flags(result)
-        report.check(
-            f"[{case.name}] найден ровно один флаг — {case.expect}",
-            got == {case.expect},
-            f"лишние: {', '.join(sorted(got - {case.expect})) or '—'}\n"
-            f"не найдено: {', '.join(sorted({case.expect} - got)) or '—'}\n"
-            f"находки целиком:\n{_describe(result)}",
-        )
+        if case.only:
+            report.check(
+                f"[{case.name}] найден ровно один флаг — {case.expect}",
+                got == {case.expect},
+                f"лишние: {', '.join(sorted(got - {case.expect})) or '—'}\n"
+                f"не найдено: {', '.join(sorted({case.expect} - got)) or '—'}\n"
+                f"находки целиком:\n{_describe(result)}",
+            )
+        else:
+            report.check(
+                f"[{case.name}] {case.expect} {'найден' if case.present else 'не найден'}",
+                (case.expect in got) is case.present,
+                f"набор флагов: {', '.join(sorted(got)) or '—'}\n"
+                f"находки целиком:\n{_describe(result)}",
+            )
 
         expected_dx = len(case.visit["Диагнозы"])
         report.check(
