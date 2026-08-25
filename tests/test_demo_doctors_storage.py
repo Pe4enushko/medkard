@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sys
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -56,8 +57,9 @@ class _CardsWriter(BaseStorage):
                 "DELETE FROM done_cards WHERE card_guid = ANY(%(guids)s)", {"guids": guids})
 
 
-def _card(guid: str, doctor_code: str | None = None) -> dict[str, Any]:
-    priem: dict[str, Any] = {"GUID": guid, "DATE": "03.03.2045"}
+def _card(guid: str, doctor_code: str | None = None,
+          date_raw: str = "03.03.2045") -> dict[str, Any]:
+    priem: dict[str, Any] = {"GUID": guid, "DATE": date_raw}
     if doctor_code is not None:
         priem["Врач_код"] = doctor_code
         priem["Врач"] = f"Врач {doctor_code}"
@@ -79,6 +81,8 @@ async def seeded(org_id: str):
     pending = str(uuid.uuid4())     # ещё не аудирована — бэкфилл берёт и такие
     no_data = str(uuid.uuid4())     # card_data IS NULL
     no_priem = str(uuid.uuid4())    # карта без блока Прием
+    old_day = str(uuid.uuid4())     # без врача, но визит давний
+    bad_date = str(uuid.uuid4())    # без врача, дата визита нечитаемая
 
     async with _CardsWriter() as writer:
         await writer.insert_card(free, _card(free), org_id)
@@ -88,10 +92,12 @@ async def seeded(org_id: str):
         await writer.insert_card(pending, _card(pending), org_id, status="pending")
         await writer.insert_card(no_data, None, org_id)
         await writer.insert_card(no_priem, {"Пациент": {"CODE": "Т-1"}}, org_id)
+        await writer.insert_card(old_day, _card(old_day, date_raw="03.03.2035"), org_id)
+        await writer.insert_card(bad_date, _card(bad_date, date_raw="позавчера"), org_id)
 
     guids = {"org_id": org_id, "free": free, "blank": blank, "ours": ours,
              "foreign": foreign, "pending": pending, "no_data": no_data,
-             "no_priem": no_priem}
+             "no_priem": no_priem, "old_day": old_day, "bad_date": bad_date}
     yield guids
 
     async with _CardsWriter() as writer:
@@ -168,3 +174,35 @@ async def test_empty_batch_writes_nothing(seeded):
     async with DoneCardsStorage() as storage:
         assert await storage.set_doctor_on_cards(card_guids=[], code="9", name="Н") == 0
         assert await storage.clear_doctor_on_cards(card_guids=[]) == 0
+
+
+# ── граница по дате визита ───────────────────────────────────────────────────
+
+async def test_since_drops_visits_older_than_the_boundary(seeded):
+    async with DoneCardsStorage() as storage:
+        guids = await storage.list_cards_without_doctor(
+            organization_id=seeded["org_id"], since=date(2045, 1, 1))
+    assert seeded["free"] in guids
+    assert seeded["old_day"] not in guids
+
+
+async def test_card_with_an_unreadable_date_drops_out_under_a_boundary(seeded):
+    # medkard_visit_date не разобрала дату — карта не лежит ни на одной дате,
+    # и под границей её просто нет. Без границы она в выборке остаётся.
+    async with DoneCardsStorage() as storage:
+        bounded = await storage.list_cards_without_doctor(
+            organization_id=seeded["org_id"], since=date(2045, 1, 1))
+        unbounded = await storage.list_cards_without_doctor(
+            organization_id=seeded["org_id"])
+    assert seeded["bad_date"] not in bounded
+    assert seeded["bad_date"] in unbounded
+
+
+async def test_revert_honours_the_same_boundary(seeded):
+    async with DoneCardsStorage() as storage:
+        near = await storage.list_cards_with_doctor_codes(
+            organization_id=seeded["org_id"], codes=DEMO_CODES, since=date(2045, 1, 1))
+        far = await storage.list_cards_with_doctor_codes(
+            organization_id=seeded["org_id"], codes=DEMO_CODES, since=date(2046, 1, 1))
+    assert seeded["ours"] in near
+    assert seeded["ours"] not in far

@@ -550,7 +550,7 @@ class DoneCardsStorage(BaseStorage):
         return guids
 
     async def list_cards_without_doctor(
-        self, *, organization_id: str, limit: int = 0
+        self, *, organization_id: str, limit: int = 0, since: date | None = None
     ) -> list[str]:
         """Guids of one org's cards whose Прием carries no doctor code.
 
@@ -562,6 +562,10 @@ class DoneCardsStorage(BaseStorage):
         An empty string counts as no doctor — 1C sends both that and no key at
         all for "no doctor". Cards with no card_data and cards with no Прием
         block have nothing to stamp and drop out. limit=0 means no cap.
+
+        *since* bounds the visit date (medkard_visit_date reads both 1C's
+        DD.MM.YYYY and ISO, migration 026). A card whose date is unparseable is
+        on no date at all, so a boundary drops it — without one it stays in.
         """
         async with self._pool.connection() as conn:
             cur = await conn.execute(
@@ -572,21 +576,27 @@ class DoneCardsStorage(BaseStorage):
                   AND card_data IS NOT NULL
                   AND jsonb_typeof(card_data -> 'Прием') = 'object'
                   AND COALESCE(card_data -> 'Прием' ->> 'Врач_код', '') = ''
+                  AND (%(since)s::date IS NULL
+                       OR medkard_visit_date(card_data -> 'Прием' ->> 'DATE')
+                          >= %(since)s::date)
                 ORDER BY card_guid
                 LIMIT NULLIF(%(limit)s, 0)
                 """,
-                {"org_id": organization_id, "limit": limit},
+                {"org_id": organization_id, "limit": limit, "since": since},
             )
             return [row["card_guid"] for row in await cur.fetchall()]
 
     async def list_cards_with_doctor_codes(
-        self, *, organization_id: str, codes: list[str], limit: int = 0
+        self, *, organization_id: str, codes: list[str], limit: int = 0,
+        since: date | None = None
     ) -> list[str]:
         """Guids of one org's cards stamped with one of *codes*.
 
         The revert half of the demo-doctor crutch: it works from the list of
         made-up codes, so a card carrying a real doctor from 1C is never
-        touched by it.
+        touched by it. *since* bounds the visit date the same way it does for
+        list_cards_without_doctor, so a bounded stamp can be taken back with
+        the same boundary.
         """
         if not codes:
             return []
@@ -598,10 +608,14 @@ class DoneCardsStorage(BaseStorage):
                 WHERE organization_id = %(org_id)s::uuid
                   AND card_data IS NOT NULL
                   AND card_data -> 'Прием' ->> 'Врач_код' = ANY(%(codes)s)
+                  AND (%(since)s::date IS NULL
+                       OR medkard_visit_date(card_data -> 'Прием' ->> 'DATE')
+                          >= %(since)s::date)
                 ORDER BY card_guid
                 LIMIT NULLIF(%(limit)s, 0)
                 """,
-                {"org_id": organization_id, "codes": codes, "limit": limit},
+                {"org_id": organization_id, "codes": codes, "limit": limit,
+                 "since": since},
             )
             return [row["card_guid"] for row in await cur.fetchall()]
 

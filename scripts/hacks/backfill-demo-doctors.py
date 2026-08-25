@@ -19,11 +19,15 @@ real doctor from 1C survives it.
 
 Run from project root (dry-run unless -y):
 
-    python scripts/hacks/backfill-demo-doctors.py Alenka [--limit 100] [-y]
+    python scripts/hacks/backfill-demo-doctors.py Alenka [--days 30] [--limit 100] [-y]
     python scripts/hacks/backfill-demo-doctors.py Alenka --revert [-y]
 
 Options:
     ORG        Organization as named in the organizations table: Alenka or MDS
+    --days     Go back this many days from today and no further; 0 — the whole
+               history of the clinic. Same meaning as in audit-one-c-period.py.
+               A card whose visit date 1C wrote unreadably is on no date at all,
+               so a boundary leaves it out; without one it is stamped too.
     --limit    Stamp (or revert) at most this many cards; 0 — all of them
     --revert   Remove the made-up doctors instead of writing them
     -y         Actually write. Without it the script only reports what it would do.
@@ -40,6 +44,7 @@ import asyncio
 import random
 import sys
 from collections import defaultdict
+from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -50,6 +55,19 @@ from storage.done_cards_storage import DoneCardsStorage
 from storage.organizations_storage import OrganizationsStorage
 
 ORGS = ("Alenka", "MDS")
+
+
+def since_date(days: int | None, today: date) -> date | None:
+    """The earliest visit date to touch, or None when the whole history goes.
+
+    --days N shifts the boundary N days back from today and includes that day,
+    as in scripts/audit-one-c-period.py.
+    """
+    if not days:
+        return None
+    if days < 0:
+        raise SystemExit(f"--days must not be negative, got {days}")
+    return today - timedelta(days=days)
 
 
 def assign(card_guids: list[str], doctors: list[dict]) -> dict[str, list[str]]:
@@ -69,9 +87,9 @@ def assign(card_guids: list[str], doctors: list[dict]) -> dict[str, list[str]]:
 
 
 async def _stamp(storage, *, org_id: str, doctors: list[dict], limit: int,
-                 apply: bool) -> int:
+                 since: date | None, apply: bool) -> int:
     guids = await storage.list_cards_without_doctor(
-        organization_id=org_id, limit=limit)
+        organization_id=org_id, limit=limit, since=since)
     print(f"Карт без врача: {len(guids)}")
     if not guids:
         return 0
@@ -93,10 +111,10 @@ async def _stamp(storage, *, org_id: str, doctors: list[dict], limit: int,
 
 
 async def _revert(storage, *, org_id: str, doctors: list[dict], limit: int,
-                  apply: bool) -> int:
+                  since: date | None, apply: bool) -> int:
     codes = [d["code"] for d in doctors]
     guids = await storage.list_cards_with_doctor_codes(
-        organization_id=org_id, codes=codes, limit=limit)
+        organization_id=org_id, codes=codes, limit=limit, since=since)
     print(f"Карт с демо-врачами {', '.join(codes)}: {len(guids)}")
     if not guids:
         return 0
@@ -110,6 +128,8 @@ async def main() -> None:
     parser = argparse.ArgumentParser(
         description="Stamp made-up doctors onto a clinic's cards (dry-run unless -y)")
     parser.add_argument("org", choices=ORGS, help="organization name")
+    parser.add_argument("--days", type=int, default=0,
+                        help="go back this many days from today; 0 — whole history")
     parser.add_argument("--limit", type=int, default=0,
                         help="at most this many cards; 0 — all of them")
     parser.add_argument("--revert", action="store_true",
@@ -120,6 +140,7 @@ async def main() -> None:
 
     if args.limit < 0:
         raise SystemExit(f"--limit must not be negative, got {args.limit}")
+    since = since_date(args.days, date.today())
 
     doctors = load_doctors()
     if not doctors:
@@ -128,13 +149,14 @@ async def main() -> None:
     async with OrganizationsStorage() as organizations:
         org_id = await organizations.get_id_by_name(args.org)
 
+    period = (f"с {since.isoformat()}" if since else "вся история клиники")
     print(f"Организация {args.org} ({org_id}), врачей в файле: {len(doctors)}, "
-          f"режим: {'снятие' if args.revert else 'штамп'}")
+          f"режим: {'снятие' if args.revert else 'штамп'}, период: {period}")
 
     async with DoneCardsStorage() as storage:
         run = _revert if args.revert else _stamp
         written = await run(storage, org_id=org_id, doctors=doctors,
-                            limit=args.limit, apply=args.apply)
+                            limit=args.limit, since=since, apply=args.apply)
 
     if args.apply:
         print(f"\nГотово: карт изменено {written}")
