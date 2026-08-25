@@ -549,6 +549,112 @@ class DoneCardsStorage(BaseStorage):
         logger.info("💾 done_cards loaded %d done guid(s) for org_id=%s", len(guids), organization_id)
         return guids
 
+    async def list_cards_without_doctor(
+        self, *, organization_id: str, limit: int = 0
+    ) -> list[str]:
+        """Guids of one org's cards whose Прием carries no doctor code.
+
+        Serves the temporary demo-doctor backfill (scripts/backfill-demo-doctors.py,
+        api/demo_doctors.py) and goes away with it. Audit status is deliberately
+        not a filter: the crutch stamps every visit, pending ones included, the
+        same way the push route does.
+
+        An empty string counts as no doctor — 1C sends both that and no key at
+        all for "no doctor". Cards with no card_data and cards with no Прием
+        block have nothing to stamp and drop out. limit=0 means no cap.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT card_guid
+                FROM done_cards
+                WHERE organization_id = %(org_id)s::uuid
+                  AND card_data IS NOT NULL
+                  AND jsonb_typeof(card_data -> 'Прием') = 'object'
+                  AND COALESCE(card_data -> 'Прием' ->> 'Врач_код', '') = ''
+                ORDER BY card_guid
+                LIMIT NULLIF(%(limit)s, 0)
+                """,
+                {"org_id": organization_id, "limit": limit},
+            )
+            return [row["card_guid"] for row in await cur.fetchall()]
+
+    async def list_cards_with_doctor_codes(
+        self, *, organization_id: str, codes: list[str], limit: int = 0
+    ) -> list[str]:
+        """Guids of one org's cards stamped with one of *codes*.
+
+        The revert half of the demo-doctor crutch: it works from the list of
+        made-up codes, so a card carrying a real doctor from 1C is never
+        touched by it.
+        """
+        if not codes:
+            return []
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT card_guid
+                FROM done_cards
+                WHERE organization_id = %(org_id)s::uuid
+                  AND card_data IS NOT NULL
+                  AND card_data -> 'Прием' ->> 'Врач_код' = ANY(%(codes)s)
+                ORDER BY card_guid
+                LIMIT NULLIF(%(limit)s, 0)
+                """,
+                {"org_id": organization_id, "codes": codes, "limit": limit},
+            )
+            return [row["card_guid"] for row in await cur.fetchall()]
+
+    async def set_doctor_on_cards(
+        self, *, card_guids: list[str], code: str, name: str
+    ) -> int:
+        """Write one doctor into the Прием block of many cards. Returns rows written.
+
+        Merges into the block rather than replacing it (replace_priem), so the
+        1C data in it survives; one statement per doctor keeps a backfill over
+        the whole clinic to a handful of round-trips.
+        """
+        if not card_guids:
+            return 0
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE done_cards
+                SET card_data = jsonb_set(
+                        card_data, '{Прием}',
+                        (card_data -> 'Прием')
+                          || jsonb_build_object('Врач', %(name)s::text,
+                                                'Врач_код', %(code)s::text))
+                WHERE card_guid = ANY(%(guids)s)
+                  AND jsonb_typeof(card_data -> 'Прием') = 'object'
+                """,
+                {"guids": card_guids, "code": code, "name": name},
+            )
+            return cur.rowcount
+
+    async def clear_doctor_on_cards(self, *, card_guids: list[str]) -> int:
+        """Drop Врач and Врач_код from the Прием block of many cards.
+
+        Both keys are empty on Alenka's live data, so removing them puts a card
+        back exactly as 1C sent it. Callers pick the cards by demo code
+        (list_cards_with_doctor_codes) — this method itself does not check.
+        """
+        if not card_guids:
+            return 0
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE done_cards
+                SET card_data = jsonb_set(
+                        card_data, '{Прием}',
+                        (card_data -> 'Прием') - 'Врач' - 'Врач_код')
+                WHERE card_guid = ANY(%(guids)s)
+                  AND jsonb_typeof(card_data -> 'Прием') = 'object'
+                """,
+                {"guids": card_guids},
+            )
+            return cur.rowcount
+
     async def list_audited_by_visit_date(
         self, *, organization_id: str, visit_date: date
     ) -> list[dict]:
