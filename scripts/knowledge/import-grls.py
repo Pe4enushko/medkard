@@ -2,7 +2,7 @@
 """Import a GRLS xlsx export (zip or directory) into grls_registry.
 
 Usage:
-    python scripts/import-grls.py <archive.zip | dir-with-xlsx> [--dry-run] [--make-dump FILE]
+    python scripts/knowledge/import-grls.py <archive.zip | dir-with-xlsx> [--dry-run] [--make-dump FILE]
 
 --dry-run        parse, dedup, print counts; do not touch the DB
 --make-dump FILE write JSONL(.gz) dump for engine sync (spec §7); works with --dry-run
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from dotenv import load_dotenv  # noqa: E402

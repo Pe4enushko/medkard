@@ -10,7 +10,7 @@ the rest of card_data is untouched. Cards whose stored block already
 equals the fresh one are not written.
 
 Run from project root:
-    python scripts/backfill-priem.py ORG --since YYYY-MM-DD [--until YYYY-MM-DD] [--dry-run] [-y]
+    python scripts/operator/backfill-priem.py ORG --since YYYY-MM-DD [--until YYYY-MM-DD] [--dry-run] [-y]
 
 Options:
     ORG        1C organization: Alenka or MDS
@@ -32,7 +32,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient

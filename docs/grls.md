@@ -18,9 +18,9 @@
 
 ## Импорт
 
-    python3 scripts/import-grls.py grls2026-08-17-1.zip --dry-run     # счётчики без записи
-    python3 scripts/import-grls.py grls2026-08-17-1.zip               # полная замена в одной транзакции
-    python3 scripts/import-grls.py grls2026-08-17-1.zip --make-dump grls.jsonl.gz   # дамп для engine
+    python3 scripts/knowledge/import-grls.py grls2026-08-17-1.zip --dry-run     # счётчики без записи
+    python3 scripts/knowledge/import-grls.py grls2026-08-17-1.zip               # полная замена в одной транзакции
+    python3 scripts/knowledge/import-grls.py grls2026-08-17-1.zip --make-dump grls.jsonl.gz   # дамп для engine
 
 После записи скрипт печатает `registry rows after import: N` — это размер
 таблицы после дедупликации по `row_hash` (`ON CONFLICT`), а не число строк,

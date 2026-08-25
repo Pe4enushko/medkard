@@ -119,7 +119,7 @@ for f in e2e/tests/audit/test_*.py; do python "$f" || exit 1; done
 не нужно искать нужный кусок трейса по времени или `card_guid` — можно сразу
 
 ```bash
-python scripts/dump-graphtraces.py --correlation-id <id>
+python scripts/checks/dump-graphtraces.py --correlation-id <id>
 ```
 
 По умолчанию скрипт вычищает дословный текст приёма (`card_data`/

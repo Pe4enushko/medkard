@@ -25,8 +25,8 @@ Nothing pre-existing is touched.
 Run from project root against a running API (reads POSTGRES_* from .env for
 the verification/teardown side):
 
-    python scripts/smoke-push-check-updates.py http://localhost:8000
-    python scripts/smoke-push-check-updates.py https://medkard.example --keep
+    python scripts/smoke/smoke-push-check-updates.py http://localhost:8000
+    python scripts/smoke/smoke-push-check-updates.py https://medkard.example --keep
 
   --keep   leave the org/key/card behind for manual poking (prints them)
 """
@@ -44,7 +44,7 @@ from pathlib import Path
 
 import httpx
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from storage.api_keys_storage import ApiKeysStorage  # noqa: E402

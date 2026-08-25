@@ -32,13 +32,13 @@
 
 ```bash
 # снимок из фикстуры или файла с картами
-python scripts/deterministic-snapshot.py snapshot \
+python scripts/checks/deterministic-snapshot.py snapshot \
     e2e/fixtures/eval_broken_cards/cases.json -o before.json
 
 # снимок из БД (POSTGRES_* из окружения)
-python scripts/deterministic-snapshot.py snapshot --from-db --limit 500 -o after.json
+python scripts/checks/deterministic-snapshot.py snapshot --from-db --limit 500 -o after.json
 
-python scripts/deterministic-snapshot.py diff before.json after.json
+python scripts/checks/deterministic-snapshot.py diff before.json after.json
 ```
 
 Скрипт снимается и на старых ревизиях: разбор возраста и число параметров

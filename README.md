@@ -30,7 +30,7 @@ Set `DATEEND` at the top of the script to change the end date.
 Audits visits from a local JSON file.
 
 ```
-python scripts/audit-file.py [--file PATH] [--excel PATH]
+python scripts/operator/audit-file.py [--file PATH] [--excel PATH]
 ```
 
 - `--file PATH` — input JSON file (default: `data.json`)

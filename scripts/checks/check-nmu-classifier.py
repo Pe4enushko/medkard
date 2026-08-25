@@ -20,7 +20,7 @@
 
 Запуск::
 
-    python scripts/check-nmu-classifier.py ~/projects/minzdrav/804_N_MZ.pdf
+    python scripts/checks/check-nmu-classifier.py ~/projects/minzdrav/804_N_MZ.pdf
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from audit.formal_structure.validator import VisitType, classify_code  # noqa: E402

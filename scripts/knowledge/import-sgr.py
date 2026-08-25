@@ -2,13 +2,13 @@
 """Import an SGR (EAEU dietary supplements) CSV export into dietary_supplements.
 
 Usage:
-    python scripts/import-sgr.py <export.csv> [--dry-run] [--make-dump FILE]
+    python scripts/knowledge/import-sgr.py <export.csv> [--dry-run] [--make-dump FILE]
 
 --dry-run        parse, dedup, print counts; do not touch the DB
 --make-dump FILE write JSONL(.gz) dump for engine sync; works with --dry-run
 Full replacement of dietary_supplements in one transaction; idempotent.
 
-Replaces the supplements half of scripts/seed-reference-lists.sh: that one pins
+Replaces the supplements half of scripts/knowledge/seed-reference-lists.sh: that one pins
 the staging width in SQL (col01 … col39) and the encoding to UTF-8, so it breaks
 on the 2026-08-24 export (43 columns, Windows-1251). Here the columns are taken
 by name from the header, and the encoding is detected.
@@ -22,7 +22,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from dotenv import load_dotenv  # noqa: E402

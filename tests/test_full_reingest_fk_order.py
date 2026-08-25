@@ -7,7 +7,7 @@ manifest entry with no prior ingest) failed with:
     key constraint "docs_file_id_fkey"
     DETAIL: Key (file_id)=(...) is not present in table "guidelines".
 
-The fix in scripts/reingest-pdfs.py's _full_reingest is to upsert guidelines
+The fix in scripts/knowledge/reingest-pdfs.py's _full_reingest is to upsert guidelines
 before writing docs. This test exercises the storage layer directly (not the
 LLM-backed chunking pipeline) to pin the required ordering.
 """

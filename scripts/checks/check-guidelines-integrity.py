@@ -11,7 +11,7 @@
 
 Подсвечивает несовпадения (отсутствие в любом из трёх мест) и печатает сводку.
 
-    python scripts/check-guidelines-integrity.py [--data-dir DIR] [--manifest-path FILE]
+    python scripts/checks/check-guidelines-integrity.py [--data-dir DIR] [--manifest-path FILE]
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import csv
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")

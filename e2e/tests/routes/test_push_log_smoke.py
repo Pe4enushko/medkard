@@ -9,7 +9,7 @@ rows per organization per day.
 
 Scope is push_log/push_metrics_by_date only. General /visits/push behaviour
 (auth rejection, 422s, card_data replacement) is already covered by
-scripts/smoke-cards-push.sh and is not re-asserted here.
+scripts/smoke/smoke-cards-push.sh and is not re-asserted here.
 
 Creates a throwaway organization + API key + one card, pushes it through the
 real HTTP API multiple times (staging a fake completed audit in between via

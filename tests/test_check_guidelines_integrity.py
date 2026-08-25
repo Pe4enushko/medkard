@@ -4,7 +4,7 @@ from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
     "check_guidelines_integrity",
-    Path(__file__).resolve().parent.parent / "scripts" / "check-guidelines-integrity.py")
+    Path(__file__).resolve().parent.parent / "scripts" / "checks" / "check-guidelines-integrity.py")
 check = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check)
 

@@ -58,15 +58,15 @@ asyncpg: это два независимых клиента одной PostgreS
 
 ## Переаудит broken-карт
 
-Скрипт `scripts/fix-broken.py` работает офлайн относительно 1С: берёт
+Скрипт `scripts/operator/fix-broken.py` работает офлайн относительно 1С: берёт
 сохранённый `card_data`, группирует карты по `organization_id` и для каждой
 группы создаёт отдельный `AuditPipeline` с её фильтром. Вызов
 `run_batched(..., done_guids=set())` отключает только дедупликацию; обычные
 фильтры организации продолжают действовать.
 
 ```bash
-python scripts/fix-broken.py Alenka --dry-run
-python scripts/fix-broken.py --all -y --num-batches 5
+python scripts/operator/fix-broken.py Alenka --dry-run
+python scripts/operator/fix-broken.py --all -y --num-batches 5
 ```
 
 После прогона скрипт повторно читает состояние выбранных GUID и разделяет их

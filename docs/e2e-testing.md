@@ -28,7 +28,7 @@ folder of its own.
   script next to the route's existing one rather than folding the new scenario into it. Example:
   `test_push_log_smoke.py` covers `push_log`/`push_metrics_by_date` specifically and deliberately
   does not re-assert `/visits/push`'s generic auth/422 behavior — that stays in
-  `scripts/smoke-cards-push.sh`.
+  `scripts/smoke/smoke-cards-push.sh`.
 
 For when to add an audit fixture, see `e2e/tests/audit/README.md`'s "Как добавить фикстуру" section.
 
@@ -37,7 +37,7 @@ For when to add an audit fixture, see `e2e/tests/audit/README.md`'s "Как до
 - `organizations.py` — `OrganizationFixtures` (`create_org`/`delete_org`), direct SQL — there's no
   public API for creating an organization.
 - `api_keys.py` — `issue_key()` (goes through `ApiKeysStorage.create_key`, the same path
-  `scripts/create-api-key.py` uses) and `ApiKeyFixtures` (`delete_key` by label, `count_key_scopes`
+  `scripts/operator/create-api-key.py` uses) and `ApiKeyFixtures` (`delete_key` by label, `count_key_scopes`
   for teardown verification).
 - `cards.py` — `push_card()` (thin `POST /visits/push` wrapper) and `CardFixtures`: `stage_audited`
   (flips a card to a fake completed formal audit, for push/override scenarios), `stage_done_with_meta`

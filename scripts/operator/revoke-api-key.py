@@ -4,8 +4,8 @@ Revoke a pull-API key, by its id or by the raw key itself — whichever you
 have on hand.
 
 Run from project root:
-    python scripts/revoke-api-key.py <key-id>
-    python scripts/revoke-api-key.py medkard_<...>
+    python scripts/operator/revoke-api-key.py <key-id>
+    python scripts/operator/revoke-api-key.py medkard_<...>
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import sys
 import uuid
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from storage.api_keys_storage import ApiKeysStorage  # noqa: E402

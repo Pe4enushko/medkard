@@ -108,7 +108,7 @@ resp = await client.chat.completions.create(
 ## query_generator.py — `generate_queries`
 
 **File:** `LLM/query_generator.py`  
-**Called from:** PDF ingestion pipeline (`scripts/ingest-pdfs.py`), not the audit pipeline.  
+**Called from:** PDF ingestion pipeline (`scripts/knowledge/ingest-pdfs.py`), not the audit pipeline.  
 **Client:** `instructor.AsyncInstructor`  
 **Call:**
 

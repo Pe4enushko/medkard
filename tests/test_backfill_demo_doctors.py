@@ -1,4 +1,4 @@
-"""Unit tests for scripts/backfill-demo-doctors.py — the plan, not the DB.
+"""Unit tests for scripts/hacks/backfill-demo-doctors.py — the plan, not the DB.
 
 The storage side is covered by tests/test_demo_doctors_storage.py, the stamp
 itself by tests/test_demo_doctors.py.
@@ -12,7 +12,7 @@ import pytest
 
 _spec = importlib.util.spec_from_file_location(
     "backfill_demo_doctors",
-    Path(__file__).resolve().parent.parent / "scripts" / "backfill-demo-doctors.py")
+    Path(__file__).resolve().parent.parent / "scripts" / "hacks" / "backfill-demo-doctors.py")
 backfill = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = backfill
 _spec.loader.exec_module(backfill)

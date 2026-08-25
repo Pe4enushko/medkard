@@ -11,7 +11,7 @@ in the database (status='done' with a non-null formal_result), without
 running any real LLM checker. This exists purely to put a done_cards row
 into the state migration 027's push_log trigger needs to see in order to
 log overrode_audit=true on the next push — it is not a substitute for
-actually exercising the audit pipeline (scripts/smoke-cards-push.sh's
+actually exercising the audit pipeline (scripts/smoke/smoke-cards-push.sh's
 --with-audit flag does that, at the cost of real LLM calls).
 """
 

@@ -16,9 +16,9 @@ the next batch, and `--revert` removes what this script wrote.
 
 Run from project root (dry-run unless -y):
 
-    python scripts/seed-demo-doctor.py MDS --date 2026-08-20 \
+    python scripts/hacks/seed-demo-doctor.py MDS --date 2026-08-20 \
         --code 90001 --name "Панкратов Эдуард Рашитович" [--limit 10] [-y]
-    python scripts/seed-demo-doctor.py MDS --date 2026-08-20 --code 90001 --revert -y
+    python scripts/hacks/seed-demo-doctor.py MDS --date 2026-08-20 --code 90001 --revert -y
 
 Options:
     ORG        Organization as named in the organizations table: Alenka or MDS
@@ -49,7 +49,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from storage.done_cards_storage import DoneCardsStorage

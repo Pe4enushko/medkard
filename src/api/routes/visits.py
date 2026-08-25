@@ -7,7 +7,7 @@ business logic here.
 
 One unified API key authenticates the integrating app, scoped to specific
 organizations (see api/auth.py); each request names the organization it
-wants via ?org=<name>, same as scripts/create_report.py's --org flag.
+wants via ?org=<name>, same as scripts/operator/create_report.py's --org flag.
 
 `pull` returns an xlsx file (not JSON): the integrating service stores it
 and runs it through its own RAG ingestion pipeline as a file, so the wire

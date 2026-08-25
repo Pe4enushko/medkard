@@ -12,12 +12,12 @@
 Использование::
 
     # снимок из фикстуры или файла с картами
-    python scripts/deterministic-snapshot.py snapshot e2e/fixtures/eval_broken_cards/cases.json -o before.json
+    python scripts/checks/deterministic-snapshot.py snapshot e2e/fixtures/eval_broken_cards/cases.json -o before.json
 
     # снимок из БД (POSTGRES_* из окружения)
-    python scripts/deterministic-snapshot.py snapshot --from-db --limit 500 -o after.json
+    python scripts/checks/deterministic-snapshot.py snapshot --from-db --limit 500 -o after.json
 
-    python scripts/deterministic-snapshot.py diff before.json after.json
+    python scripts/checks/deterministic-snapshot.py diff before.json after.json
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from audit.formal_structure.validator import FormalValidator  # noqa: E402
 
@@ -98,7 +98,7 @@ def _provenance(validator: FormalValidator) -> dict[str, Any]:
     revision = "неизвестна"
     try:
         revision = subprocess.run(
-            ["git", "-C", str(Path(__file__).resolve().parent.parent),
+            ["git", "-C", str(Path(__file__).resolve().parent.parent.parent),
              "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5,
         ).stdout.strip() or revision
@@ -107,7 +107,7 @@ def _provenance(validator: FormalValidator) -> dict[str, Any]:
     age_fn = _patient_age_fn
     return {
         "revision": revision,
-        "src": str(Path(__file__).resolve().parent.parent / "src"),
+        "src": str(Path(__file__).resolve().parent.parent.parent / "src"),
         "age_reader": f"{age_fn.__module__}.{age_fn.__name__}",
         "get_rules_arity": len(inspect.signature(validator.get_rules).parameters),
     }

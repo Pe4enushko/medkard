@@ -35,22 +35,22 @@ pytest
 pytest tests/test_validations.py
 
 # Ingest clinical-guideline PDFs (manifest.csv + pdfs/ → Postgres docs table)
-python scripts/ingest-pdfs.py
+python scripts/knowledge/ingest-pdfs.py
 
 # Run a full audit for a 1C org and export to Excel
 python scripts/audit-one-c-period.py Alenka [--days N] [--date DD.MM.YYYY] [--ignore-icd CODE ...] [--num-batches N] [--ftpcreds FILE]
 
 # Audit a single local JSON file
-python scripts/audit-file.py <path-to-visit-json>
+python scripts/operator/audit-file.py <path-to-visit-json>
 
 # Re-audit cards frozen with broken = TRUE (offline: reads card_data from DB)
-python scripts/fix-broken.py ORG|--all [-y] [--dry-run] [--num-batches N]
+python scripts/operator/fix-broken.py ORG|--all [-y] [--dry-run] [--num-batches N]
 
 # Replay today's cached 1C data (for development)
-python scripts/mock-run-today.py
+python scripts/smoke/mock-run-today.py
 
 # Import GRLS registry (xlsx zip → grls_registry/grls_imports), see docs/grls.md
-python scripts/import-grls.py <archive.zip> [--dry-run] [--make-dump FILE]
+python scripts/knowledge/import-grls.py <archive.zip> [--dry-run] [--make-dump FILE]
 ```
 
 E2E tests (standalone scripts against a live API/Postgres/LLM, not pytest) are documented in
@@ -100,7 +100,7 @@ src/
 
 ## Key Data Flows
 
-**Ingestion** (`scripts/ingest-pdfs.py`):
+**Ingestion** (`scripts/knowledge/ingest-pdfs.py`):
 `manifest.csv` + `pdfs/` → `load_documents()` → chunks → embed contextual text (section + body) → insert into `docs` table with one embedding column.
 
 **Audit pipeline** (`AuditPipeline.run_batched`):

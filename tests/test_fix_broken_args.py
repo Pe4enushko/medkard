@@ -1,4 +1,4 @@
-"""Argument and confirmation tests for scripts/fix-broken.py."""
+"""Argument and confirmation tests for scripts/operator/fix-broken.py."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from audit.broken_replay import BrokenGroup
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location(
     "fix_broken_script",
-    ROOT / "scripts" / "fix-broken.py",
+    ROOT / "scripts" / "operator" / "fix-broken.py",
 )
 assert SPEC and SPEC.loader
 fix_broken = importlib.util.module_from_spec(SPEC)
