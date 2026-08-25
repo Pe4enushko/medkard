@@ -132,3 +132,20 @@ def test_load_missing_format_raises(tmp_path):
     p = _write_formats(tmp_path, {"Alenka": {"standard": ["диагноз"]}})
     with pytest.raises((KeyError, ValueError)):
         load_inspection_format("Alenka", "typo", path=p)
+
+
+def test_short_labels_need_an_exact_match():
+    """Abbreviations are 2–3 characters long, so a distance-2 window matches
+    almost anything: real Alenka vaccination cards had «Фсс» landing on the
+    «чсс» rank and «ФР»/«ХЗ»/«Р» on «чд». Short names must match exactly."""
+    data = [_item("Фсс"), _item("ФР"), _item("ХЗ"), _item("Р"), _item("ЧСС")]
+    tokens = ["чсс", "чд", "ф20", "вес"]
+    out = reorder_inspection_data(data, tokens)
+    assert [d["Параметр"] for d in out] == ["ЧСС", "Фсс", "ФР", "ХЗ", "Р"]
+
+
+def test_short_labels_still_take_their_own_rank():
+    data = [_item("Огр"), _item("Стул"), _item("Огол")]
+    tokens = ["огол", "огр", "стул"]
+    out = reorder_inspection_data(data, tokens)
+    assert [d["Параметр"] for d in out] == ["Огол", "Огр", "Стул"]
