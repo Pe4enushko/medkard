@@ -12,6 +12,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from audit.graph_trace import emit as trace_emit
+from LLM.prompt_context import today_block
 from LLM.graphs.diagnosis_state import (
     Aspect,
     Chunk,
@@ -691,7 +692,11 @@ async def judge_aspect(
         "treatment": "treatment_checker.txt",
         "criteria": "criteria_checker.txt",
     }[aspect]
-    context_parts = [
+    context_parts = []
+    today = today_block(state.get("visit_date"))
+    if today:
+        context_parts.append(today)
+    context_parts += [
         f"## Пациент\n{state.get('patient_block', '—')}",
         f"## Диагноз\n{state.get('diagnosis_block', '—')}",
         f"## Клинический контекст записи\n{state.get('visit_context', '—')}",

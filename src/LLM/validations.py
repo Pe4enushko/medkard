@@ -26,6 +26,8 @@ from pydantic import BaseModel, Field, RootModel
 logger = logging.getLogger(__name__)
 
 from LLM.client import LLMClient
+from LLM.prompt_context import today_block
+from parsers.json_parser import visit_date
 
 _client = LLMClient()
 
@@ -61,6 +63,17 @@ class _RuleVerdict(BaseModel):
     comment: str = Field(default="", max_length=1000)
     violated: bool
     issue: str = Field(default="", max_length=500)
+
+
+def _visit_message(visit: dict[str, Any]) -> str:
+    """Запись для модели: сначала точка отсчёта во времени, потом сама карта.
+
+    Дата приёма внутри JSON и так есть, но как одно поле среди прочих она
+    моделью за «сегодня» не принимается — см. ``LLM.prompt_context.today_block``.
+    """
+    visit_text = json.dumps(visit, ensure_ascii=False, indent=2)
+    today = today_block(visit_date(visit.get("Прием") or {}))
+    return f"{today}\n\n{visit_text}" if today else visit_text
 
 
 def _finding_to_dict(finding: _Finding) -> dict[str, str]:
@@ -149,7 +162,7 @@ async def validate_visit(
         (findings, tokens) — findings is a list of ``{"flag": ..., "issue": ...}``
         dicts; tokens is the total LLM token count for this call.
     """
-    visit_text = json.dumps(visit, ensure_ascii=False, indent=2)
+    visit_text = _visit_message(visit)
 
     resolved_client = client or _client
     raw_content, tokens = await resolved_client.call(
@@ -183,7 +196,7 @@ async def validate_rule(
     одного замечания; флаг проставляется кодом, а применимость решена раньше —
     отбором правил в ``FormalValidator.get_rules``.
     """
-    visit_text = json.dumps(visit, ensure_ascii=False, indent=2)
+    visit_text = _visit_message(visit)
     resolved_client = client or _client
     raw_content, tokens = await resolved_client.call(
         messages=[

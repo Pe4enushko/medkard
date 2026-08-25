@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
 from typing import Any
 
 from audit.diagnosis.clinic_recs import ClinicRecs
@@ -16,6 +15,7 @@ from audit.graph_trace import (
     emit as trace_emit,
 )
 from audit.models import DiagnosisAuditResult
+from parsers.json_parser import visit_date
 from storage.models.result import (
     DiagnosisIssue,
     GuidelineSource,
@@ -128,25 +128,6 @@ def _format_diagnosis(diagnosis: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _visit_date(raw: object) -> date | None:
-    if isinstance(raw, datetime):
-        return raw.date()
-    if isinstance(raw, date):
-        return raw
-    if not isinstance(raw, str) or not raw.strip():
-        return None
-    value = raw.strip()
-    try:
-        return date.fromisoformat(value[:10])
-    except ValueError:
-        pass
-    try:
-        day, month, year = (int(part) for part in value.split("."))
-        return date(year, month, day)
-    except (TypeError, ValueError):
-        return None
-
-
 def _issue_from_graph(raw: dict[str, Any]) -> DiagnosisIssue:
     return DiagnosisIssue(
         issue=raw["issue"],
@@ -252,7 +233,7 @@ class DiagnosisValidator:
             "visit_context": _format_visit_context(self._visit),
             "patient_block": patient_block,
             "diagnosis_block": _format_diagnosis(diagnosis),
-            "visit_date": _visit_date(visit_meta.get("DATE")),
+            "visit_date": visit_date(visit_meta),
             "file_id": file_id,
             "doc_title": doc_title,
             "toc": toc,

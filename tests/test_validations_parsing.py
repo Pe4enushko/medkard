@@ -247,3 +247,33 @@ def test_evidence_is_generated_before_the_decisions() -> None:
     assert list(_RuleVerdict.model_json_schema()["properties"]) == [
         "comment", "violated", "issue",
     ]
+
+
+def test_validate_rule_anchors_today_on_the_visit_date() -> None:
+    client = _FakeClient('{"comment":"","violated":false,"issue":""}')
+    visit = {"Прием": {"DATE": "20.08.2026", "GUID": "g"}, "Диагнозы": []}
+
+    asyncio.run(
+        validate_rule(
+            "prompt", visit, "rule", flag_code="F", rule_id="r", client=client  # type: ignore[arg-type]
+        )
+    )
+
+    visit_message = client.messages[1]["content"]
+    assert visit_message.startswith("## Сегодняшний день")
+    assert "20.08.2026" in visit_message
+    # сама запись передаётся следом, без изменений
+    assert json.dumps(visit, ensure_ascii=False, indent=2) in visit_message
+
+
+def test_validate_rule_without_a_visit_date_sends_the_bare_record() -> None:
+    client = _FakeClient('{"comment":"","violated":false,"issue":""}')
+    visit = {"Прием": {"GUID": "g"}}
+
+    asyncio.run(
+        validate_rule(
+            "prompt", visit, "rule", flag_code="F", rule_id="r", client=client  # type: ignore[arg-type]
+        )
+    )
+
+    assert client.messages[1]["content"] == json.dumps(visit, ensure_ascii=False, indent=2)
