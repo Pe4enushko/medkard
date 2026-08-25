@@ -71,7 +71,7 @@ guessing by suffix is unsafe. 90 such appointments exist; they are recognised by
 the service name instead, where the clinic writes «первичный» / «повторный»
 itself.
 
-`scripts/check-nmu-classifier.py <804н.pdf>` audits the table against the order:
+`scripts/checks/check-nmu-classifier.py <804н.pdf>` audits the table against the order:
 it reports contradictions and verdicts the order does not support (both are
 errors, non-zero exit) and counts what the table leaves to the name (expected).
 The order is the oracle, not a data source — nothing is generated from it into

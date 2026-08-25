@@ -1,6 +1,6 @@
 """pipeline.py — shared per-chunk ingest pipeline: chunk → contextual embedding → Doc.
 
-Shared by scripts/ingest-pdfs.py and scripts/reingest-pdfs.py. Embeds the chunk's
+Shared by scripts/knowledge/ingest-pdfs.py and scripts/knowledge/reingest-pdfs.py. Embeds the chunk's
 contextual text ("[section]\\n<body>") — NOT hypothetical queries (reverse HyDE removed).
 """
 import asyncio

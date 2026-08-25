@@ -7,7 +7,7 @@ Pull-API для организаций, интегрирующихся с medkar
 организация.
 
 Роуты реализованы в `src/api/routes/visits.py`; проверить любой из них
-можно скриптом `scripts/test-visits-route.sh` — с мок-данными, без
+можно скриптом `scripts/smoke/test-visits-route.sh` — с мок-данными, без
 написания клиента.
 
 ## GET /visits/check
@@ -144,16 +144,16 @@ Pull-API для организаций, интегрирующихся с medkar
 [{"code": "00012", "name": "Губарева Елена Александровна"}]
 ```
 
-## Демо-врач (scripts/seed-demo-doctor.py)
+## Демо-врач (scripts/hacks/seed-demo-doctor.py)
 
 Пока 1С не шлёт `Прием.Врач_код` и `Прием.Врач`, у обеих врачебных фич —
 персонального отчёта (`doctor_code` у `/visits/pull`) и списка
 `/visits/doctors` — на боевых данных нет входа: оба ключа пусты. Скрипт
-`scripts/seed-demo-doctor.py` проставляет их на уже отаудированных картах за
+`scripts/hacks/seed-demo-doctor.py` проставляет их на уже отаудированных картах за
 указанную дату:
 
 ```
-python scripts/seed-demo-doctor.py MDS --date 2026-08-20 \
+python scripts/hacks/seed-demo-doctor.py MDS --date 2026-08-20 \
     --code 90001 --name "Панкратов Эдуард Рашитович" [--limit 10] [-y]
 ```
 
@@ -193,8 +193,8 @@ python scripts/seed-demo-doctor.py MDS --date 2026-08-20 \
 правила, дозаписывает только пустые:
 
 ```
-python scripts/backfill-demo-doctors.py Alenka [--limit 100] [-y]
-python scripts/backfill-demo-doctors.py Alenka --revert [-y]
+python scripts/hacks/backfill-demo-doctors.py Alenka [--limit 100] [-y]
+python scripts/hacks/backfill-demo-doctors.py Alenka --revert [-y]
 ```
 
 Без `-y` — только отчёт: сколько карт без врача и как они разошлись бы по
@@ -204,7 +204,7 @@ python scripts/backfill-demo-doctors.py Alenka --revert [-y]
 проштампованная карта возвращается в инкрементальном синке как свежеотаудированная.
 
 Убрать костыль целиком: `git rm src/api/demo_doctors.py resources/demo_doctors.json
-scripts/backfill-demo-doctors.py` и три строки в `src/api/routes/visits.py`.
+scripts/hacks/backfill-demo-doctors.py` и три строки в `src/api/routes/visits.py`.
 
 ## POST /visits/push
 

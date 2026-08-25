@@ -554,7 +554,7 @@ class DoneCardsStorage(BaseStorage):
     ) -> list[str]:
         """Guids of one org's cards whose Прием carries no doctor code.
 
-        Serves the temporary demo-doctor backfill (scripts/backfill-demo-doctors.py,
+        Serves the temporary demo-doctor backfill (scripts/hacks/backfill-demo-doctors.py,
         api/demo_doctors.py) and goes away with it. Audit status is deliberately
         not a filter: the crutch stamps every visit, pending ones included, the
         same way the push route does.

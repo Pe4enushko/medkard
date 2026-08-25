@@ -19,7 +19,7 @@ Options:
 
 Stand rollout on the drifted DB (see migrations/RUNBOOK.md):
   1. migrate.sh --skip-until 024_docs_reconcile.sql   # baseline 001-023
-  2. python scripts/reingest-pdfs.py --force-all       # fill docs.embedding
+  2. python scripts/knowledge/reingest-pdfs.py --force-all       # fill docs.embedding
   3. migrate.sh                                        # apply 024 reconcile
 EOF
 }

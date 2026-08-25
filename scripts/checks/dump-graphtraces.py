@@ -10,10 +10,10 @@ other field (messages, output, system_prompt, query, ...) is model-generated
 or structural, not the patient's own record, and stays in by default.
 
 Run from project root:
-    python scripts/dump-graphtraces.py --correlation-id ID
-    python scripts/dump-graphtraces.py --card-guid GUID
-    python scripts/dump-graphtraces.py --card-guid GUID --keep-card-data
-    python scripts/dump-graphtraces.py --card-guid GUID --path e2e/logs/graphtraces.jsonl
+    python scripts/checks/dump-graphtraces.py --correlation-id ID
+    python scripts/checks/dump-graphtraces.py --card-guid GUID
+    python scripts/checks/dump-graphtraces.py --card-guid GUID --keep-card-data
+    python scripts/checks/dump-graphtraces.py --card-guid GUID --path e2e/logs/graphtraces.jsonl
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 
 _CARD_DATA_FIELDS = ("card_data", "card_data_priem", "human_message")
 _REDACTED = "«card data removed — pass --keep-card-data to see it»"

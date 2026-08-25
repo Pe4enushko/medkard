@@ -9,7 +9,7 @@ from storage.models import Doc
 from storage.models.guideline import Guideline
 
 _spec = importlib.util.spec_from_file_location(
-    "reingest_pdfs", Path(__file__).resolve().parent.parent / "scripts" / "reingest-pdfs.py")
+    "reingest_pdfs", Path(__file__).resolve().parent.parent / "scripts" / "knowledge" / "reingest-pdfs.py")
 reingest = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(reingest)
 

@@ -22,7 +22,7 @@ history is not replayed, then run the reconcile:
 # 2. Mark 001–023 applied WITHOUT running them:
 bash migrations/migrate.sh --skip-until 024_docs_reconcile.sql
 # 3. Fill docs.embedding for every row:
-python scripts/reingest-pdfs.py --force-all
+python scripts/knowledge/reingest-pdfs.py --force-all
 # 4. Apply 024 (drops chunk_embedding/hyde_reembedded, keeps embedding):
 bash migrations/migrate.sh
 ```

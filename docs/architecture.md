@@ -36,7 +36,7 @@ LLM-моделью по трём измерениям качества и отд
                                               │        ▼                             │
 ┌─────────────┐   PDF клинреков + manifest    │ AuditPipeline (src/audit/pipeline.py)│
 │ Минздрав:   │──────────────────────────────▶│   формальная проверка (LLM)          │
-│ клин.реком. │  scripts/reingest-pdfs.py     │   проверка кодирования МКБ (агент)   │
+│ клин.реком. │  scripts/knowledge/reingest-pdfs.py     │   проверка кодирования МКБ (агент)   │
 └─────────────┘        │                      │   проверка по клинрекам (3 агента) ──┼──┐
                        ▼                      │        │                             │  │
               ┌────────────────┐   векторный  │        ▼                             │  │
@@ -120,7 +120,7 @@ LLM-вызовов на визит: `2 + 3N` (N — число диагнозо�
 
 ## RAG: как клинреки попадают в поиск и как ищутся
 
-Ингест (офлайн, `scripts/reingest-pdfs.py`):
+Ингест (офлайн, `scripts/knowledge/reingest-pdfs.py`):
 
 ```
 resources/manifest.csv ──┐        (справочник: ID, название, коды МКБ, возраст…)
@@ -224,7 +224,7 @@ wall-clock со слиянием параллельных интервалов).
   каждый issue проверяется регексом, «заражённые» чинятся отдельным LLM-вызовом.
 - **Возрастные пороги расходятся**: формальная проверка считает ребёнком `< 18`,
   подбор клинреков — `<= 15`. Это текущее состояние кода, не баг конфигурации.
-- **Токены и тайминги** пишутся в done_cards на каждую карту; `scripts/metrics.py`
+- **Токены и тайминги** пишутся в done_cards на каждую карту; `scripts/checks/metrics.py`
   показывает агрегаты.
 - **Миграции**: `migrations/migrate.sh` с леджером `schema_migrations`;
   осторожно — два файла `013_*`, применяются оба в алфавитном порядке.
@@ -235,10 +235,10 @@ wall-clock со слиянием параллельных интервалов).
 ```bash
 cp .env.example .env            # Postgres, LLM, эмбеддинги, креды 1С
 bash migrations/migrate.sh      # схема БД
-python scripts/seed-guidelines.py           # манифест → guidelines
-python scripts/reingest-pdfs.py             # PDF → чанки → эмбеддинги
-bash scripts/seed-reference-lists.sh        # реестры лекарств/БАД
-python scripts/audit-file.py --file data.json          # аудит локального JSON
+python scripts/knowledge/seed-guidelines.py           # манифест → guidelines
+python scripts/knowledge/reingest-pdfs.py             # PDF → чанки → эмбеддинги
+bash scripts/knowledge/seed-reference-lists.sh        # реестры лекарств/БАД
+python scripts/operator/audit-file.py --file data.json          # аудит локального JSON
 python scripts/audit-one-c-period.py Alenka --days 1   # боевой прогон
 docker compose up -d            # pull-API (только API; аудит — вне контейнера)
 ```

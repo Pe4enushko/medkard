@@ -5,11 +5,11 @@
 # against a running `api.app:create_app` instance, without writing a client.
 #
 # Usage:
-#   ./scripts/test-visits-route.sh ROUTE URL API_KEY [ORG] [DATE] [DOCTOR_CODE]
+#   ./scripts/smoke/test-visits-route.sh ROUTE URL API_KEY [ORG] [DATE] [DOCTOR_CODE]
 #
 #   ROUTE   check | pull | export | push | check_updates | doctors
 #   URL     base URL of the API, e.g. http://localhost:8000
-#   API_KEY bearer token (see scripts/create-api-key.py)
+#   API_KEY bearer token (see scripts/operator/create-api-key.py)
 #   ORG     org name for ?org=          (default: MDS)
 #   DATE    date for check/pull, DD.MM.YYYY not required — ISO YYYY-MM-DD
 #           (default: today; ignored by push, which sends a mock card body,
@@ -21,13 +21,13 @@
 #           a code outside [\w-]{1,64} is rejected with 422.
 #
 # Examples:
-#   ./scripts/test-visits-route.sh check  http://localhost:8000 $API_KEY
-#   ./scripts/test-visits-route.sh pull   http://localhost:8000 $API_KEY Alenka 2026-07-01
-#   ./scripts/test-visits-route.sh pull   http://localhost:8000 $API_KEY MDS 2026-07-01 00012
-#   ./scripts/test-visits-route.sh export http://localhost:8000 $API_KEY MDS
-#   ./scripts/test-visits-route.sh push   http://localhost:8000 $API_KEY MDS
-#   ./scripts/test-visits-route.sh check_updates http://localhost:8000 $API_KEY MDS 2026-07-20
-#   ./scripts/test-visits-route.sh doctors http://localhost:8000 $API_KEY MDS
+#   ./scripts/smoke/test-visits-route.sh check  http://localhost:8000 $API_KEY
+#   ./scripts/smoke/test-visits-route.sh pull   http://localhost:8000 $API_KEY Alenka 2026-07-01
+#   ./scripts/smoke/test-visits-route.sh pull   http://localhost:8000 $API_KEY MDS 2026-07-01 00012
+#   ./scripts/smoke/test-visits-route.sh export http://localhost:8000 $API_KEY MDS
+#   ./scripts/smoke/test-visits-route.sh push   http://localhost:8000 $API_KEY MDS
+#   ./scripts/smoke/test-visits-route.sh check_updates http://localhost:8000 $API_KEY MDS 2026-07-20
+#   ./scripts/smoke/test-visits-route.sh doctors http://localhost:8000 $API_KEY MDS
 
 set -euo pipefail
 
@@ -37,7 +37,7 @@ Usage: $0 ROUTE URL API_KEY [ORG] [DATE] [DOCTOR_CODE]
 
   ROUTE   check | pull | export | push | check_updates | doctors
   URL     base URL of the API, e.g. http://localhost:8000
-  API_KEY bearer token (see scripts/create-api-key.py)
+  API_KEY bearer token (see scripts/operator/create-api-key.py)
   ORG     org name for ?org=          (default: MDS)
   DATE    date for check/pull, ISO YYYY-MM-DD (default: today)
           (push ignores DATE — it sends a mock card body instead;

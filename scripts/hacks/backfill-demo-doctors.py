@@ -19,8 +19,8 @@ real doctor from 1C survives it.
 
 Run from project root (dry-run unless -y):
 
-    python scripts/backfill-demo-doctors.py Alenka [--limit 100] [-y]
-    python scripts/backfill-demo-doctors.py Alenka --revert [-y]
+    python scripts/hacks/backfill-demo-doctors.py Alenka [--limit 100] [-y]
+    python scripts/hacks/backfill-demo-doctors.py Alenka --revert [-y]
 
 Options:
     ORG        Organization as named in the organizations table: Alenka or MDS
@@ -42,7 +42,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from api.demo_doctors import doctors_path, load_doctors

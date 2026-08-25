@@ -1,4 +1,4 @@
-"""Integration tests for the bulk doctor stamp behind scripts/backfill-demo-doctors.py.
+"""Integration tests for the bulk doctor stamp behind scripts/hacks/backfill-demo-doctors.py.
 
 Seeds its own done_cards rows on a far-future date (2045-03-03) so stand data
 can't collide, and deletes them afterwards — same shape as

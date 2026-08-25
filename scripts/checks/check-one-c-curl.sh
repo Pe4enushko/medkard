@@ -9,12 +9,12 @@
 #   - Accept: application/json
 #
 # Usage:
-#   ./scripts/check-one-c-curl.sh Alenka 03.06.2026 03.06.2026
-#   ./scripts/check-one-c-curl.sh MDS    01.06.2026 03.06.2026
+#   ./scripts/checks/check-one-c-curl.sh Alenka 03.06.2026 03.06.2026
+#   ./scripts/checks/check-one-c-curl.sh MDS    01.06.2026 03.06.2026
 #
 # Reads the same env vars the Python client does. Load your .env first, e.g.:
 #   set -a; source .env; set +a
-#   ./scripts/check-one-c-curl.sh Alenka 03.06.2026 03.06.2026
+#   ./scripts/checks/check-one-c-curl.sh Alenka 03.06.2026 03.06.2026
 
 set -euo pipefail
 

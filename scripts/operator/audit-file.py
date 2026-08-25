@@ -4,7 +4,7 @@ Load appointments from a JSON file in the project root, run the full audit
 pipeline, then export results to Excel.
 
 Run from project root:
-    python scripts/audit-file.py [--file PATH] [--excel PATH] [--num-batches N]
+    python scripts/operator/audit-file.py [--file PATH] [--excel PATH] [--num-batches N]
 
 Options:
     --file         Input JSON file (default: data.json)
@@ -22,7 +22,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from audit.excel_formatter import ExcelFormatter

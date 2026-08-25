@@ -5,7 +5,7 @@ from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
     "backfill_priem",
-    Path(__file__).resolve().parent.parent / "scripts" / "backfill-priem.py")
+    Path(__file__).resolve().parent.parent / "scripts" / "operator" / "backfill-priem.py")
 backfill = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(backfill)
 

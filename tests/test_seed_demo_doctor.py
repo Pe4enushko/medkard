@@ -1,4 +1,4 @@
-"""Unit tests for scripts/seed-demo-doctor.py — the demo-doctor stamper.
+"""Unit tests for scripts/hacks/seed-demo-doctor.py — the demo-doctor stamper.
 
 Pure functions only: no DB. The storage method the script leans on
 (list_audited_by_visit_date) is covered by tests/test_seed_demo_doctor_storage.py.
@@ -13,7 +13,7 @@ import pytest
 
 _spec = importlib.util.spec_from_file_location(
     "seed_demo_doctor",
-    Path(__file__).resolve().parent.parent / "scripts" / "seed-demo-doctor.py")
+    Path(__file__).resolve().parent.parent / "scripts" / "hacks" / "seed-demo-doctor.py")
 seed = importlib.util.module_from_spec(_spec)
 # Registered before exec: @dataclass resolves annotations through
 # sys.modules[cls.__module__], which is None for a module loaded by spec alone.

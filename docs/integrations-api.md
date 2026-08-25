@@ -22,7 +22,7 @@
   (дефолт 15 с, в `.env.example` — 25).
 - Ответ возвращается как есть (`json.loads`); сетевые ошибки → `RuntimeError`.
 - Данные приходят **обезличенными** (контур данных: вход из 1С обезличен, модели локальные).
-- Диагностика: `scripts/check-one-c-curl.sh {Alenka|MDS} FROM TO` — воспроизводит
+- Диагностика: `scripts/checks/check-one-c-curl.sh {Alenka|MDS} FROM TO` — воспроизводит
   запрос curl'ом с теми же env.
 
 ### Кеш `data_snapshots/`
@@ -54,7 +54,7 @@
 - Креды из файла `key=value` (`ip, port, username, password` обязательны).
 - `upload(local, filename, creds)` → пассивный обычный FTP (без TLS), путь
   `/YYYY/MM/<filename>` по **текущей дате запуска** (org — только в имени файла).
-- Вызывают: `audit-one-c-period.py --ftpcreds` и `scripts/send_report_ftp.py`.
+- Вызывают: `audit-one-c-period.py --ftpcreds` и `scripts/operator/send_report_ftp.py`.
 
 ## Pull-API — `src/api/` (FastAPI)
 
@@ -90,8 +90,8 @@
 (`api_key_organizations`). Управление:
 
 ```
-python scripts/create-api-key.py "<label>" --orgs Alenka MDS   # печатает ключ ОДИН раз
-python scripts/revoke-api-key.py <uuid | сырой ключ>            # мягкий revoke (revoked_at)
+python scripts/operator/create-api-key.py "<label>" --orgs Alenka MDS   # печатает ключ ОДИН раз
+python scripts/operator/revoke-api-key.py <uuid | сырой ключ>            # мягкий revoke (revoked_at)
 ```
 
 ## Отчётность — `src/reporting/`
@@ -112,7 +112,7 @@ python scripts/revoke-api-key.py <uuid | сырой ключ>            # мя�
   ├─ [диск] ExcelFormatter.export_period → .xlsx → ftp.upload → /YYYY/MM/
   ├─ [API]  ApiFormatter.make_xlsx → байты xlsx (pull)
   ├─ [API]  ApiFormatter.export → сырые строки (реплика engine)
-  └─ [метрики] done_cards_metrics → scripts/metrics.py
+  └─ [метрики] done_cards_metrics → scripts/checks/metrics.py
 ```
 
 ## Мультиарендность

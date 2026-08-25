@@ -235,7 +235,7 @@ async def test_multiple_pushes_in_one_day_aggregate_in_metrics_view(alenka_org_i
 
 @pytest.mark.asyncio
 async def test_replace_priem_on_pending_card_does_not_log(alenka_org_id: str):
-    """replace_priem (scripts/backfill-priem.py's write path) never touches
+    """replace_priem (scripts/operator/backfill-priem.py's write path) never touches
     status or pushed_at, so it must not fire the push_log trigger even when
     it happens to run against a row that is already status='pending' — the
     exact scenario Finding 1 of the final review flagged as a phantom-push

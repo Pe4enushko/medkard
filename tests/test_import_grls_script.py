@@ -9,7 +9,7 @@ from grls.dump import read_dump
 from tests.grls_fixtures import make_sheet, sample_row
 
 _spec = importlib.util.spec_from_file_location(
-    "import_grls", Path(__file__).resolve().parent.parent / "scripts" / "import-grls.py")
+    "import_grls", Path(__file__).resolve().parent.parent / "scripts" / "knowledge" / "import-grls.py")
 imp = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = imp  # dataclasses (PEP 563 annotations) needs the module registered
 _spec.loader.exec_module(imp)

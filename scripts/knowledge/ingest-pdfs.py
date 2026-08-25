@@ -3,7 +3,7 @@
 ingest-pdfs.py — ingest PDF chunks from manifest.csv into the docs table.
 
 Run from the project root::
-    python scripts/ingest-pdfs.py
+    python scripts/knowledge/ingest-pdfs.py
 
 For each chunk: embeds its contextual text (section + body),
 then stores everything in the docs table.
@@ -18,7 +18,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from RAG.ingestion.data_loader import load_documents

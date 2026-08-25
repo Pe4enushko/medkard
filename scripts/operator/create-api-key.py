@@ -8,12 +8,12 @@ the organizations named here — every key must be scoped to at least one
 org; each request still names which org's cards it wants via ?org=.
 
 Run from project root:
-    python scripts/create-api-key.py "1C integration" --orgs Alenka MDS
-    python scripts/create-api-key.py "1C integration" --orgs Alenka
+    python scripts/operator/create-api-key.py "1C integration" --orgs Alenka MDS
+    python scripts/operator/create-api-key.py "1C integration" --orgs Alenka
 
 Prints the raw key to stdout exactly once. Only its hash is stored in the
 database — if the key is lost, issue a new one and revoke the old one
-(scripts/revoke-api-key.py <key-id>, printed alongside the new key).
+(scripts/operator/revoke-api-key.py <key-id>, printed alongside the new key).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import secrets
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from storage.api_keys_storage import ApiKeysStorage  # noqa: E402
@@ -54,7 +54,7 @@ async def main() -> None:
     print(f"New API key '{_args.label}' (id={key_id}), scoped to: {', '.join(_args.orgs)}\n")
     print(f"    {raw_key}\n")
     print("Save this now — it cannot be shown again.")
-    print(f"To revoke it later: python scripts/revoke-api-key.py {key_id}")
+    print(f"To revoke it later: python scripts/operator/revoke-api-key.py {key_id}")
 
 
 if __name__ == "__main__":

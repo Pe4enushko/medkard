@@ -5,7 +5,7 @@ Full mock audit run using synthetic visit data for today's date.
 No 1C connection, no database writes — pure pipeline smoke-test.
 
 Run from project root:
-    python scripts/mock-run-today.py [--org Alenka|MDS] [--visits N] [--excel PATH]
+    python scripts/smoke/mock-run-today.py [--org Alenka|MDS] [--visits N] [--excel PATH]
 
 Options:
     --org      Organization name embedded in mock data (default: Alenka)
@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from audit.pipeline import AuditPipeline

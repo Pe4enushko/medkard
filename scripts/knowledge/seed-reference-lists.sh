@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Truncates and reloads dietary_supplements from CSV. Drugs now come from GRLS: scripts/import-grls.py
-# Usage: ./scripts/seed-reference-lists.sh
+# Truncates and reloads dietary_supplements from CSV. Drugs now come from GRLS: scripts/knowledge/import-grls.py
+# Usage: ./scripts/knowledge/seed-reference-lists.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+ROOT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 ENV_FILE="$ROOT_DIR/.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 _spec = importlib.util.spec_from_file_location(
-    "deterministic_snapshot", ROOT / "scripts" / "deterministic-snapshot.py"
+    "deterministic_snapshot", ROOT / "scripts" / "checks" / "deterministic-snapshot.py"
 )
 snap = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(snap)

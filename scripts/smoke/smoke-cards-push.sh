@@ -15,10 +15,10 @@
 #   7. --pending-only audit run     → card becomes status='done'   [--with-audit]
 #
 # Usage:
-#   ./scripts/smoke-cards-push.sh URL API_KEY [ORG] [--with-audit]
+#   ./scripts/smoke/smoke-cards-push.sh URL API_KEY [ORG] [--with-audit]
 #
 #   URL           base URL of the API, e.g. http://localhost:8000
-#   API_KEY       bearer token (see scripts/create-api-key.py)
+#   API_KEY       bearer token (see scripts/operator/create-api-key.py)
 #   ORG           org name for ?org=   (default: MDS)
 #   --with-audit  also run step 7, which invokes
 #                 `python scripts/audit-one-c-period.py ORG --pending-only`.
@@ -50,7 +50,7 @@ for arg in "$@"; do
 done
 
 BASE_URL="${URL%/}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 # Fixed, obviously-synthetic GUID so a leftover row is recognisable and the
 # cleanup below can always find it. Valid hex — Прием.GUID is stored as text,
 # but a malformed one would be indistinguishable from corrupt 1C data.

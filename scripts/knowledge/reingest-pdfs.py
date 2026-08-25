@@ -6,7 +6,7 @@ Unlike ingest-pdfs.py, does NOT skip already-ingested files. Per file it decides
 upsert, or skip — driven by the ingest_runs resume table (status + last-done PDF
 hash) and a manifest-vs-guidelines diff.
 
-    python scripts/reingest-pdfs.py [--only-failed] [--file-id ID]
+    python scripts/knowledge/reingest-pdfs.py [--only-failed] [--file-id ID]
 """
 import argparse
 import asyncio
@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from RAG.ingestion.data_loader import MANIFEST_PATH, PDFS_DIR, load_documents, resolve_pdf_path

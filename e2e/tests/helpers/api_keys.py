@@ -2,7 +2,7 @@
 api_keys.py — mint/delete throwaway API keys for e2e tests.
 
 issue_key goes through ApiKeysStorage.create_key (the same path
-scripts/create-api-key.py uses) rather than inserting rows directly, so a
+scripts/operator/create-api-key.py uses) rather than inserting rows directly, so a
 test key is authorized exactly the way a real one would be.
 
 delete_key removes the row outright (not ApiKeysStorage.revoke_key, which

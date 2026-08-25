@@ -1,6 +1,6 @@
 # Reingest-with-resume — процесс (от папки до завершения)
 
-Сквозная схема работы `scripts/reingest-pdfs.py`: как файлы из `pdfs/` и строки
+Сквозная схема работы `scripts/knowledge/reingest-pdfs.py`: как файлы из `pdfs/` и строки
 `resources/manifest.csv` попадают в БД (`docs` + `guidelines`) с устойчивостью к прерываниям.
 См. спеку [`2026-07-09-reingest-with-resume-design.md`](specs/2026-07-09-reingest-with-resume-design.md)
 и план [`2026-07-14-reingest-with-resume.md`](plans/2026-07-14-reingest-with-resume.md).
@@ -16,10 +16,10 @@
               (первый прогон / после смены схемы БД — один раз)
                                      │
         bash migrations/migrate.sh   → docs, guidelines, ingest_runs (019–023)
-        python scripts/seed-guidelines.py → guidelines := снимок манифеста «как есть»
+        python scripts/knowledge/seed-guidelines.py → guidelines := снимок манифеста «как есть»
                                      │
                                      ▼
-        python scripts/reingest-pdfs.py  [--data-dir DIR] [--manifest-path FILE] [--only-failed] [--file-id ID] [--dry-run]
+        python scripts/knowledge/reingest-pdfs.py  [--data-dir DIR] [--manifest-path FILE] [--only-failed] [--file-id ID] [--dry-run]
                                      │
       ┌──────────────────────── СБОР СОСТОЯНИЯ ────────────────────────┐
       │  manifest_rows ← manifest.csv                                   │
