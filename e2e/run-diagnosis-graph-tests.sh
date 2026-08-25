@@ -91,7 +91,7 @@ fi
 
 mapfile -t TESTS < <(
     cd "$ROOT" || exit
-    find "${E2E_TESTS_DIR#"$ROOT/"}" -type f -name 'test_*.py' \
+    find "${E2E_TESTS_DIR#"$ROOT/"}" -type f -name '*test_*.py' \
         | grep -E -- "$pattern" \
         | sort
 )

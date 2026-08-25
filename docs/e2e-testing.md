@@ -32,6 +32,27 @@ folder of its own.
 
 For when to add an audit fixture, see `e2e/tests/audit/README.md`'s "Как добавить фикстуру" section.
 
+## Group prefixes (`e2e/tests/audit/`)
+
+Audit scripts carry a one-digit group prefix *before* `test`, so a group is one `ls` or one
+grep away:
+
+| Prefix | Group |
+|--------|-------|
+| `1-`   | fixture cards vs. the formal rules of the ministry orders |
+| `2-`   | diagnosis-graph health: recursion, context overflow, output length, malformed JSON |
+| `3-`   | unfilled template fields — the check that code, not the model, performs |
+
+A new script joins an existing group by its subject; a genuinely new subject takes the next
+free prefix. Prefixes are never reshuffled — a prefix printed in an old `logs/e2e-*.log` has
+to keep meaning the same group.
+
+Because the prefix precedes `test`, the runner discovers scripts by `*test_*.py`, not
+`test_*.py`. A script added as `test_*.py` with no prefix is still found; one added as
+`*_test.py` is not.
+
+`e2e/tests/routes/` is not prefixed: one script per route already names its own subject.
+
 ## Helper contract (`e2e/tests/helpers/`)
 
 - `organizations.py` — `OrganizationFixtures` (`create_org`/`delete_org`), direct SQL — there's no
