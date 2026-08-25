@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import psycopg
@@ -548,3 +548,41 @@ class DoneCardsStorage(BaseStorage):
         guids = {row["card_guid"] for row in rows}
         logger.info("💾 done_cards loaded %d done guid(s) for org_id=%s", len(guids), organization_id)
         return guids
+
+    async def list_audited_by_visit_date(
+        self, *, organization_id: str, visit_date: date
+    ) -> list[dict]:
+        """Audited cards of one org on one visit date, with per-kind issue counts.
+
+        Selection matches the pull API's (reporting/api_formatter.py): audited
+        cards only — ignored and broken ones carry no results, and pending ones
+        have not been through the pipeline yet. The date comes from
+        medkard_visit_date(Прием.DATE), which reads both 1C's DD.MM.YYYY and ISO
+        (migration 026); a card whose date is unparseable is simply not on any
+        date and drops out.
+
+        Counts, not the results themselves: callers rank cards by how much the
+        audit found, and a date's worth of full result arrays is a lot of JSON
+        to move for a number. A NULL result column counts as zero — "the checker
+        never ran" and "it found nothing" are different, but neither puts a line
+        in a report.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT card_guid,
+                       card_data -> 'Прием' ->> 'Врач_код'          AS doctor_code,
+                       COALESCE(jsonb_array_length(formal_result), 0)    AS formal_n,
+                       COALESCE(jsonb_array_length(diag_result), 0)      AS diag_n,
+                       COALESCE(jsonb_array_length(icd_check_result), 0) AS icd_n
+                FROM done_cards
+                WHERE organization_id = %(org_id)s::uuid
+                  AND ignored = FALSE
+                  AND broken = FALSE
+                  AND status = 'done'
+                  AND medkard_visit_date(card_data -> 'Прием' ->> 'DATE') = %(date)s::date
+                ORDER BY card_guid
+                """,
+                {"org_id": organization_id, "date": visit_date},
+            )
+            return [dict(row) for row in await cur.fetchall()]
