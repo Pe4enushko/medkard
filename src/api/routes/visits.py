@@ -21,6 +21,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from api import demo_doctors
 from api.auth import require_org_access
 from api.models import CheckResponse, DoctorEntry, PushResponse
 from parsers.excel import build_empty_report_bytes
@@ -140,7 +141,7 @@ async def push(
     card: dict,
     org_access: tuple[str, str] = Depends(require_org_access),
 ) -> PushResponse:
-    org_id, _ = org_access
+    org_id, org_name = org_access
     card_guid = _extract_card_guid(card)
     if not card_guid:
         raise HTTPException(
@@ -154,6 +155,10 @@ async def push(
         )
 
     async with DoneCardsStorage() as storage:
+        # ВРЕМЕННЫЙ КОСТЫЛЬ (api/demo_doctors.py): 1С не шлёт врача, а показать
+        # персональные отчёты надо. Убирается тремя строками отсюда.
+        if demo_doctors.enabled_for(org_name):
+            card = demo_doctors.stamp(card, previous=await storage.get_priem(card_guid))
         await storage.upsert_pending(
             card_guid=card_guid,
             card_data=json.dumps(card, ensure_ascii=False),
