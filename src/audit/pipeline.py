@@ -38,6 +38,7 @@ from audit.graph_trace import (
 )
 from audit.icd_check.validator import check_icd_codes
 from audit.models import FormalFinding, FormalStructureResult
+from parsers.inspection_labels import normalize_visit_labels
 from parsers.json_parser import AppointmentParser
 from storage.done_cards_storage import DoneCardsStorage
 from storage.guidelines_storage import GuidelinesStorage
@@ -252,6 +253,10 @@ class AuditPipeline:
     @_traced_card_audit
     async def _audit_visit(self, visit: dict[str, Any]) -> Result:
         """Audit a single visit and return one Result object."""
+        # единственная точка входа визита в аудит: дальше этот же dict уходит и
+        # в проверяющие модели, и в карточку отчёта, поэтому имена полей осмотра
+        # приводятся к врачебным здесь (см. parsers.inspection_labels)
+        visit = normalize_visit_labels(visit)
         priem = visit.get("Прием") or {}
         visit_id = priem.get("GUID") or priem.get("DATE") or "unknown"
         card_guid = priem.get("GUID") or None
