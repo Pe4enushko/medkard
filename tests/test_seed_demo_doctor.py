@@ -162,7 +162,14 @@ def _run(storage, **kwargs):
     kwargs.setdefault("limit", 10)
     kwargs.setdefault("apply", False)
     kwargs.setdefault("revert", False)
-    return asyncio.run(seed._run(storage, **kwargs))
+    # Свой цикл, а не asyncio.run(): тот на выходе снимает текущий цикл потока,
+    # и следующие в сьюте файлы (tests/test_cards_push_api.py и другие,
+    # зовущие get_event_loop() из синхронных хелперов) падают на пустом месте.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(seed._run(storage, **kwargs))
+    finally:
+        loop.close()
 
 
 def test_dry_run_writes_nothing():
