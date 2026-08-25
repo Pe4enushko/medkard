@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,32 @@ def patient_age(patient: dict[str, Any]) -> int | None:
         return int(raw) if raw >= 0 else None
     text = str(raw).strip()
     return int(text) if text.isdigit() else None
+
+
+def visit_date(visit_meta: dict[str, Any]) -> date | None:
+    """Дата приёма из блока «Прием», или None если её нельзя прочитать.
+
+    1С отдаёт её в двух видах — «25.06.2026» и «2026-06-25T13:10:00», — поэтому
+    разбор общий: и подбор статуса препарата в ГРЛС на дату визита, и блок
+    «сегодня» для чекеров обязаны видеть один и тот же день.
+    """
+    raw = visit_meta.get("DATE")
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    value = raw.strip()
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        pass
+    try:
+        day, month, year = (int(part) for part in value.split("."))
+        return date(year, month, day)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass

@@ -556,6 +556,49 @@ async def test_judge_treatment_receives_grls_context() -> None:
     assert "## Фрагменты клинических рекомендаций «КР»" in user_context
 
 
+async def test_judge_aspect_anchors_today_on_the_visit_date() -> None:
+    """Без этого чекер судит даты по своему знанию о «сегодня» и объявляет год
+    приёма будущим: на выгрузке Алёнки за 20.08.2026 так родились ложные
+    замечания «дата в будущем, возможно опечатка» в шести картах."""
+    from datetime import date
+
+    pool = build_aspect_pool(
+        [("anamnesis", [_row("anamnesis-1", section="Анамнез", index=1, rrf=0.5)])],
+        file_id="file-1",
+        doc_title="КР",
+    )
+    client = _Client('{"issues":[]}')
+
+    await judge_aspect(
+        {"doc_title": "КР", "visit_date": date(2026, 8, 20), "pools": {"anamnesis": pool}},
+        "anamnesis",
+        client=client,
+        detector=_Detector(),
+    )
+
+    user_context = client.calls[0][0][1]["content"]
+    assert user_context.startswith("## Сегодняшний день")
+    assert "20.08.2026" in user_context
+
+
+async def test_judge_aspect_without_a_visit_date_says_nothing_about_today() -> None:
+    pool = build_aspect_pool(
+        [("anamnesis", [_row("anamnesis-1", section="Анамнез", index=1, rrf=0.5)])],
+        file_id="file-1",
+        doc_title="КР",
+    )
+    client = _Client('{"issues":[]}')
+
+    await judge_aspect(
+        {"doc_title": "КР", "pools": {"anamnesis": pool}},
+        "anamnesis",
+        client=client,
+        detector=_Detector(),
+    )
+
+    assert "Сегодняшний день" not in client.calls[0][0][1]["content"]
+
+
 async def test_judge_aspect_degrades_on_invalid_json_without_losing_tokens() -> None:
     pool = build_aspect_pool(
         [("q", [_row("a", section="2", index=1, rrf=0.4)])],

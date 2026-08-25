@@ -9,7 +9,8 @@ relative order and are appended after the matched ones.
 
 Matching is case-insensitive and fuzzy: labels are normalized (lowercased,
 ё→е, whitespace collapsed, leading/trailing punctuation stripped) and compared
-by Levenshtein distance with a small threshold (default 2).
+by Levenshtein distance with a small threshold (default 2). Names shorter than
+_MIN_FUZZY_LEN characters must match exactly — see _distance_budget.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from typing import Any
 
 _PARAM_KEY = "Параметр"
 _STRIP_CHARS = " .:;,-—"
+_MIN_FUZZY_LEN = 4
 
 _DEFAULT_FORMATS_PATH = Path(__file__).resolve().parents[2] / "resources" / "inspection_formats.json"
 
@@ -56,6 +58,30 @@ def _levenshtein(a: str, b: str, max_distance: int = 2) -> int:
     return prev[lb]
 
 
+def _distance_budget(a: str, b: str, max_distance: int) -> int:
+    """Distance allowed between normalized names *a* and *b*.
+
+    Abbreviations are 2-3 characters long, and a distance-2 window on such a
+    name matches nearly anything: on real vaccination cards «Фсс» landed on the
+    «чсс» rank and «ФР»/«ХЗ»/«Р» on «чд». Anything shorter than _MIN_FUZZY_LEN
+    therefore has to match exactly.
+    """
+    if min(len(a), len(b)) < _MIN_FUZZY_LEN:
+        return 0
+    return max_distance
+
+
+def labels_match(a: str, b: str, *, max_distance: int = 2) -> bool:
+    """Одно ли это имя поля с точностью до дрейфа написания.
+
+    Тот же матчинг, что и в переупорядочивании: 1С добавляет и убирает
+    двоеточия, путает «листка»/«листке», а короткие имена сверяются точно.
+    """
+    na, nb = _normalize(a), _normalize(b)
+    budget = _distance_budget(na, nb, max_distance)
+    return _levenshtein(na, nb, budget) <= budget
+
+
 def reorder_inspection_data(
     inspection_data: list[dict[str, Any]],
     order_tokens: list[str],
@@ -83,7 +109,10 @@ def reorder_inspection_data(
         for idx, np in enumerate(norm_params):
             if claimed[idx]:
                 continue
-            d = _levenshtein(nt, np, max_distance)
+            budget = _distance_budget(nt, np, max_distance)
+            d = _levenshtein(nt, np, budget)
+            if d > budget:
+                continue
             if d < best_dist:
                 best_dist = d
                 best_idx = idx

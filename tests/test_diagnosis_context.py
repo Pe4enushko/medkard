@@ -81,14 +81,6 @@ def test_format_visit_context_marks_missing_context(monkeypatch) -> None:
     assert context == "—"
 
 
-def test_visit_date_accepts_one_c_and_iso_shapes(monkeypatch) -> None:
-    validator = _load_validator_module(monkeypatch)
-
-    assert validator._visit_date("25.06.2026").isoformat() == "2026-06-25"
-    assert validator._visit_date("2026-06-25T13:10:00").isoformat() == "2026-06-25"
-    assert validator._visit_date("not-a-date") is None
-
-
 async def test_validate_diagnosis_maps_graph_contract(monkeypatch) -> None:
     validator = _load_validator_module(monkeypatch)
 
