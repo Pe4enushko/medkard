@@ -22,6 +22,10 @@ apply to *all* visit types are the easy ones to trip by accident:
                                         regimen, duration and justification
   ОТСУТСТВУЕТ_ИНФОРМАЦИЯ_О_СОПРОВОЖДАЮЩЕМ — children under 15 need a named
                                         legal representative
+                                        (1C ships this field as «родственник
+                                        лвн»; the audit renames it to «На
+                                        приеме пациент с» on the way in —
+                                        see parsers.inspection_labels)
 
 Dates are fixed, never `today`: fixtures are pure data, nothing is written
 to the database, and a stable date keeps runs reproducible and log lines
