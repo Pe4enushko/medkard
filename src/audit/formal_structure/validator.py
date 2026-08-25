@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from LLM.chinese_detector import ChineseDetector
+from audit.formal_structure.required_fields import missing_required_fields
 from LLM.validations import validate_rule
 from LLM.visit_classifier import VisitClassifier
 from parsers.json_parser import patient_age as _patient_age
@@ -470,6 +471,26 @@ class FormalValidator:
                     }
         return None
 
+    def _check_missing_required_fields(
+        self,
+        visit: dict[str, Any],
+        visit_types: set[VisitType],
+    ) -> dict[str, str] | None:
+        """Одно замечание на все обязательные поля, которых в записи нет.
+
+        Пустых полей 1С не присылает, поэтому модели отсутствие анамнеза
+        неоткуда увидеть — она судит по тому, что ей показали. Замечание
+        одно на карту: три отдельных о трёх полях врач читает как три дефекта.
+        """
+        keys = {_VISIT_TYPE_RULE_KEY[vt] for vt in visit_types}
+        missing = missing_required_fields(visit.get("ДанныеОсмотра") or [], keys)
+        if not missing:
+            return None
+        return {
+            "flag": "НЕЗАПОЛНЕНЫ_ПОЛЯ_ШАБЛОНА",
+            "issue": "Поля осмотра не заполнены: " + ", ".join(missing),
+        }
+
     async def validate(
         self,
         visit: dict[str, Any],
@@ -533,6 +554,12 @@ class FormalValidator:
                 repaired, repair_tokens = await _chinese_detector.repair_issue(finding["issue"])
                 findings[i] = {**finding, "issue": repaired}
                 tokens += repair_tokens
+
+        unfilled = self._check_missing_required_fields(visit, visit_types)
+        if unfilled:
+            logger.info("[formal] %s", unfilled["issue"])
+            # источника в rules.json нет: набор считан по боевым картам клиники
+            findings.append({**unfilled, "source": ""})
 
         contradiction = self._check_nmu_keyword_contradiction(visit)
         if contradiction:

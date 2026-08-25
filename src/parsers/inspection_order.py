@@ -71,6 +71,17 @@ def _distance_budget(a: str, b: str, max_distance: int) -> int:
     return max_distance
 
 
+def labels_match(a: str, b: str, *, max_distance: int = 2) -> bool:
+    """Одно ли это имя поля с точностью до дрейфа написания.
+
+    Тот же матчинг, что и в переупорядочивании: 1С добавляет и убирает
+    двоеточия, путает «листка»/«листке», а короткие имена сверяются точно.
+    """
+    na, nb = _normalize(a), _normalize(b)
+    budget = _distance_budget(na, nb, max_distance)
+    return _levenshtein(na, nb, budget) <= budget
+
+
 def reorder_inspection_data(
     inspection_data: list[dict[str, Any]],
     order_tokens: list[str],
