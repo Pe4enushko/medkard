@@ -6,6 +6,7 @@ itself by tests/test_demo_doctors.py.
 
 import importlib.util
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -59,3 +60,26 @@ def test_no_doctors_is_an_error():
     # happen.
     with pytest.raises(SystemExit):
         backfill.assign(["g1"], [])
+
+
+# ── граница по дате визита ───────────────────────────────────────────────────
+
+def test_no_days_means_no_boundary():
+    assert backfill.since_date(0, date(2026, 8, 25)) is None
+    assert backfill.since_date(None, date(2026, 8, 25)) is None
+
+
+def test_days_counts_back_from_today():
+    # Как у scripts/audit-one-c-period.py: --days N сдвигает начало периода на
+    # N дней назад от сегодня, граница включительная.
+    assert backfill.since_date(30, date(2026, 8, 25)) == date(2026, 7, 26)
+
+
+def test_one_day_is_yesterday_and_today():
+    assert backfill.since_date(1, date(2026, 8, 25)) == date(2026, 8, 24)
+
+
+def test_negative_days_is_an_error():
+    import pytest as _pytest
+    with _pytest.raises(SystemExit):
+        backfill.since_date(-1, date(2026, 8, 25))
