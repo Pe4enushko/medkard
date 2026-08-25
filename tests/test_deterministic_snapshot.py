@@ -132,3 +132,21 @@ def test_diff_says_so_when_provenance_is_missing(capsys) -> None:
     snap._diff({}, {})
 
     assert capsys.readouterr().out.count("происхождение не записано") == 2
+
+
+def test_diff_notices_fields_that_stopped_being_reported(capsys):
+    before = {"card-1": _profile(missing_required_fields=["Анамнез заболевания"])}
+    after = {"card-1": _profile(missing_required_fields=[])}
+
+    assert snap._diff(before, after) == 1
+    assert "missing_required_fields: ['Анамнез заболевания'] → []" in capsys.readouterr().out
+
+
+def test_missing_required_is_none_on_a_revision_without_the_check():
+    """Снимок «до» снимается старым кодом. Пустой список там означал бы
+    «не хватало ноль полей» — и починенное выглядело бы неизменным."""
+
+    class OldValidator:
+        pass
+
+    assert snap._missing_required(OldValidator(), {}, set()) is None

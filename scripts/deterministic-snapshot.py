@@ -113,6 +113,23 @@ def _provenance(validator: FormalValidator) -> dict[str, Any]:
     }
 
 
+def _missing_required(
+    validator: FormalValidator, visit: dict[str, Any], visit_types: set[Any]
+) -> list[str] | None:
+    """Обязательные поля шаблона, которых в записи нет.
+
+    None — на ревизии, где проверки ещё не было: пустой список означал бы
+    «полей не хватало ноль», и снимок «до» врал бы про починенное.
+    """
+    check = getattr(validator, "_check_missing_required_fields", None)
+    if check is None:
+        return None
+    finding = check(visit, visit_types)
+    return [] if finding is None else sorted(
+        part.strip() for part in finding["issue"].split(":", 1)[1].split(",")
+    )
+
+
 async def _profile(visit: dict[str, Any], validator: FormalValidator) -> dict[str, Any]:
     """Всё, что решается кодом до обращения к модели."""
     visit_types = await validator.get_visit_types(visit)
@@ -127,12 +144,14 @@ async def _profile(visit: dict[str, Any], validator: FormalValidator) -> dict[st
     accepted = len(inspect.signature(validator.get_rules).parameters)
     rules = validator.get_rules(*(visit_types, age, icd_codes, visit)[:accepted])
     contradiction = validator._check_nmu_keyword_contradiction(visit)  # noqa: SLF001
+    unfilled = _missing_required(validator, visit, visit_types)
     return {
         "visit_types": sorted(t.name for t in visit_types),
         "age": age,
         "icd": sorted(c for c in icd_codes if c),
         "rules": sorted(r["flag_code"] for r in rules),
         "nmu_contradiction": bool(contradiction),
+        "missing_required_fields": unfilled,
     }
 
 
@@ -169,7 +188,8 @@ def _diff(before: dict[str, Any], after: dict[str, Any]) -> int:
         if b == a:
             continue
         entry: dict[str, Any] = {"card": key}
-        for field in ("visit_types", "age", "icd", "nmu_contradiction"):
+        for field in ("visit_types", "age", "icd", "nmu_contradiction",
+                      "missing_required_fields"):
             if b.get(field) != a.get(field):
                 entry[field] = f"{b.get(field)} → {a.get(field)}"
         gained = sorted(set(a["rules"]) - set(b["rules"]))
