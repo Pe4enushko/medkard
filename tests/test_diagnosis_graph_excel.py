@@ -55,7 +55,13 @@ def _load(monkeypatch):
     return model, excel
 
 
-def test_excel_adds_guideline_sources_before_icd_check(monkeypatch) -> None:
+def test_report_has_no_separate_column_of_guideline_sources(monkeypatch) -> None:
+    """Колонка «Источники КР» (появилась 20.08.2026 вместе с графом) дословно
+    повторяла хвост `[ИСТОЧНИКИ]` колонки H — тот же список разделов, только с
+    кодом МКБ вместо названия клинрека, до 1282 символов в ячейке. Врач читал её
+    как мусор, а привязка источника к замечанию, ради которой источники и нужны,
+    живёт в колонке проверки по клин.рекомендациям.
+    """
     model, excel = _load(monkeypatch)
 
     diagnosis = [
@@ -80,9 +86,13 @@ def test_excel_adds_guideline_sources_before_icd_check(monkeypatch) -> None:
 
     row = excel._build_row({}, model.FormalStructureResult(), diagnosis, icd_check=[])
 
-    assert excel._HEADERS[8:10] == ["Источники КР", "Проверка кодирования МКБ"]
-    assert row[8] == "[J01] КР по синуситу: 2 Диагностика (цит.)"
-    assert len(row) == len(excel._HEADERS) == 10
+    assert "Источники КР" not in excel._HEADERS
+    assert excel._HEADERS[-1] == "Проверка кодирования МКБ"
+    assert len(row) == len(excel._HEADERS) == 9
+    # Источники никуда не делись: они в колонке проверки по клин.рекомендациям,
+    # рядом с замечанием, которое ими обосновано.
+    assert "КР по синуситу" in row[7]
+    assert "2 Диагностика" in row[7]
 
 
 def test_excel_keeps_our_degradation_out_of_the_report(monkeypatch) -> None:
