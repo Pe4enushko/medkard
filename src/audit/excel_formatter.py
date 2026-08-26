@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from api import demo_doctors
 from parsers.excel import AuditExcelWriter
 from reporting.result_parser import build_manifest_meta as _build_manifest_meta
 from reporting.result_parser import parse_diagnosis as _parse_diagnosis
@@ -129,6 +130,11 @@ class ExcelFormatter:
         legacy:        Use the legacy 3-column layout (visits / formal / diagnosis).
         order_tokens:  Optional canonical field order for ДанныеОсмотра; ``None``
                        disables reordering.
+        org_name:      Organization this report is scoped to. Only the demo-doctor
+                       crutch reads it (api/demo_doctors.py): the clinic it is
+                       switched on for gets its report without a doctor, the way
+                       it looked before the crutch. Pass it wherever the caller
+                       knows the org; ``None`` strips nothing.
     """
 
     def __init__(
@@ -137,9 +143,11 @@ class ExcelFormatter:
         *,
         legacy: bool = False,
         order_tokens: list[str] | None = None,
+        org_name: str | None = None,
     ) -> None:
         self._excel = AuditExcelWriter(excel_path, legacy=legacy, order_tokens=order_tokens)
         self._reader = _DoneCardsReader()
+        self._org_name = org_name
 
     async def __aenter__(self) -> "ExcelFormatter":
         await self._reader.__aenter__()
@@ -175,6 +183,9 @@ class ExcelFormatter:
 
     def _write_rows(self, rows: list[dict[str, Any]], manifest_meta: dict) -> int:
         existing = _existing_guids_in_excel(self._excel)
+        # ВРЕМЕННЫЙ КОСТЫЛЬ (api/demo_doctors.py): выдуманный врач нужен Искре,
+        # но не этому отчёту — его читает другой продукт. Убирается вместе с org_name.
+        hide_doctor = demo_doctors.enabled_for(self._org_name or "")
         written = 0
         for row in rows:
             guid = (row["card_guid"] or "").lower()
@@ -182,6 +193,8 @@ class ExcelFormatter:
                 logger.debug("📊 skipping already exported card guid=%s", guid)
                 continue
             visit = row["card_data"]
+            if hide_doctor:
+                visit = demo_doctors.unstamp(visit)
             formal = _parse_formal(row["formal_result"])
             diagnosis = _parse_diagnosis(row["diag_result"], manifest_meta)
             icd_check = _parse_icd_check(row.get("icd_check_result") or [])

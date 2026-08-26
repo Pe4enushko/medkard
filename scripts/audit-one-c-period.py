@@ -198,7 +198,8 @@ async def main() -> None:
         #     Independent of stage 2: runs whether or not new cards were processed,
         #     so the report always reflects every card in the period.
         async with ExcelFormatter(
-            EXCEL_PATH, legacy=_args.legacy_report, order_tokens=INSPECTION_ORDER
+            EXCEL_PATH, legacy=_args.legacy_report, order_tokens=INSPECTION_ORDER,
+            org_name=_args.org,
         ) as fmt:
             written = await fmt.export_period(PERIOD_FROM, PERIOD_TO, org_id)
         log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)

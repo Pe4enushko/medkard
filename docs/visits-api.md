@@ -208,8 +208,24 @@ python scripts/hacks/backfill-demo-doctors.py Alenka --days 30 --revert [-y]
 `done_cards_set_updated_at` (миграция 022) срабатывает и на UPDATE, поэтому
 проштампованная карта возвращается в инкрементальном синке как свежеотаудированная.
 
+В xlsx-отчёт выдуманный врач не попадает. Отчёт читает другой продукт, и на
+его показе клиника должна выглядеть ровно так, как выглядела до костыля —
+без врача вовсе. Поэтому `ExcelFormatter` принимает `org_name`, и для клиники,
+на которой костыль включён, снимает `Врач`/`Врач_код` с блока `Прием` при
+записи строки (`api/demo_doctors.unstamp`). Хранимая карта не меняется — это
+только вид на неё; колонка «Специализация» приходит из верхнеуровневого блока
+`Врач`, который костыль не трогал, и остаётся на месте. Снимаются оба ключа, а
+не только выдуманные коды: пока штамп включён, других врачей у этой клиники
+нет, а отчёт, где часть врачей видна, а часть нет, объяснять труднее, чем
+отчёт без врачей. `org_name` передают все три скрипта, делающие отчёт:
+`audit-one-c-period.py` (ночной, он же кладёт файл на FTP),
+`operator/send_report_ftp.py` и `operator/create_report.py`. Выгрузку для Искры
+(`GET /visits/pull`, `reporting/api_formatter.py`) это не касается: там врач и
+есть весь смысл костыля.
+
 Убрать костыль целиком: `git rm src/api/demo_doctors.py resources/demo_doctors.json
-scripts/hacks/backfill-demo-doctors.py` и три строки в `src/api/routes/visits.py`.
+scripts/hacks/backfill-demo-doctors.py`, три строки в `src/api/routes/visits.py`
+и `org_name` с тремя строками в `audit/excel_formatter.py`.
 
 ## POST /visits/push
 
