@@ -22,17 +22,23 @@ from storage.models.result import (
 )
 
 
+def guideline_meta(guideline: Guideline) -> dict:
+    """{name, date, age_group} одной строки справочника — снимок её редакции.
+
+    Одно место на оба пути: снимок пишется при аудите (audit/diagnosis/validator.py),
+    манифест собирается на чтении, и разъехаться они не должны — иначе одна и та
+    же карта выглядит по-разному в отчёте и в выгрузке.
+    """
+    return {
+        "name": guideline.name or "",
+        "date": guideline.published_at or "",
+        "age_group": ", ".join(guideline.age_category),
+    }
+
+
 def build_manifest_meta(guidelines: list[Guideline]) -> dict[str, dict]:
     """Return {file_id: {name, date, age_group}} from Guideline objects."""
-    return {
-        g.file_id: {
-            "name": g.name or "",
-            "date": g.published_at or "",
-            "age_group": ", ".join(g.age_category),
-        }
-        for g in guidelines
-        if g.file_id
-    }
+    return {g.file_id: guideline_meta(g) for g in guidelines if g.file_id}
 
 
 def parse_formal(data: list[dict]) -> FormalStructureResult:
@@ -90,7 +96,12 @@ def parse_diagnosis(data: list[dict], manifest_meta: dict[str, dict] | None = No
             for iss in entry.get("issues", [])
         ]
         file_id = entry.get("guideline_file_id")
-        meta = manifest_meta.get(file_id) if (manifest_meta and file_id) else None
+        # Снимок из строки сильнее манифеста: карту проверяли против ТОЙ редакции,
+        # а манифест к моменту чтения ушёл вперёд — вплоть до того, что file_id в
+        # нём уже нет. Манифест остаётся для карт, записанных до снимков.
+        meta = entry.get("guideline_meta") or (
+            manifest_meta.get(file_id) if (manifest_meta and file_id) else None
+        )
         guideline_sources = [
             GuidelineSource(
                 file_id=source.get("file_id", ""),

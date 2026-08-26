@@ -142,7 +142,11 @@ class DiagnosisResult:
     icd_code: str
     issues: list[DiagnosisIssue] = field(default_factory=list)
     guideline_file_id: str | None = None
-    guideline_meta: dict | None = None  # {name, date, age_group} — populated at export time, not stored in DB
+    # {name, date, age_group} той редакции клинрека, против которой проверяли
+    # карту. Пишется в done_cards вместе с результатом; на чтении снимок из
+    # строки сильнее манифеста (reporting/result_parser.py), а манифестом
+    # добираются карты, записанные до снимков.
+    guideline_meta: dict | None = None
     guideline_sources: list[GuidelineSource] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 

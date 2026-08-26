@@ -29,6 +29,7 @@ class _FakeDiagnosisValidator:
     async def validate_diagnosis(self, diagnosis):
         return DiagnosisAuditResult(
             guideline_file_id=f"guideline-{diagnosis['КодМКБ']}",
+            guideline_meta={"name": "КР", "date": "2024", "age_group": "Взрослые"},
             icd_code=diagnosis["КодМКБ"],
             criteria_issues=[
                 DiagnosisIssue(issue="Критерий не выполнен", aspect="criteria")
@@ -232,3 +233,23 @@ def test_failed_card_audit_closes_the_same_trace(monkeypatch, tmp_path):
     assert len({row["correlation_id"] for row in records}) == 1
     assert {row["card_guid"] for row in records} == {"trace-failed-card"}
     assert records[-1]["exception"]["message"] == "formal unavailable"
+
+
+def test_audit_visit_keeps_the_guideline_snapshot(monkeypatch):
+    # Снимок редакции идёт с результатом проверки до самой записи карты: без
+    # этого шага в done_cards уезжает голый file_id.
+    monkeypatch.setattr(pipeline_module, "FormalValidator", _FakeFormalValidator)
+    monkeypatch.setattr(pipeline_module, "DiagnosisValidator", _FakeDiagnosisValidator)
+
+    visit = {
+        "Прием": {"GUID": "visit-2"},
+        "Диагнозы": [{"КодМКБ": "A01", "НаименованиеМКБ": "First"}],
+    }
+
+    result = asyncio.run(pipeline_module.AuditPipeline()._audit_visit(visit))
+
+    assert result.diagnosis[0].guideline_meta == {
+        "name": "КР",
+        "date": "2024",
+        "age_group": "Взрослые",
+    }

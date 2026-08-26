@@ -32,6 +32,10 @@ class DiagnosisAuditResult:
     treatment_issues: list[DiagnosisIssue] = field(default_factory=list)
     criteria_issues: list[DiagnosisIssue] = field(default_factory=list)
     guideline_file_id: str | None = None
+    # {name, date, age_group} той редакции клинрека, против которой шла проверка.
+    # Снимается здесь и доезжает до done_cards: file_id живёт до следующей
+    # редакции, а карта проверена навсегда.
+    guideline_meta: dict | None = None
     icd_code: str | None = None
     guideline_sources: list[GuidelineSource] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)

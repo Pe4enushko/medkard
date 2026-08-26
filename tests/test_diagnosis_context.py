@@ -96,7 +96,11 @@ async def test_validate_diagnosis_maps_graph_contract(monkeypatch) -> None:
             return None
 
         async def get(self, file_id):
-            return types.SimpleNamespace(name="КР по синуситу")
+            # Полная строка справочника: валидатор снимает с неё редакцию
+            # (name/published_at/age_category) в guideline_meta.
+            return types.SimpleNamespace(
+                name="КР по синуситу", published_at="2024", age_category=["Взрослые"]
+            )
 
     guidelines_module = types.ModuleType("storage.guidelines_storage")
     guidelines_module.GuidelinesStorage = GuidelinesStorage

@@ -216,11 +216,16 @@ class DiagnosisValidator:
             return result, clinic_tokens
 
         from RAG.retrieval.searches import get_sections_for_file
+        from reporting.result_parser import guideline_meta
         from storage.guidelines_storage import GuidelinesStorage
 
         async with GuidelinesStorage() as storage:
             guideline = await storage.get(file_id)
         doc_title = guideline.name if guideline and guideline.name else file_id
+        # Снимок редакции идёт с результатом в done_cards: file_id переживает
+        # только до следующей редакции справочника, а карта проверена против
+        # этой. Справочник о file_id не знает — снимка нет, выдумывать нечего.
+        meta = guideline_meta(guideline) if guideline else None
         toc = await get_sections_for_file(file_id)
         patient_block = (
             "\n".join(
@@ -283,6 +288,7 @@ class DiagnosisValidator:
                 _issue_from_graph(item) for item in issues.get("criteria", [])
             ],
             guideline_file_id=file_id,
+            guideline_meta=meta,
             icd_code=dx_code,
             guideline_sources=[
                 _guideline_source_from_graph(source)

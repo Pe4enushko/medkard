@@ -30,6 +30,13 @@ def _load_modules(monkeypatch):
 
     base = types.ModuleType("storage.base")
     base.BaseStorage = type("BaseStorage", (), {})
+
+    # done_cards_storage импортирует его для ретрая апсерта; здесь до пула дело
+    # не доходит, но без имени модуль не импортируется вовсе.
+    async def _reopen_shared_pool():
+        raise AssertionError("тест не должен ходить в БД")
+
+    base.reopen_shared_pool = _reopen_shared_pool
     monkeypatch.setitem(sys.modules, "storage.base", base)
 
     done_path = SRC / "storage" / "done_cards_storage.py"
@@ -155,3 +162,63 @@ def test_diag_json_omits_aspect_for_diagnosis_filter_marker(monkeypatch) -> None
 
     assert issue["issue"] == "Диагноз пропущен фильтром МКБ"
     assert "aspect" not in issue
+
+
+def test_diag_json_stores_the_guideline_snapshot(monkeypatch) -> None:
+    # Редакции клинреков меняются, и file_id пропадает из манифеста: развернуть
+    # ссылку задним числом можно не всегда, поэтому снимок пишется вместе с картой.
+    model, done, _ = _load_modules(monkeypatch)
+    diagnosis = model.DiagnosisResult(
+        icd_code="J01",
+        guideline_file_id="file-1",
+        guideline_meta={"name": "Острый синусит", "date": "2024", "age_group": "Взрослые"},
+    )
+
+    payload = json.loads(done._diag_json([diagnosis]))[0]
+
+    assert payload["guideline_meta"] == {
+        "name": "Острый синусит",
+        "date": "2024",
+        "age_group": "Взрослые",
+    }
+
+
+def test_diag_json_omits_the_snapshot_when_there_is_no_guideline(monkeypatch) -> None:
+    # Ключ со значением null у карт без клинрека — лишнее расхождение со старым
+    # JSON: у таких карт разворачивать нечего.
+    model, done, _ = _load_modules(monkeypatch)
+    diagnosis = model.DiagnosisResult(icd_code="Z00")
+
+    payload = json.loads(done._diag_json([diagnosis]))[0]
+
+    assert "guideline_meta" not in payload
+
+
+def test_parse_diagnosis_prefers_the_stored_snapshot(monkeypatch) -> None:
+    # Карту проверяли против той редакции, что записана в строке; свежий манифест
+    # рассказывает про другую.
+    _, _, parser = _load_modules(monkeypatch)
+    entry = {
+        "icd_code": "J01",
+        "guideline_file_id": "file-1",
+        "issues": [],
+        "guideline_meta": {"name": "Редакция 2024", "date": "2024", "age_group": "Взрослые"},
+    }
+
+    parsed = parser.parse_diagnosis(
+        [entry], {"file-1": {"name": "Редакция 2026", "date": "2026", "age_group": "Дети"}}
+    )[0]
+
+    assert parsed.guideline_meta["name"] == "Редакция 2024"
+
+
+def test_parse_diagnosis_falls_back_to_the_manifest_without_a_snapshot(monkeypatch) -> None:
+    # Карты до бэкфилла снимка не имеют, и манифест остаётся единственным источником.
+    _, _, parser = _load_modules(monkeypatch)
+    entry = {"icd_code": "J01", "guideline_file_id": "file-1", "issues": []}
+
+    parsed = parser.parse_diagnosis(
+        [entry], {"file-1": {"name": "Редакция 2026", "date": "2026", "age_group": "Дети"}}
+    )[0]
+
+    assert parsed.guideline_meta["name"] == "Редакция 2026"

@@ -45,6 +45,11 @@ def _diag_json(diagnosis: list[DiagnosisResult]) -> str:
             {
                 "icd_code": dr.icd_code,
                 "guideline_file_id": dr.guideline_file_id,
+                # Снимок редакции, а не ссылка: file_id пропадает из манифеста
+                # при смене редакции, и развернуть его потом уже нечем. Ключа
+                # нет вовсе, когда клинрека нет, — иначе у таких карт JSON
+                # разъедется со старыми записями на пустом месте.
+                **({"guideline_meta": dr.guideline_meta} if dr.guideline_meta else {}),
                 "issues": [
                     {
                         "issue": iss.issue,
@@ -548,6 +553,55 @@ class DoneCardsStorage(BaseStorage):
         guids = {row["card_guid"] for row in rows}
         logger.info("💾 done_cards loaded %d done guid(s) for org_id=%s", len(guids), organization_id)
         return guids
+
+    async def list_diag_results_without_meta(
+        self, *, limit: int = 0, after_id: str = ""
+    ) -> list[dict[str, Any]]:
+        """Карты, где хотя бы у одного диагноза есть file_id и нет снимка редакции.
+
+        Обслуживает разовый бэкфилл (scripts/hacks/backfill-guideline-meta.py) и
+        уезжает вместе с ним. Постранично по id, а не по card_guid: карты без
+        guid тоже лежат в таблице, и по ним курсор не построить. Ключевой
+        курсор здесь обязателен — карту, у которой file_id ушёл из справочника,
+        скрипт не меняет, и по LIMIT/OFFSET она попадала бы в выборку вечно.
+        limit=0 — без ограничения.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT id::text AS id, diag_result
+                FROM done_cards
+                WHERE jsonb_typeof(diag_result) = 'array'
+                  AND (%(after)s = '' OR id > %(after)s::uuid)
+                  AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements(diag_result) AS entry
+                      WHERE COALESCE(entry ->> 'guideline_file_id', '') <> ''
+                        AND NOT (entry ? 'guideline_meta'))
+                ORDER BY id
+                LIMIT NULLIF(%(limit)s, 0)
+                """,
+                {"limit": limit, "after": after_id},
+            )
+            return await cur.fetchall()
+
+    async def set_diag_result(self, *, card_id: str, diag_json: str) -> int:
+        """Переписать diag_result одной карты. Возвращает число изменённых строк.
+
+        Вторая половина бэкфилла снимков: строку собирает скрипт, здесь она
+        только пишется. updated_at двигает триггер (миграция 022), и реплика
+        движка забирает карту обычным инкрементальным синком.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE done_cards
+                SET diag_result = %(diag)s::jsonb
+                WHERE id = %(id)s::uuid
+                """,
+                {"id": card_id, "diag": diag_json},
+            )
+            return cur.rowcount
 
     async def list_cards_without_doctor(
         self, *, organization_id: str, limit: int = 0, since: date | None = None

@@ -475,6 +475,7 @@ class AuditPipeline:
                     icd_code=dx_code,
                     issues=diag_result.all_issues,
                     guideline_file_id=diag_result.guideline_file_id,
+                    guideline_meta=diag_result.guideline_meta,
                     guideline_sources=diag_result.guideline_sources,
                     errors=diag_result.errors,
                 )
