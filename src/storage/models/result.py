@@ -180,8 +180,10 @@ class DiagnosisResult:
                 )
                 rendered_sources.append(f"{source.doc_title} — разделы: {sections}")
             blocks.append("[ИСТОЧНИКИ]: " + " | ".join(rendered_sources))
-        if self.errors:
-            blocks.append("[ДЕГРАДАЦИЯ]: " + "; ".join(self.errors))
+        # errors в отчёт НЕ идут. Это наша внутренняя авария (упавший судья,
+        # пустой ответ модели), а врач читает эту ячейку как заключение по
+        # приёму — сырой текст исключения он прочтёт как дефект карты. В строке
+        # done_cards поле остаётся: по нему мы и разбираем, что не отработало.
         return "\n".join(blocks)
 
 
