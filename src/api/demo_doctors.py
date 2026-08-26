@@ -10,8 +10,12 @@ card of the named organization gets one of the made-up doctors from
 resources/demo_doctors.json as it arrives.
 
 THIS IS A CRUTCH AND IS BUILT TO BE REMOVED: `git rm` this module, drop the
-three lines it occupies in api/routes/visits.py, and the crutch is gone.
-Nothing else imports it except the backfill script.
+three lines it occupies in api/routes/visits.py and the three in
+audit/excel_formatter.py, and the crutch is gone. Nothing else imports it
+except the backfill script.
+
+The made-up doctor is for the pull API only. The xlsx report is read by
+another product, so `unstamp` takes the doctor back out on the way into it.
 
 The switch is a single variable — DEMO_DOCTOR_STAMP_ORG=Alenka, empty means
 off — rather than a flag plus an organization name, which would eventually
@@ -103,3 +107,21 @@ def stamp(card: dict, *, previous: dict | None, doctors: list[dict] | None = Non
         doctor = {"code": picked["code"], "name": picked["name"]}
 
     return {**card, "Прием": {**priem, "Врач": doctor["name"], "Врач_код": doctor["code"]}}
+
+
+def unstamp(card: dict) -> dict:
+    """The card with the doctor taken back out of its Прием block.
+
+    The xlsx report is read by another product, and on its demo the clinic
+    has to look the way it looked before this crutch: with no doctor at all.
+    Both keys go, not only the made-up ones — while the stamp is on there is
+    no other kind of doctor on this clinic's cards, and a report that drops
+    some doctors and keeps others would be harder to explain than one that
+    shows none. The stored card is not touched: this is a view of it.
+    """
+    priem = card.get("Прием")
+    if not isinstance(priem, dict):
+        return card
+    if "Врач" not in priem and "Врач_код" not in priem:
+        return card
+    return {**card, "Прием": {k: v for k, v in priem.items() if k not in ("Врач", "Врач_код")}}

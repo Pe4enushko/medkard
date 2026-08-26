@@ -79,7 +79,8 @@ async def main() -> None:
         _args.date_from, _args.date_to, _args.org, excel_path,
     )
     async with ExcelFormatter(
-        excel_path, legacy=_args.legacy_report, order_tokens=INSPECTION_ORDER
+        excel_path, legacy=_args.legacy_report, order_tokens=INSPECTION_ORDER,
+        org_name=_args.org,
     ) as fmt:
         written = await fmt.export_period(date_from, date_to, org_id)
     if written:

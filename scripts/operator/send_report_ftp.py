@@ -73,7 +73,7 @@ async def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         local_path = Path(tmp) / _auto_name
         log.info("Creating report for %s — %s (org=%s)", _args.date_from, _args.date_to, _args.org)
-        async with ExcelFormatter(local_path) as fmt:
+        async with ExcelFormatter(local_path, org_name=_args.org) as fmt:
             written = await fmt.export_period(date_from, date_to, org_id)
 
         if not written:
