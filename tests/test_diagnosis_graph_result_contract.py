@@ -99,8 +99,10 @@ def test_diag_json_separates_issue_and_guideline_sources(monkeypatch) -> None:
     assert payload["issues"][0]["aspect"] == "inspection"
     assert payload["issues"][0]["sources"][0]["chunk_id"] == "chunk-1"
     assert payload["guideline_sources"][0]["sections"][0]["chunk_indices"] == [10, 11]
-    assert payload["errors"] == ["judge_treatment: timeout"]
     assert "sources" not in payload
+    # Деградация ушла из строки в свою колонку — наружу diag_result её не несёт.
+    assert "errors" not in payload
+    assert done._diag_errors([diagnosis]) == ["J01: judge_treatment: timeout"]
 
 
 def test_parse_diagnosis_accepts_legacy_and_new_contracts(monkeypatch) -> None:
@@ -222,3 +224,36 @@ def test_parse_diagnosis_falls_back_to_the_manifest_without_a_snapshot(monkeypat
     )[0]
 
     assert parsed.guideline_meta["name"] == "Редакция 2026"
+
+
+def test_diag_json_no_longer_carries_our_errors(monkeypatch) -> None:
+    # diag_result уезжает в реплику движка и попадает агенту медчека как есть.
+    # Наши аварии агент прочитает как факт о карте и понесёт врачу.
+    model, done, _ = _load_modules(monkeypatch)
+    diagnosis = model.DiagnosisResult(
+        icd_code="I67.9",
+        guideline_file_id="617_5",
+        errors=["judge_criteria: 1 validation error for JudgeOutput"],
+    )
+
+    payload = json.loads(done._diag_json([diagnosis]))[0]
+
+    assert "errors" not in payload
+
+
+def test_degradation_goes_to_its_own_column_with_the_diagnosis_named(monkeypatch) -> None:
+    model, done, _ = _load_modules(monkeypatch)
+    diagnosis = [
+        model.DiagnosisResult(icd_code="I67.9", errors=["judge_criteria: пусто"]),
+        model.DiagnosisResult(icd_code="J01"),
+    ]
+
+    assert done._diag_errors(diagnosis) == ["I67.9: judge_criteria: пусто"]
+
+
+def test_a_clean_audit_writes_no_degradation(monkeypatch) -> None:
+    # NULL, а не пустой массив: «ничего не падало» и «падало, но список пуст» —
+    # разные вещи, и по колонке мы ищем именно аварии.
+    model, done, _ = _load_modules(monkeypatch)
+
+    assert done._diag_errors([model.DiagnosisResult(icd_code="J01")]) is None

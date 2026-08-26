@@ -82,12 +82,29 @@ def _diag_json(diagnosis: list[DiagnosisResult]) -> str:
                     }
                     for source in dr.guideline_sources
                 ],
-                "errors": dr.errors,
             }
             for dr in diagnosis
         ],
         ensure_ascii=False,
     )
+
+
+def _diag_errors(diagnosis: list[DiagnosisResult]) -> list[str] | None:
+    """Наши аварии по карте: «<код МКБ>: <что упало>». None — ничего не падало.
+
+    В diag_result им не место: строка уезжает в реплику движка и попадает агенту
+    медчека как есть, а он прочитает нашу деградацию как факт о карте и понесёт
+    её врачу. Колонка diag_errors из медкарда не выходит — её не выбирает ни
+    один запрос pull-API (tests/test_diag_errors_stay_in_medkard.py).
+    """
+    lines = [
+        f"{dr.icd_code or '—'}: {error}"
+        for dr in diagnosis
+        for error in dr.errors
+    ]
+    # NULL, а не пустой массив: по колонке мы ищем аварии, и «их не было»
+    # должно отличаться от «список пуст».
+    return lines or None
 
 
 class DoneCardsStorage(BaseStorage):
@@ -128,6 +145,7 @@ class DoneCardsStorage(BaseStorage):
         formal_json = _formal_json(formal)
         diag_json = _diag_json(diagnosis)
         icd_check_json = _icd_check_json(icd_check)
+        diag_errors = _diag_errors(diagnosis)
 
         try:
             return await self._upsert_once(
@@ -135,6 +153,7 @@ class DoneCardsStorage(BaseStorage):
                 formal_json=formal_json,
                 diag_json=diag_json,
                 icd_check_json=icd_check_json,
+                diag_errors=diag_errors,
                 token_count=token_count,
                 time_ms=time_ms,
                 started_at=started_at,
@@ -153,6 +172,7 @@ class DoneCardsStorage(BaseStorage):
                 formal_json=formal_json,
                 diag_json=diag_json,
                 icd_check_json=icd_check_json,
+                diag_errors=diag_errors,
                 token_count=token_count,
                 time_ms=time_ms,
                 started_at=started_at,
@@ -168,6 +188,7 @@ class DoneCardsStorage(BaseStorage):
         formal_json: str,
         diag_json: str,
         icd_check_json: str | None,
+        diag_errors: list[str] | None,
         token_count: int,
         time_ms: int,
         started_at: datetime,
@@ -181,15 +202,16 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, icd_check_result, token_count, time_ms, started_at, finished_at, ignored, organization_id, status)
+                            (card_guid, card_data, formal_result, diag_result, icd_check_result, diag_errors, token_count, time_ms, started_at, finished_at, ignored, organization_id, status)
                         VALUES
-                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s, 'done')
+                            (%(guid)s, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(diag_errors)s::text[], %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s, 'done')
                         ON CONFLICT (card_guid) DO UPDATE SET
                             card_data         = EXCLUDED.card_data,
                             status            = 'done',
                             formal_result     = EXCLUDED.formal_result,
                             diag_result       = EXCLUDED.diag_result,
                             icd_check_result  = EXCLUDED.icd_check_result,
+                            diag_errors       = EXCLUDED.diag_errors,
                             token_count       = EXCLUDED.token_count,
                             time_ms           = EXCLUDED.time_ms,
                             started_at        = EXCLUDED.started_at,
@@ -205,6 +227,7 @@ class DoneCardsStorage(BaseStorage):
                             "formal":      formal_json,
                             "diag":        diag_json,
                             "icd_check":   icd_check_json,
+                            "diag_errors": diag_errors,
                             "tokens":      token_count,
                             "ms":          time_ms,
                             "started_at":  started_at,
@@ -216,9 +239,9 @@ class DoneCardsStorage(BaseStorage):
                     cur = await conn.execute(
                         """
                         INSERT INTO done_cards
-                            (card_guid, card_data, formal_result, diag_result, icd_check_result, token_count, time_ms, started_at, finished_at, ignored, organization_id, status)
+                            (card_guid, card_data, formal_result, diag_result, icd_check_result, diag_errors, token_count, time_ms, started_at, finished_at, ignored, organization_id, status)
                         VALUES
-                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s, 'done')
+                            (NULL, %(data)s::jsonb, %(formal)s::jsonb, %(diag)s::jsonb, %(icd_check)s::jsonb, %(diag_errors)s::text[], %(tokens)s, %(ms)s, %(started_at)s, %(finished_at)s, FALSE, %(org_id)s, 'done')
                         RETURNING id::text
                         """,
                         {
@@ -226,6 +249,7 @@ class DoneCardsStorage(BaseStorage):
                             "formal":      formal_json,
                             "diag":        diag_json,
                             "icd_check":   icd_check_json,
+                            "diag_errors": diag_errors,
                             "tokens":      token_count,
                             "ms":          time_ms,
                             "started_at":  started_at,
@@ -408,6 +432,7 @@ class DoneCardsStorage(BaseStorage):
                         formal_result     = NULL,
                         diag_result       = NULL,
                         icd_check_result  = NULL,
+                        diag_errors       = NULL,
                         ignored           = FALSE,
                         broken            = FALSE,
                         stacktrace        = NULL,
@@ -554,17 +579,18 @@ class DoneCardsStorage(BaseStorage):
         logger.info("💾 done_cards loaded %d done guid(s) for org_id=%s", len(guids), organization_id)
         return guids
 
-    async def list_diag_results_without_meta(
+    async def list_diag_results_to_backfill(
         self, *, limit: int = 0, after_id: str = ""
     ) -> list[dict[str, Any]]:
-        """Карты, где хотя бы у одного диагноза есть file_id и нет снимка редакции.
+        """Карты, чей diag_result надо переписать: нет снимка редакции ИЛИ есть errors.
 
         Обслуживает разовый бэкфилл (scripts/hacks/backfill-guideline-meta.py) и
-        уезжает вместе с ним. Постранично по id, а не по card_guid: карты без
-        guid тоже лежат в таблице, и по ним курсор не построить. Ключевой
-        курсор здесь обязателен — карту, у которой file_id ушёл из справочника,
-        скрипт не меняет, и по LIMIT/OFFSET она попадала бы в выборку вечно.
-        limit=0 — без ограничения.
+        уезжает вместе с ним. Два условия в одной выборке, потому что скрипт
+        правит строку за один проход. Постранично по id, а не по card_guid:
+        карты без guid тоже лежат в таблице, и по ним курсор не построить.
+        Ключевой курсор здесь обязателен — карту, у которой file_id ушёл из
+        справочника, скрипт не меняет, и по LIMIT/OFFSET она попадала бы в
+        выборку вечно. limit=0 — без ограничения.
         """
         async with self._pool.connection() as conn:
             cur = await conn.execute(
@@ -576,8 +602,9 @@ class DoneCardsStorage(BaseStorage):
                   AND EXISTS (
                       SELECT 1
                       FROM jsonb_array_elements(diag_result) AS entry
-                      WHERE COALESCE(entry ->> 'guideline_file_id', '') <> ''
-                        AND NOT (entry ? 'guideline_meta'))
+                      WHERE (COALESCE(entry ->> 'guideline_file_id', '') <> ''
+                             AND NOT (entry ? 'guideline_meta'))
+                         OR jsonb_array_length(COALESCE(entry -> 'errors', '[]'::jsonb)) > 0)
                 ORDER BY id
                 LIMIT NULLIF(%(limit)s, 0)
                 """,
@@ -585,21 +612,29 @@ class DoneCardsStorage(BaseStorage):
             )
             return await cur.fetchall()
 
-    async def set_diag_result(self, *, card_id: str, diag_json: str) -> int:
+    async def set_diag_result(
+        self, *, card_id: str, diag_json: str, diag_errors: list[str] | None = None
+    ) -> int:
         """Переписать diag_result одной карты. Возвращает число изменённых строк.
 
-        Вторая половина бэкфилла снимков: строку собирает скрипт, здесь она
-        только пишется. updated_at двигает триггер (миграция 022), и реплика
-        движка забирает карту обычным инкрементальным синком.
+        Вторая половина бэкфилла: строку собирает скрипт, здесь она только
+        пишется. diag_errors дописывается к тому, что в колонке уже лежит, —
+        аварии из строки и аварии из колонки это один и тот же журнал, и
+        затирать одно другим нельзя. updated_at двигает триггер (миграция 022),
+        и реплика движка забирает карту обычным инкрементальным синком.
         """
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 """
                 UPDATE done_cards
-                SET diag_result = %(diag)s::jsonb
+                SET diag_result = %(diag)s::jsonb,
+                    diag_errors = CASE
+                        WHEN %(errors)s::text[] IS NULL THEN diag_errors
+                        ELSE COALESCE(diag_errors, '{}'::text[]) || %(errors)s::text[]
+                    END
                 WHERE id = %(id)s::uuid
                 """,
-                {"id": card_id, "diag": diag_json},
+                {"id": card_id, "diag": diag_json, "errors": diag_errors},
             )
             return cur.rowcount
 

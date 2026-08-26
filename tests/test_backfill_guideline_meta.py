@@ -24,7 +24,7 @@ MANIFEST = {
 def test_known_file_id_gets_its_snapshot():
     diag = [{"icd_code": "J01", "guideline_file_id": "file-1", "issues": []}]
 
-    expanded, counts = backfill.expand(diag, MANIFEST)
+    expanded, _, counts = backfill.expand(diag, MANIFEST)
 
     assert expanded[0]["guideline_meta"] == MANIFEST["file-1"]
     assert counts["expanded"] == 1
@@ -41,11 +41,10 @@ def test_the_rest_of_the_entry_survives():
         "errors": ["partial"],
     }]
 
-    expanded, _ = backfill.expand(diag, MANIFEST)
+    expanded, _, _ = backfill.expand(diag, MANIFEST)
 
     assert expanded[0]["issues"] == diag[0]["issues"]
     assert expanded[0]["guideline_sources"] == diag[0]["guideline_sources"]
-    assert expanded[0]["errors"] == ["partial"]
 
 
 def test_erased_file_id_is_skipped_not_invented():
@@ -53,7 +52,7 @@ def test_erased_file_id_is_skipped_not_invented():
     # а пустые строки в отчёте выглядят как данные.
     diag = [{"icd_code": "J01", "guideline_file_id": "gone", "issues": []}]
 
-    expanded, counts = backfill.expand(diag, MANIFEST)
+    expanded, _, counts = backfill.expand(diag, MANIFEST)
 
     assert expanded is None
     assert counts["missing"] == 1
@@ -66,7 +65,7 @@ def test_card_with_a_snapshot_is_left_alone():
         "guideline_meta": {"name": "Редакция 2020", "date": "2020", "age_group": "Дети"},
     }]
 
-    expanded, counts = backfill.expand(diag, MANIFEST)
+    expanded, _, counts = backfill.expand(diag, MANIFEST)
 
     assert expanded is None
     assert counts["already"] == 1
@@ -76,7 +75,7 @@ def test_diagnosis_without_a_guideline_is_not_a_gap():
     # Клинрека для кода не нашлось ещё при аудите — разворачивать нечего.
     diag = [{"icd_code": "Z00", "guideline_file_id": None, "issues": []}]
 
-    expanded, counts = backfill.expand(diag, MANIFEST)
+    expanded, _, counts = backfill.expand(diag, MANIFEST)
 
     assert expanded is None
     assert counts["no_guideline"] == 1
@@ -90,7 +89,7 @@ def test_one_expanded_entry_carries_the_erased_one_along():
         {"icd_code": "J02", "guideline_file_id": "gone", "issues": []},
     ]
 
-    expanded, counts = backfill.expand(diag, MANIFEST)
+    expanded, _, counts = backfill.expand(diag, MANIFEST)
 
     assert expanded[0]["guideline_meta"] == MANIFEST["file-1"]
     assert "guideline_meta" not in expanded[1]
@@ -100,3 +99,38 @@ def test_one_expanded_entry_carries_the_erased_one_along():
 
 def test_empty_diag_result_changes_nothing():
     assert backfill.expand([], MANIFEST)[0] is None
+
+
+def test_our_errors_are_taken_out_of_the_row():
+    # diag_result уезжает агенту медчека как есть, поэтому наши аварии из строки
+    # уходят в отдельную колонку — вместе с кодом диагноза, чтобы было видно,
+    # на чём упало.
+    diag = [{"icd_code": "I67.9", "guideline_file_id": "file-1", "issues": [],
+             "errors": ["judge_criteria: пусто"]}]
+
+    expanded, degradation, counts = backfill.expand(diag, MANIFEST)
+
+    assert "errors" not in expanded[0]
+    assert degradation == ["I67.9: judge_criteria: пусто"]
+    assert counts["degraded"] == 1
+
+
+def test_a_row_with_only_errors_is_still_rewritten():
+    # Снимок уже есть, разворачивать нечего — но строку всё равно надо почистить.
+    diag = [{"icd_code": "I67.9", "guideline_file_id": "file-1",
+             "guideline_meta": MANIFEST["file-1"], "issues": [],
+             "errors": ["judge_criteria: пусто"]}]
+
+    expanded, degradation, _ = backfill.expand(diag, MANIFEST)
+
+    assert expanded is not None
+    assert "errors" not in expanded[0]
+    assert degradation == ["I67.9: judge_criteria: пусто"]
+
+
+def test_a_clean_row_reports_no_degradation():
+    diag = [{"icd_code": "J01", "guideline_file_id": "file-1", "issues": []}]
+
+    _, degradation, _ = backfill.expand(diag, MANIFEST)
+
+    assert degradation is None

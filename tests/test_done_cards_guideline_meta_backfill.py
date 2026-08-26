@@ -56,7 +56,7 @@ async def test_lists_only_cards_whose_diagnosis_has_no_snapshot():
         bare_id = await _insert(
             bare, [DiagnosisResult(icd_code="J01", guideline_file_id="file-1")]
         )
-        await _insert(
+        stamped_id = await _insert(
             stamped,
             [DiagnosisResult(
                 icd_code="J01",
@@ -66,14 +66,15 @@ async def test_lists_only_cards_whose_diagnosis_has_no_snapshot():
         )
         # Клинрека не нашлось ещё при аудите: разворачивать нечего, и такая карта
         # не должна крутиться в выборке вечно.
-        await _insert(empty, [DiagnosisResult(icd_code="Z00")])
+        empty_id = await _insert(empty, [DiagnosisResult(icd_code="Z00")])
 
         async with DoneCardsStorage() as storage:
-            rows = await storage.list_diag_results_without_meta(limit=0, after_id="")
+            rows = await storage.list_diag_results_to_backfill(limit=0, after_id="")
 
         found = {row["id"] for row in rows}
         assert bare_id in found
-        assert len(found) == len({row["id"] for row in rows})
+        assert stamped_id not in found
+        assert empty_id not in found
     finally:
         await _cleanup(bare, stamped, empty)
 
@@ -87,9 +88,9 @@ async def test_keyset_paging_does_not_repeat_a_card():
         await _insert(second, [DiagnosisResult(icd_code="J02", guideline_file_id="file-2")])
 
         async with DoneCardsStorage() as storage:
-            page = await storage.list_diag_results_without_meta(limit=1, after_id="")
+            page = await storage.list_diag_results_to_backfill(limit=1, after_id="")
             assert len(page) == 1
-            nxt = await storage.list_diag_results_without_meta(
+            nxt = await storage.list_diag_results_to_backfill(
                 limit=1, after_id=page[0]["id"]
             )
 
@@ -139,5 +140,59 @@ async def test_set_diag_result_writes_the_snapshot_and_bumps_updated_at():
         # Реплика движка забирает карты по updated_at: без сдвига бэкфилл до неё
         # не доедет вовсе.
         assert row["updated_at"] > before
+    finally:
+        await _cleanup(guid)
+
+
+@pytest.mark.asyncio
+async def test_a_card_with_our_errors_is_listed_even_with_a_snapshot():
+    # Строку надо почистить от errors независимо от того, развёрнут ли снимок.
+    guid = f"pytest-meta-degraded-{uuid.uuid4()}"
+    try:
+        row_id = await _insert(guid, [DiagnosisResult(
+            icd_code="I67.9",
+            guideline_file_id="file-1",
+            guideline_meta={"name": "КР", "date": "2024", "age_group": "Взрослые"},
+            errors=["judge_criteria: пусто"],
+        )])
+        # Аудит пишет errors уже в свою колонку, поэтому строку с ними для теста
+        # собираем руками — ровно так она выглядит у карт до этой ветки.
+        async with DoneCardsStorage() as storage:
+            async with storage._pool.connection() as conn:
+                await conn.execute(
+                    "UPDATE done_cards SET diag_result = jsonb_set(diag_result, "
+                    "'{0,errors}', %(e)s::jsonb), diag_errors = NULL "
+                    "WHERE id = %(id)s::uuid",
+                    {"id": row_id, "e": json.dumps(["judge_criteria: пусто"])},
+                )
+            rows = await storage.list_diag_results_to_backfill(limit=0, after_id="")
+
+        assert row_id in {row["id"] for row in rows}
+    finally:
+        await _cleanup(guid)
+
+
+@pytest.mark.asyncio
+async def test_set_diag_result_appends_the_degradation_it_took_out():
+    guid = f"pytest-meta-append-{uuid.uuid4()}"
+    try:
+        row_id = await _insert(guid, [DiagnosisResult(
+            icd_code="J01", guideline_file_id="file-1", errors=["judge_treatment: таймаут"],
+        )])
+        async with DoneCardsStorage() as storage:
+            await storage.set_diag_result(
+                card_id=row_id,
+                diag_json=json.dumps([{"icd_code": "J01", "guideline_file_id": "file-1"}]),
+                diag_errors=["J01: judge_criteria: пусто"],
+            )
+            async with storage._pool.connection() as conn:
+                cur = await conn.execute(
+                    "SELECT diag_errors FROM done_cards WHERE id = %(id)s::uuid",
+                    {"id": row_id},
+                )
+                stored = (await cur.fetchone())["diag_errors"]
+
+        # Аварию, записанную аудитом, бэкфилл дополняет, а не затирает.
+        assert stored == ["J01: judge_treatment: таймаут", "J01: judge_criteria: пусто"]
     finally:
         await _cleanup(guid)

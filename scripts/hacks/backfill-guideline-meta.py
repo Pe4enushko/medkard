@@ -9,6 +9,11 @@ WHY THIS EXISTS: аудит теперь кладёт в diag_result поле gu
 меняются, и file_id пропадает из манифеста вместе со старой. Скрипт проходит
 по таким картам один раз и проставляет снимок из текущего справочника.
 
+Заодно вынимает из строки наши errors: diag_result уезжает в реплику движка и
+попадает агенту медчека как есть, а он прочитает нашу деградацию как факт о
+карте и понесёт врачу. Аварии переезжают в done_cards.diag_errors (миграция 030),
+откуда наружу не выходят.
+
 Ничего не выдумывает: file_id, которого в справочнике уже нет, пропускается —
 карта остаётся как была, и в отчёте у неё, как и сейчас, будет один номер
 вместо названия. Карту со снимком скрипт не трогает: там записана та редакция,
@@ -45,16 +50,25 @@ from storage.done_cards_storage import DoneCardsStorage
 from storage.guidelines_storage import GuidelinesStorage
 
 
-def expand(diag_result: list[dict], manifest: dict[str, dict]) -> tuple[list[dict] | None, Counter]:
-    """Снимок редакции по каждой записи диагноза: (новый diag_result | None, счётчики).
+def expand(
+    diag_result: list[dict], manifest: dict[str, dict],
+) -> tuple[list[dict] | None, list[str] | None, Counter]:
+    """Перебрать записи диагнозов: (новый diag_result | None, аварии | None, счётчики).
 
-    None значит «строку писать нечем»: ни одной записи развернуть не удалось.
-    Счётчики считают записи, а не карты: expanded — развёрнутые, already — уже
-    со снимком, missing — file_id, которого нет в справочнике (редакция ушла),
-    no_guideline — диагнозы, для которых клинрек не нашёлся ещё при аудите.
+    Делает две вещи разом, потому что обе переписывают одну и ту же строку:
+    проставляет снимок редакции и вынимает из строки наши errors — diag_result
+    уезжает в реплику движка и попадает агенту медчека как есть, а он прочитает
+    нашу деградацию как факт о карте. Аварии уходят в done_cards.diag_errors
+    в том же виде, что их пишет аудит: «<код МКБ>: <что упало>».
+
+    Первый элемент — None, когда строку писать незачем. Счётчики считают записи,
+    а не карты: expanded — развёрнутые, already — уже со снимком, missing —
+    file_id, которого нет в справочнике (редакция ушла), no_guideline — диагнозы
+    без клинрека, degraded — записи, из которых вынули аварию.
     """
     counts: Counter = Counter()
     entries = []
+    degradation: list[str] = []
     changed = False
     for entry in diag_result or []:
         entry = dict(entry)
@@ -69,8 +83,14 @@ def expand(diag_result: list[dict], manifest: dict[str, dict]) -> tuple[list[dic
             changed = True
         else:
             counts["missing"] += 1
+        errors = entry.pop("errors", None)
+        if errors:
+            code = entry.get("icd_code") or "—"
+            degradation.extend(f"{code}: {error}" for error in errors)
+            counts["degraded"] += 1
+            changed = True
         entries.append(entry)
-    return (entries if changed else None), counts
+    return (entries if changed else None), (degradation or None), counts
 
 
 async def _run(storage, *, manifest: dict[str, dict], limit: int, batch: int,
@@ -82,20 +102,22 @@ async def _run(storage, *, manifest: dict[str, dict], limit: int, batch: int,
         size = batch if not limit else min(batch, limit - seen)
         if size <= 0:
             break
-        rows = await storage.list_diag_results_without_meta(limit=size, after_id=after_id)
+        rows = await storage.list_diag_results_to_backfill(limit=size, after_id=after_id)
         if not rows:
             break
         after_id = rows[-1]["id"]
         seen += len(rows)
         for row in rows:
-            entries, counts = expand(row["diag_result"], manifest)
+            entries, degradation, counts = expand(row["diag_result"], manifest)
             totals += counts
             if entries is None:
                 continue
             totals["cards"] += 1
             if apply:
                 await storage.set_diag_result(
-                    card_id=row["id"], diag_json=json.dumps(entries, ensure_ascii=False))
+                    card_id=row["id"],
+                    diag_json=json.dumps(entries, ensure_ascii=False),
+                    diag_errors=degradation)
         print(f"  просмотрено карт: {seen}, к записи: {totals['cards']}")
     return totals
 
@@ -129,7 +151,8 @@ async def main() -> None:
     print(f"\nЗаписей диагнозов: развёрнуто {totals['expanded']}, "
           f"редакция ушла из справочника {totals['missing']}, "
           f"уже со снимком {totals['already']}, "
-          f"без клинрека {totals['no_guideline']}")
+          f"без клинрека {totals['no_guideline']}, "
+          f"вынуто аварий {totals['degraded']}")
     if args.apply:
         print(f"Карт изменено: {totals['cards']}")
     else:
