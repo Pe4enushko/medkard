@@ -151,3 +151,12 @@ def test_short_labels_still_take_their_own_rank():
     tokens = ["огол", "огр", "стул"]
     out = reorder_inspection_data(data, tokens)
     assert [d["Параметр"] for d in out] == ["Огол", "Огр", "Стул"]
+
+
+def test_reorder_survives_a_non_dict_element():
+    """Тот же случай, что у дорисовки: 1С прислала в списке не-словарь.
+    Переупорядочивание обязано его пережить и не потерять."""
+    data = [{"Параметр": "Диагноз", "Значение": "J06.9"}, "мусор", None]
+    out = reorder_inspection_data(data, ["жалобы", "диагноз"])
+    assert out[0] == data[0]
+    assert out[1:] == ["мусор", None]

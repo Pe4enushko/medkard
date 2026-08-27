@@ -294,3 +294,22 @@ def test_a_field_name_with_a_comma_stays_one_slot():
 def test_a_clinic_without_formats_raises(clinic):
     with pytest.raises(ValueError):
         load_inspection_formats(clinic)
+
+
+def test_a_broken_element_does_not_take_the_whole_card_down(tmp_path):
+    """ДанныеОсмотра доезжают до отчёта такими, какими их прислала 1С —
+    json_parser их не проверяет. Элемент не-словарь не должен ронять дорисовку:
+    строку карты пишут в xlsx целиком, и падение уносит её всю."""
+    formats = _formats(tmp_path, _SIMPLE)
+    data = ["мусор", _field("жалобы", "кашель"), None, _field("чсс", "80")]
+
+    out = fill_missing_fields(data, formats[0])
+
+    assert _labels(out[:4]) == ["жалобы", "анамнез", "температура", "чсс"]
+    # мусор не потерян и не размножен — уехал в хвост, как всякое поле вне шаблона
+    assert out[4:] == ["мусор", None]
+
+
+def test_a_broken_element_does_not_break_recognition(tmp_path):
+    formats = _formats(tmp_path, _SIMPLE)
+    assert match_format(["мусор", _field("жалобы"), _field("температура")], formats) is not None
