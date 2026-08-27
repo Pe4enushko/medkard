@@ -236,21 +236,58 @@ def test_alenka_vaccination_card_is_not_filled_by_the_standard_template():
     assert drawn == ["Прививочный анамнез"]
 
 
-def test_alenka_foreign_card_matches_no_format():
-    """Туберкулинодиагностика — 16 карт из одного поля; нефролог — своё ядро.
-    Ни то, ни другое дорисовывать нечем."""
+def test_alenka_specialist_cards_get_their_own_templates():
+    """У нефролога и гастроэнтеролога свои шаблоны: базовый закрывает у них 4 и 17
+    слотов из 37, натянуть его значило бы выдать 19–32 пустые строки на карту."""
+    formats = load_inspection_formats("Alenka")
+
+    nephrologist = [
+        _field(label)
+        for label in ("родственник лвн", "Рекомендации", "Наследственный анамнез",
+                      "Жалобы нефролог", "An. morbi", "Объективный статус нефролог", "an_vitae")
+    ]
+    matched = match_format(nephrologist, formats)
+    assert matched.name == "nephrologist"
+    out = fill_missing_fields(nephrologist, matched)
+    # карта полная — дорисовывать нечего, поменялся только порядок
+    assert PLACEHOLDER not in [item["Значение"] for item in out]
+    assert _labels(out)[:3] == ["родственник лвн", "Жалобы нефролог", "An. morbi"]
+
+    gastro = [
+        _field(label)
+        for label in ("Status praesens аллерголог", "Жалобы на момент обращения",
+                      "Мочевыделительная система", "Живот", "Язык", "Селезенка")
+    ]
+    assert match_format(gastro, formats).name == "gastroenterologist"
+
+
+def test_alenka_card_without_a_template_is_left_alone():
+    """Туберкулинодиагностика — 16 карт из одного поля, карты из одних «Заметок» —
+    ещё 15. Шаблона у них нет, дорисовывать нечем."""
     formats = load_inspection_formats("Alenka")
     assert match_format([_field("Комментарий к вакцинации")], formats) is None
-    assert match_format(
-        [
-            _field("Жалобы нефролог"),
-            _field("Объективный статус нефролог"),
-            _field("An. morbi"),
-            _field("родственник лвн"),
-            _field("Рекомендации"),
-        ],
-        formats,
-    ) is None
+    assert match_format([_field("Заметки")], formats) is None
+
+
+def test_all_alenka_templates_share_one_order():
+    """Врач читает отчёт по всем приёмам подряд: жалобы, анамнез, витальные, осмотр,
+    рекомендации должны идти в одном и том же порядке в каждом шаблоне клиники."""
+    spine = ["Жалоб", "анамнез", "Температура", "Стул", "Рекомендаци"]
+    for fmt in load_inspection_formats("Alenka"):
+        names = [slot[0] for slot in fmt.slots]
+        positions = [
+            next((i for i, name in enumerate(names) if part.lower() in name.lower()), None)
+            for part in spine
+        ]
+        seen = [p for p in positions if p is not None]
+        assert seen == sorted(seen), f"{fmt.name}: {names}"
+
+
+def test_a_field_name_with_a_comma_stays_one_slot():
+    """Запятая в строке манифеста делит её на поля, поэтому имя с запятой внутри
+    задаётся списком: «При температуре 37,5  С прием» — одно поле, а не два."""
+    vaccination = next(f for f in load_inspection_formats("Alenka") if f.name == "vaccination")
+    assert ("При температуре 37,5  С прием",) in vaccination.slots
 
 
 @pytest.mark.parametrize("clinic", ["MDS", "нет такой"])
