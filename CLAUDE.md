@@ -95,6 +95,7 @@ src/
 └── parsers/
     ├── excel.py             # Input Excel parser
     ├── inspection_order.py  # Optional canonical reorder of ДанныеОсмотра (manifest-driven, fuzzy match)
+    ├── inspection_fill.py   # Draws the template fields 1C did not send («не заполнено») in the report
     └── json_parser.py       # Visit JSON normalization
 ```
 

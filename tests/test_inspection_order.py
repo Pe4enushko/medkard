@@ -116,10 +116,12 @@ def test_load_comma_split_flattens_tokens(tmp_path):
 
 
 def test_load_real_manifest_default_path():
-    # the committed resources/inspection_formats.json must load and split
+    # the committed resources/inspection_formats.json must load and split.
+    # Names are spelled as 1C spells them: the report draws a missing field
+    # under its manifest name, and «чсс» in the ЧСС row would read as a bug.
     tokens = load_inspection_format("Alenka", "standard")
-    assert "температура" in tokens and "рост" in tokens
-    assert "жалобы на момент осмотра" in tokens
+    assert "Температура" in tokens and "Рост" in tokens
+    assert "Жалобы на момент осмотра" in tokens
 
 
 def test_load_missing_clinic_raises(tmp_path):

@@ -24,6 +24,7 @@ from typing import Any
 
 from api import demo_doctors
 from parsers.excel import AuditExcelWriter
+from parsers.inspection_order import InspectionFormat
 from reporting.result_parser import build_manifest_meta as _build_manifest_meta
 from reporting.result_parser import parse_diagnosis as _parse_diagnosis
 from reporting.result_parser import parse_formal as _parse_formal
@@ -135,6 +136,9 @@ class ExcelFormatter:
                        switched on for gets its report without a doctor, the way
                        it looked before the crutch. Pass it wherever the caller
                        knows the org; ``None`` strips nothing.
+        formats:       Optional inspection templates of the clinic; a recognised
+                       record is rendered in its template's order with the
+                       missing fields drawn as «не заполнено».
     """
 
     def __init__(
@@ -144,8 +148,11 @@ class ExcelFormatter:
         legacy: bool = False,
         order_tokens: list[str] | None = None,
         org_name: str | None = None,
+        formats: list[InspectionFormat] | None = None,
     ) -> None:
-        self._excel = AuditExcelWriter(excel_path, legacy=legacy, order_tokens=order_tokens)
+        self._excel = AuditExcelWriter(
+            excel_path, legacy=legacy, order_tokens=order_tokens, formats=formats
+        )
         self._reader = _DoneCardsReader()
         self._org_name = org_name
 

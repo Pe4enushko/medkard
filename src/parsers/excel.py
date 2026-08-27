@@ -43,7 +43,8 @@ from openpyxl.styles import Alignment
 from openpyxl.worksheet.worksheet import Worksheet
 
 from audit.models import FormalStructureResult
-from parsers.inspection_order import reorder_inspection_data
+from parsers.inspection_fill import fill_missing_fields, match_format
+from parsers.inspection_order import InspectionFormat, reorder_inspection_data
 
 _HEADERS = [
     "Специализация",
@@ -155,6 +156,43 @@ def _card_data_text(visit: dict[str, Any]) -> str:
     return "\n\n".join(parts) if parts else "—"
 
 
+def _guideline_sources_text(diagnosis: Any) -> str:
+    if not isinstance(diagnosis, list):
+        return "—"
+    lines: list[str] = []
+    for result in diagnosis:
+        sources = getattr(result, "guideline_sources", None) or []
+        for source in sources:
+            sections = "; ".join(
+                f"{section.section or 'раздел не указан'}{' (цит.)' if section.cited else ''}"
+                for section in source.sections
+            )
+            lines.append(f"[{getattr(result, 'icd_code', '—')}] {source.doc_title}: {sections}")
+    return "\n".join(lines) if lines else "—"
+
+
+def _inspection_for_report(
+    visit: dict[str, Any],
+    order_tokens: list[str] | None,
+    formats: list[InspectionFormat] | None,
+) -> list[dict[str, Any]]:
+    """ДанныеОсмотра, как их увидит врач.
+
+    Совпал шаблон — запись идёт его порядком, и поля, которых 1С не прислала,
+    дорисовываются пустыми: незаполненное поле в выгрузке не приходит вовсе, и
+    без дорисовки пропуск в отчёте неотличим от поля, которого в шаблоне нет.
+    Не совпал — только порядок, заданный оператором (шаблона у записи нет, и
+    дорисовывать её нечем).
+    """
+    inspection = visit.get("ДанныеОсмотра") or []
+    fmt = match_format(inspection, formats) if formats else None
+    if fmt is not None:
+        return fill_missing_fields(inspection, fmt)
+    if order_tokens:
+        return reorder_inspection_data(inspection, order_tokens)
+    return inspection
+
+
 def _build_row(
     visit: dict[str, Any],
     formal: FormalStructureResult,
@@ -163,15 +201,14 @@ def _build_row(
     *,
     legacy: bool = False,
     order_tokens: list[str] | None = None,
+    formats: list[InspectionFormat] | None = None,
 ) -> list[str]:
     if legacy:
         return [_pretty(visit), _pretty(formal), _pretty(diagnosis)]
 
     specialization = (visit.get("Врач") or {}).get("SPECIALIZATION") or "—"
     visit_date = (visit.get("Прием") or {}).get("DATE") or "—"
-    inspection = visit.get("ДанныеОсмотра") or []
-    if order_tokens:
-        inspection = reorder_inspection_data(inspection, order_tokens)
+    inspection = _inspection_for_report(visit, order_tokens, formats)
     return [
         specialization,
         visit_date,
@@ -190,6 +227,7 @@ def build_workbook_bytes(
     *,
     legacy: bool = False,
     order_tokens: list[str] | None = None,
+    formats: list[InspectionFormat] | None = None,
 ) -> bytes:
     """Build an xlsx workbook in memory from (visit, formal, diagnosis, icd_check)
     tuples and return its bytes — no disk I/O, for use in per-request API responses.
@@ -207,7 +245,10 @@ def build_workbook_bytes(
     ws.auto_filter.ref = autofilter
 
     for visit, formal, diagnosis, icd_check in rows:
-        row = _build_row(visit, formal, diagnosis, icd_check, legacy=legacy, order_tokens=order_tokens)
+        row = _build_row(
+            visit, formal, diagnosis, icd_check,
+            legacy=legacy, order_tokens=order_tokens, formats=formats,
+        )
         ws.append(row)
         new_row = ws.max_row
         for col_idx in range(1, len(row) + 1):
@@ -242,6 +283,11 @@ class AuditExcelWriter:
         legacy:       Use the legacy 3-column layout (visits / formal / diagnosis).
         order_tokens: Optional flat token list used to reorder each visit's
                        ДанныеОсмотра before rendering (see reorder_inspection_data).
+        formats:      Optional inspection templates of the clinic. A record
+                       recognised as one of them is rendered in that template's
+                       order with its missing fields drawn as «не заполнено»
+                       (see inspection_fill); order_tokens then apply only to
+                       records no template recognised.
     """
 
     def __init__(
@@ -250,10 +296,12 @@ class AuditExcelWriter:
         *,
         legacy: bool = False,
         order_tokens: list[str] | None = None,
+        formats: list[InspectionFormat] | None = None,
     ) -> None:
         self._path = Path(path)
         self._legacy = legacy
         self._order_tokens = order_tokens
+        self._formats = formats
 
     def _open_or_create(self) -> tuple[Workbook, Worksheet]:
         if self._path.exists():
@@ -295,6 +343,7 @@ class AuditExcelWriter:
             row = _build_row(
                 visit, formal, diagnosis, icd_check,
                 legacy=self._legacy, order_tokens=self._order_tokens,
+                formats=self._formats,
             )
             wb, ws = self._open_or_create()
             ws.append(row)

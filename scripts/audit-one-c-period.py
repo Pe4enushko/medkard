@@ -42,7 +42,7 @@ from integrations.ftp import load_creds, upload
 from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient
 from audit.filters import CardFilter
 from parsers.filter_config import load_card_filter
-from parsers.inspection_order import load_inspection_format
+from parsers.inspection_order import load_inspection_format, load_inspection_formats
 from RAG.retrieval.vector_store import close_pool
 from storage.done_cards_storage import DoneCardsStorage
 from storage.organizations_storage import OrganizationsStorage
@@ -68,13 +68,16 @@ _parser.add_argument(
     default=None,
     metavar="NAME",
     help="Reorder ДанныеОсмотра fields using resources/inspection_formats.json "
-         "[<org>][<NAME>]. Omit to leave field order unchanged.",
+         "[<org>][<NAME>], and draw the fields a recognised template is missing "
+         "as «не заполнено». Omit to leave the record as 1C sent it.",
 )
 _args = _parser.parse_args()
 
 INSPECTION_ORDER = (
     load_inspection_format(_args.org, _args.format) if _args.format else None
 )
+# Шаблоны той же клиники: по ним запись опознаётся и дорисовывается.
+INSPECTION_FORMATS = load_inspection_formats(_args.org) if _args.format else None
 
 ONE_C_CLIENTS: dict[str, type[OneCClient]] = {
     "Alenka": AlenkaOneCClient,
@@ -199,7 +202,7 @@ async def main() -> None:
         #     so the report always reflects every card in the period.
         async with ExcelFormatter(
             EXCEL_PATH, legacy=_args.legacy_report, order_tokens=INSPECTION_ORDER,
-            org_name=_args.org,
+            org_name=_args.org, formats=INSPECTION_FORMATS,
         ) as fmt:
             written = await fmt.export_period(PERIOD_FROM, PERIOD_TO, org_id)
         log.info("📊 Exported %d row(s) to %s", written, EXCEL_PATH)

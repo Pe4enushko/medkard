@@ -24,7 +24,10 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from audit.excel_formatter import ExcelFormatter  # noqa: E402
-from parsers.inspection_order import load_inspection_format  # noqa: E402
+from parsers.inspection_order import (  # noqa: E402
+    load_inspection_format,
+    load_inspection_formats,
+)
 from storage.organizations_storage import OrganizationsStorage  # noqa: E402
 
 # ── Args ──────────────────────────────────────────────────────────────────────
@@ -39,13 +42,16 @@ _parser.add_argument(
     default=None,
     metavar="NAME",
     help="Reorder ДанныеОсмотра fields using resources/inspection_formats.json "
-         "[<org>][<NAME>]. Omit to leave field order unchanged.",
+         "[<org>][<NAME>], and draw the fields a recognised template is missing "
+         "as «не заполнено». Omit to leave the record as 1C sent it.",
 )
 _args = _parser.parse_args()
 
 INSPECTION_ORDER = (
     load_inspection_format(_args.org, _args.format) if _args.format else None
 )
+# Шаблоны той же клиники: по ним запись опознаётся и дорисовывается.
+INSPECTION_FORMATS = load_inspection_formats(_args.org) if _args.format else None
 
 
 def _parse_date(value: str, label: str) -> datetime:
@@ -80,7 +86,7 @@ async def main() -> None:
     )
     async with ExcelFormatter(
         excel_path, legacy=_args.legacy_report, order_tokens=INSPECTION_ORDER,
-        org_name=_args.org,
+        org_name=_args.org, formats=INSPECTION_FORMATS,
     ) as fmt:
         written = await fmt.export_period(date_from, date_to, org_id)
     if written:
