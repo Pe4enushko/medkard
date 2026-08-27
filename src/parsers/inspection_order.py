@@ -164,12 +164,17 @@ class InspectionFormat:
     Слот — одно поле записи; несколько имён в слоте значат, что 1С присылает
     его то под одним, то под другим («На приеме пациент с» = «родственник лвн»),
     и заполненным слот считается по любому из них.
+
+    ``never_drawn`` — слоты, которые упорядочиваются наравне с остальными, но
+    пустыми не рисуются: они живут в карте вне записи осмотра, и пустая строка
+    сказала бы о них неправду.
     """
 
     name: str
     slots: tuple[tuple[str, ...], ...]
     signature: tuple[str, ...]
     min_signature_match: int
+    never_drawn: tuple[str, ...] = ()
 
     @property
     def order_tokens(self) -> list[str]:
@@ -252,6 +257,7 @@ def load_inspection_formats(
                 slots=_slots(entry["order"]),
                 signature=tuple(entry["signature"]),
                 min_signature_match=int(entry.get("min_signature_match", len(entry["signature"]))),
+                never_drawn=tuple(entry.get("never_drawn", ())),
             )
         )
     return out

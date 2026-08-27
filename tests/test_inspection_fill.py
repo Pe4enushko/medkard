@@ -165,10 +165,32 @@ def test_an_empty_record_is_left_alone(tmp_path):
 # ── боевой конфиг Алёнки ─────────────────────────────────────────────────────
 
 
-def test_alenka_standard_card_gets_the_dead_slots_drawn():
-    """«Пациент нуждается в уходе» и «Диагноз» не пришли ни в одной из 334 карт
-    (диагноз едет отдельным блоком карты). Решение главврача — рисовать шаблон
-    как есть, поэтому в отчёте они появляются пустыми у каждой карты."""
+def test_never_drawn_slot_keeps_its_place_but_is_not_drawn(tmp_path):
+    """Поле из never_drawn упорядочивается как обычно, но пустым не рисуется."""
+    formats = _formats(
+        tmp_path,
+        {
+            "Alenka": {
+                "standard": {
+                    "order": ["жалобы", "диагноз", "анамнез"],
+                    "never_drawn": ["диагноз"],
+                    "signature": ["жалобы"],
+                    "min_signature_match": 1,
+                }
+            }
+        },
+    )
+    assert _labels(fill_missing_fields([_field("жалобы")], formats[0])) == ["жалобы", "анамнез"]
+    # пришёл — встал на своё место шаблона
+    out = fill_missing_fields([_field("анамнез"), _field("диагноз", "J06.9")], formats[0])
+    assert _labels(out) == ["жалобы", "диагноз", "анамнез"]
+    assert out[1]["Значение"] == "J06.9"
+
+
+def test_alenka_standard_card_draws_care_but_not_diagnosis():
+    """«Пациент нуждается в уходе» и «Диагноз» не пришли ни в одной из 334 карт.
+    Диагноз при этом в карте есть всегда — своим блоком, поэтому пустым он не
+    рисуется; поля про уход в выгрузке нет вовсе, и оно рисуется."""
     formats = load_inspection_formats("Alenka")
     card = [
         _field(label)
@@ -185,7 +207,7 @@ def test_alenka_standard_card_gets_the_dead_slots_drawn():
     out = fill_missing_fields(card, matched)
     drawn = [item["Параметр"] for item in out if item["Значение"] == PLACEHOLDER]
     assert "Пациент нуждается в уходе" in drawn
-    assert "Диагноз" in drawn
+    assert "Диагноз" not in drawn
     assert _labels(out)[0] == "На приеме пациент с"
 
 

@@ -68,6 +68,9 @@ def fill_missing_fields(
     Поля, которых в шаблоне нет, сохраняют свой относительный порядок и уходят
     в хвост — как и при обычном переупорядочивании. Ничего не теряется и не
     дублируется: пришедшие элементы попадают в результат теми же объектами.
+
+    Слоты из ``fmt.never_drawn`` пропускаются: место в порядке у них есть, а
+    пустой строки быть не должно.
     """
     if not inspection_data:
         return list(inspection_data)
@@ -81,7 +84,7 @@ def fill_missing_fields(
         if idx >= 0:
             claimed[idx] = True
             result.append(inspection_data[idx])
-        else:
+        elif not any(labels_match(slot[0], name) for name in fmt.never_drawn):
             result.append(_drawn(slot[0], inspection_data, placeholder))
 
     for idx, item in enumerate(inspection_data):
