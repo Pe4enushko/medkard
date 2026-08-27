@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -71,15 +72,56 @@ def _distance_budget(a: str, b: str, max_distance: int) -> int:
     return max_distance
 
 
+def match_score(a: str, b: str, *, max_distance: int = 2) -> int | None:
+    """Расстояние между именами полей или ``None``, если это разные поля.
+
+    Ноль — имена совпали дословно; чем больше, тем дальше написание разошлось.
+    Нужно там, где на одно имя шаблона претендуют несколько полей записи:
+    выигрывает ближайшее.
+    """
+    na, nb = _normalize(a), _normalize(b)
+    budget = _distance_budget(na, nb, max_distance)
+    distance = _levenshtein(na, nb, budget)
+    return distance if distance <= budget else None
+
+
 def labels_match(a: str, b: str, *, max_distance: int = 2) -> bool:
     """Одно ли это имя поля с точностью до дрейфа написания.
 
     Тот же матчинг, что и в переупорядочивании: 1С добавляет и убирает
     двоеточия, путает «листка»/«листке», а короткие имена сверяются точно.
     """
-    na, nb = _normalize(a), _normalize(b)
-    budget = _distance_budget(na, nb, max_distance)
-    return _levenshtein(na, nb, budget) <= budget
+    return match_score(a, b, max_distance=max_distance) is not None
+
+
+def normalized_labels(inspection_data: list[dict[str, Any]]) -> list[str]:
+    """Нормализованные имена полей записи — в том порядке, в каком они пришли."""
+    return [_normalize(str(item.get(_PARAM_KEY, ""))) for item in inspection_data]
+
+
+def claim_nearest(
+    names: list[str] | tuple[str, ...],
+    norm_params: list[str],
+    claimed: list[bool],
+    *,
+    max_distance: int = 2,
+) -> int:
+    """Индекс ближайшего незанятого поля записи, подходящего под любое из *names*,
+    или -1. Ничьи решаются в пользу поля, пришедшего раньше."""
+    best_idx = -1
+    best_dist = max_distance + 1
+    for name in names:
+        nt = _normalize(name)
+        for idx, np in enumerate(norm_params):
+            if claimed[idx]:
+                continue
+            distance = match_score(nt, np, max_distance=max_distance)
+            if distance is None or distance >= best_dist:
+                continue
+            best_dist, best_idx = distance, idx
+            if distance == 0:
+                return best_idx
+    return best_idx
 
 
 def reorder_inspection_data(
@@ -103,21 +145,7 @@ def reorder_inspection_data(
     result: list[dict[str, Any]] = []
 
     for token in order_tokens:
-        nt = _normalize(token)
-        best_idx = -1
-        best_dist = max_distance + 1
-        for idx, np in enumerate(norm_params):
-            if claimed[idx]:
-                continue
-            budget = _distance_budget(nt, np, max_distance)
-            d = _levenshtein(nt, np, budget)
-            if d > budget:
-                continue
-            if d < best_dist:
-                best_dist = d
-                best_idx = idx
-                if d == 0:
-                    break
+        best_idx = claim_nearest([token], norm_params, claimed, max_distance=max_distance)
         if best_idx >= 0:
             claimed[best_idx] = True
             result.append(inspection_data[best_idx])
@@ -129,6 +157,56 @@ def reorder_inspection_data(
     return result
 
 
+@dataclass(frozen=True)
+class InspectionFormat:
+    """Один шаблон осмотра: порядок полей, слоты и по чему шаблон опознаётся.
+
+    Слот — одно поле записи; несколько имён в слоте значат, что 1С присылает
+    его то под одним, то под другим («На приеме пациент с» = «родственник лвн»),
+    и заполненным слот считается по любому из них.
+    """
+
+    name: str
+    slots: tuple[tuple[str, ...], ...]
+    signature: tuple[str, ...]
+    min_signature_match: int
+
+    @property
+    def order_tokens(self) -> list[str]:
+        return [name for slot in self.slots for name in slot]
+
+
+def _slots(order: list[Any]) -> tuple[tuple[str, ...], ...]:
+    """Строка манифеста → слоты. Запятая в строке разделяет разные поля, список
+    из нескольких строк — имена одного поля."""
+    slots: list[tuple[str, ...]] = []
+    for line in order:
+        if isinstance(line, (list, tuple)):
+            names = tuple(str(name).strip() for name in line if str(name).strip())
+            if names:
+                slots.append(names)
+            continue
+        for token in str(line).split(","):
+            token = token.strip()
+            if token:
+                slots.append((token,))
+    return tuple(slots)
+
+
+def _clinic_formats(clinic: str, path: str | Path) -> dict[str, Any]:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    clinics = {key: value for key, value in data.items() if not key.startswith("_")}
+    if clinic not in clinics:
+        raise ValueError(
+            f"Clinic {clinic!r} not found in {path} (have: {sorted(clinics)})"
+        )
+    return {
+        key: value for key, value in clinics[clinic].items() if not key.startswith("_")
+    }
+
+
 def load_inspection_format(
     clinic: str,
     format_name: str,
@@ -137,26 +215,43 @@ def load_inspection_format(
     """Load the manifest JSON and return the flat, comma-split token list for
     ``[clinic][format_name]``.
 
+    Accepts both manifest shapes: a bare list of order lines, and the object
+    ``{"order": [...], "signature": [...], "min_signature_match": N}`` — only
+    the order is returned either way.
+
     Raises ValueError with a clear message if the clinic or format is absent.
     """
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-
-    if clinic not in data:
-        raise ValueError(
-            f"Clinic {clinic!r} not found in {path} (have: {sorted(data)})"
-        )
-    formats = data[clinic]
+    formats = _clinic_formats(clinic, path)
     if format_name not in formats:
         raise ValueError(
             f"Format {format_name!r} not found for clinic {clinic!r} in {path} "
             f"(have: {sorted(formats)})"
         )
+    entry = formats[format_name]
+    order = entry["order"] if isinstance(entry, dict) else entry
+    return [name for slot in _slots(order) for name in slot]
 
-    tokens: list[str] = []
-    for line in formats[format_name]:
-        for tok in str(line).split(","):
-            tok = tok.strip()
-            if tok:
-                tokens.append(tok)
-    return tokens
+
+def load_inspection_formats(
+    clinic: str,
+    path: str | Path = _DEFAULT_FORMATS_PATH,
+) -> list[InspectionFormat]:
+    """Все шаблоны клиники, которые можно опознать по самой записи, — в том
+    порядке, в каком они лежат в манифесте (он же порядок приоритета).
+
+    Шаблон без ``signature`` не возвращается: опознать его нечем, а применять
+    ко всем подряд нельзя — одна клиника присылает несколько шаблонов.
+    """
+    out: list[InspectionFormat] = []
+    for name, entry in _clinic_formats(clinic, path).items():
+        if not isinstance(entry, dict) or not entry.get("signature"):
+            continue
+        out.append(
+            InspectionFormat(
+                name=name,
+                slots=_slots(entry["order"]),
+                signature=tuple(entry["signature"]),
+                min_signature_match=int(entry.get("min_signature_match", len(entry["signature"]))),
+            )
+        )
+    return out
