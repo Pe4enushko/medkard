@@ -95,8 +95,17 @@ def labels_match(a: str, b: str, *, max_distance: int = 2) -> bool:
 
 
 def normalized_labels(inspection_data: list[dict[str, Any]]) -> list[str]:
-    """Нормализованные имена полей записи — в том порядке, в каком они пришли."""
-    return [_normalize(str(item.get(_PARAM_KEY, ""))) for item in inspection_data]
+    """Нормализованные имена полей записи — в том порядке, в каком они пришли.
+
+    Элемент не-словарь получает пустое имя и потому не совпадёт ни с одним слотом:
+    ДанныеОсмотра доезжают сюда такими, какими их прислала 1С (json_parser их не
+    проверяет), а падение здесь уносит из отчёта всю строку карты — Excel-писатель
+    ловит исключение вокруг сборки строки целиком.
+    """
+    return [
+        _normalize(str(item.get(_PARAM_KEY, ""))) if isinstance(item, dict) else ""
+        for item in inspection_data
+    ]
 
 
 def claim_nearest(
@@ -140,7 +149,7 @@ def reorder_inspection_data(
     if not order_tokens or not inspection_data:
         return list(inspection_data)
 
-    norm_params = [_normalize(str(item.get(_PARAM_KEY, ""))) for item in inspection_data]
+    norm_params = normalized_labels(inspection_data)
     claimed = [False] * len(inspection_data)
     result: list[dict[str, Any]] = []
 
