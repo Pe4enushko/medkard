@@ -223,6 +223,26 @@ python scripts/hacks/backfill-demo-doctors.py Alenka --days 30 --revert [-y]
 (`GET /visits/pull`, `reporting/api_formatter.py`) это не касается: там врач и
 есть весь смысл костыля.
 
+**Штамп висит только на пуше.** Карты, которые приезжают ночным пулом 1С
+(`scripts/audit-one-c-period.py` → `AuditPipeline`), роут `POST /visits/push` не
+проходят и остаются без врача — и так будет каждую ночь, пока 1С не начнёт слать
+врача. Поэтому бэкфилл нужен не разово, а в кроне следом за ночным аудитом:
+
+```
+python scripts/hacks/backfill-demo-doctors.py Alenka --days 3 -y
+```
+
+Проверить, где сейчас дыра, — `scripts/hacks/check-demo-doctors.py` (только
+читает, на проде безопасен): показывает состояние переключателя и файла врачей,
+сколько карт без врача и на каких датах, и главное — каким путём эти карты
+пришли. Карта без `pushed_at` приехала ночным пулом (костыль её не видел), с
+`pushed_at` — пушем, и тогда дело в выключенном переключателе или нечитаемом
+файле. Возвращает код 1, если что-то не так, так что его можно повесить в крон.
+
+```
+python scripts/hacks/check-demo-doctors.py Alenka [--days 30] [--limit 20]
+```
+
 Убрать костыль целиком: `git rm src/api/demo_doctors.py resources/demo_doctors.json
 scripts/hacks/backfill-demo-doctors.py`, три строки в `src/api/routes/visits.py`
 и `org_name` с тремя строками в `audit/excel_formatter.py`.
