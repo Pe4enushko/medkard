@@ -4,8 +4,18 @@
 Классификатор типа визита живёт в
 ``audit.formal_structure.validator._CODE_RULES`` — маленькая таблица совпадений
 по началу, середине и концу кода. Приказ здесь не источник данных, а способ её
-проверить: скрипт читает PDF номенклатуры, для каждой записи раздела B берёт вид
+проверить: скрипт читает номенклатуру, для каждой записи раздела B берёт вид
 услуги из наименования и сравнивает с тем, что говорит таблица.
+
+Источник по умолчанию — ``resources/nomenclature-804n.csv``, выгрузка текстового
+слоя ``804_N_MZ.pdf`` (экспорт ГАРАНТ от 06.09.2023, ред. с изм. 24.09.2020),
+10 441 код. Она лежит в репозитории ради того, чтобы ту же сверку гонял обычный
+тест, а не только человек с корпусом НПА под рукой. Флаг ``--pdf`` читает сам
+приказ — так CSV и пересобирают, когда выходит новая редакция.
+
+**Чего проверка не ловит.** Выгрузка заморожена на одной редакции: если Минздрав
+переставит окончания кодов, CSV об этом не узнает и тест останется зелёным.
+Сторожит она регрессию классификатора, а не устаревание номенклатуры.
 
 Три исхода:
 
@@ -20,16 +30,19 @@
 
 Запуск::
 
-    python scripts/checks/check-nmu-classifier.py ~/projects/minzdrav/804_N_MZ.pdf
+    python scripts/checks/check-nmu-classifier.py
+    python scripts/checks/check-nmu-classifier.py --pdf ~/projects/minzdrav/804_N_MZ.pdf
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import re
 import sys
 from collections import Counter
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -41,8 +54,13 @@ from audit.formal_structure.validator import (  # noqa: E402
     classify_name,
 )
 
+CSV_PATH = ROOT / "resources" / "nomenclature-804n.csv"
+
 # В PDF часть кодов набрана кириллической «В» — нормализуем обе раскладки.
 _CODE_RE = re.compile(r"[BВ]0[1-5]\.\d{3}\.\d{3}")
+# В CSV код лежит отдельным полем целиком, поэтому четвёртая группа не теряется:
+# именно на ней проверяется запрет читать окончание у длинного кода.
+_CSV_CODE_RE = re.compile(r"[BВ]0[1-5]\.\d{3}\.\d{3}(?:\.\d{3})?")
 # Хвост записи в PDF цепляет сноски и ссылки на приказы — режем по ним.
 _NAME_TAIL_RE = re.compile(r"Приказ Министерства|Утратил[аи]? силу|<\d")
 
@@ -77,6 +95,16 @@ def _entries(pdf_path: Path) -> list[tuple[str, str]]:
     return out
 
 
+def entries_from_csv(path: Path = CSV_PATH) -> list[tuple[str, str]]:
+    """(код, наименование) для записей раздела B из выгрузки номенклатуры."""
+    with open(path, encoding="utf-8", newline="") as f:
+        return [
+            (row["code"], row["name"])
+            for row in csv.DictReader(f)
+            if _CSV_CODE_RE.fullmatch(row["code"]) and row["name"]
+        ]
+
+
 def _by_name(name: str) -> VisitType | None:
     for pattern, visit_type in _BY_NAME:
         if pattern.match(name):
@@ -84,25 +112,20 @@ def _by_name(name: str) -> VisitType | None:
     return None
 
 
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("pdf", type=Path, help="путь к PDF приказа 804н")
-    parser.add_argument("--show", type=int, default=8, help="сколько примеров печатать")
-    args = parser.parse_args(argv)
-    if not args.pdf.exists():
-        parser.error(f"файл не найден: {args.pdf}")
+class Report(NamedTuple):
+    """Итог сверки. Ошибками считаются contradictions и extra."""
 
-    entries = _entries(args.pdf)
-    if len(entries) < 500:
-        print(f"извлечено всего {len(entries)} записей — PDF распознан не полностью", file=sys.stderr)
-        return 2
+    contradictions: list[str]
+    extra: list[str]
+    uncovered: list[str]
+    barred: list[str]
+    by_section: Counter
+    agreed: Counter
 
-    contradictions: list[str] = []
-    extra: list[str] = []
-    uncovered: list[str] = []
-    barred: list[str] = []
-    by_section = Counter()
-    agreed = Counter()
+
+def compare(entries: list[tuple[str, str]]) -> Report:
+    """Сверить вердикт классификатора с наименованием по каждой записи."""
+    report = Report([], [], [], [], Counter(), Counter())
 
     for code, name in entries:
         from_code = classify_code(code)
@@ -113,46 +136,73 @@ def main(argv: list[str]) -> int:
             # шаблоны приёмов, а тут уход, диагностические комплексы и
             # реабилитация. Исключения из раздела проверяются ниже.
             if from_code is not NO_GUESS:
-                by_section[code[:3]] += 1
+                report.by_section[code[:3]] += 1
                 continue
         if from_code is NO_GUESS:
             # Ради этих строк _NAME_DESCRIBES_SERVICE и заведён: разбор
             # наименования выносит вердикт, а услуга приёмом не является.
             loose = classify_name(name)
             if loose is not None:
-                barred.append(f"{code} → наименование дало бы {loose.name}: {name}")
+                report.barred.append(f"{code} → наименование дало бы {loose.name}: {name}")
             continue
         if from_code is None and from_name is None:
             continue
         if from_code is None:
-            uncovered.append(f"{code} — {name}")
+            report.uncovered.append(f"{code} — {name}")
         elif from_name is None:
-            extra.append(f"{code} → {from_code.name}, но по приказу это не приём: {name}")
+            report.extra.append(f"{code} → {from_code.name}, но по приказу это не приём: {name}")
         elif from_code is not from_name:
-            contradictions.append(f"{code} → {from_code.name}, а по приказу {from_name.name}: {name}")
+            report.contradictions.append(
+                f"{code} → {from_code.name}, а по приказу {from_name.name}: {name}"
+            )
         else:
-            agreed[from_code.name] += 1
+            report.agreed[from_code.name] += 1
 
+    return report
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--pdf",
+        type=Path,
+        default=None,
+        help="перечитать приказ из PDF вместо resources/nomenclature-804n.csv",
+    )
+    parser.add_argument("--show", type=int, default=8, help="сколько примеров печатать")
+    args = parser.parse_args(argv)
+    source = args.pdf or CSV_PATH
+    if not source.exists():
+        parser.error(f"файл не найден: {source}")
+
+    entries = _entries(args.pdf) if args.pdf else entries_from_csv()
+    if len(entries) < 500:
+        print(f"извлечено всего {len(entries)} записей — источник прочитан не полностью", file=sys.stderr)
+        return 2
+
+    r = compare(entries)
+
+    print(f"источник: {source}")
     print(f"записей раздела B: {len(entries)}")
-    print(f"вердикт по разделу кода (п. 5.1 приказа): {sum(by_section.values())} {dict(sorted(by_section.items()))}")
-    print(f"эвристика окончания совпала с наименованием: {sum(agreed.values())} {dict(agreed)}")
-    print(f"не покрыто таблицей (разбирается по наименованию): {len(uncovered)}")
-    for line in uncovered[: args.show]:
+    print(f"вердикт по разделу кода (п. 5.1 приказа): {sum(r.by_section.values())} {dict(sorted(r.by_section.items()))}")
+    print(f"эвристика окончания совпала с наименованием: {sum(r.agreed.values())} {dict(r.agreed)}")
+    print(f"не покрыто таблицей (разбирается по наименованию): {len(r.uncovered)}")
+    for line in r.uncovered[: args.show]:
         print(f"    {line[:110]}")
-    if len(uncovered) > args.show:
-        print(f"    … ещё {len(uncovered) - args.show}")
+    if len(r.uncovered) > args.show:
+        print(f"    … ещё {len(r.uncovered) - args.show}")
 
-    print(f"остановлено списками исключений (иначе наименование соврало бы): {len(barred)}")
-    for line in barred[: args.show]:
+    print(f"остановлено списками исключений (иначе наименование соврало бы): {len(r.barred)}")
+    for line in r.barred[: args.show]:
         print(f"    {line[:110]}")
-    if len(barred) > args.show:
-        print(f"    … ещё {len(barred) - args.show}")
+    if len(r.barred) > args.show:
+        print(f"    … ещё {len(r.barred) - args.show}")
 
-    for label, items in (("ПРОТИВОРЕЧИЕ", contradictions), ("ЛИШНЕЕ", extra)):
+    for label, items in (("ПРОТИВОРЕЧИЕ", r.contradictions), ("ЛИШНЕЕ", r.extra)):
         for line in items:
             print(f"{label}: {line[:130]}", file=sys.stderr)
 
-    failed = len(contradictions) + len(extra)
+    failed = len(r.contradictions) + len(r.extra)
     # Ноль здесь значит «эвристика окончания не разошлась с наименованиями на
     # текущей редакции 804н», а не «правило верное»: приказ окончания не
     # расшифровывает, см. комментарий к _CODE_RULES.

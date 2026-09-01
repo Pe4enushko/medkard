@@ -219,7 +219,8 @@ _B04_NOT_A_PAIR: dict[str, str] = {
 # * то же у B04: .001 диспансерный приём, .002 профилактический, но у части
 #   специальностей на этих окончаниях стоят школы для пациентов.
 #
-# Сверка таблицы с приказом: scripts/checks/check-nmu-classifier.py <804н.pdf>.
+# Сверка с приказом: scripts/checks/check-nmu-classifier.py, тот же прогон
+# в tests/test_nmu_classifier_vs_804n.py по resources/nomenclature-804n.csv.
 _CODE_RULES: tuple[_CodeRule, ...] = (
     # Первыми — коды, у которых врёт наименование: ниже стоят ряды, отдающие
     # разбор наименования, и они бы перехватили эти коды.
@@ -345,6 +346,10 @@ class FormalValidator:
         ):
             result.add(VisitType.PROPHYLACTIC_TUBERCULIN)
 
+        # услуги, не давшие вида приёма: пишутся в лог, когда карта уходит в
+        # OTHER. Без них по логу не понять ни почему, ни сколько таких карт.
+        undecided: list[str] = []
+
         services: list = visit.get("Услуги") or []
         if not services:
             logger.warning("[formal] visit has empty or missing Услуги — defaulting to OTHER")
@@ -356,6 +361,7 @@ class FormalValidator:
                 continue
 
             svc_type: VisitType | None = None
+            svc_codes: list[str] = []
             # Хотя бы один код услуги попал в списки исключений: наименование
             # у таких услуг содержит «первичный»/«профилактическое», но приёмом
             # они не являются. Флаг копится отдельно от вердикта — определённый
@@ -370,6 +376,7 @@ class FormalValidator:
                     if not m:
                         continue
                     code = m.group(0).upper().replace("В", "B").replace("А", "A")
+                    svc_codes.append(code)
                     code_type = classify_code(code)
                     if code_type is VisitType.LAB_RESEARCH_INTERVENTION:
                         # Исследование или вмешательство перекрывает остальные
@@ -393,9 +400,22 @@ class FormalValidator:
 
             if svc_type is not None:
                 result.add(svc_type)
+            else:
+                undecided.append(
+                    "%s / %s"
+                    % (
+                        ",".join(dict.fromkeys(svc_codes)) or "без кода",
+                        (svc.get("Наименование") or "без наименования")[:80],
+                    )
+                )
 
         if not result:
-            logger.warning("[formal] could not determine visit type — defaulting to OTHER")
+            logger.warning(
+                "[formal] could not determine visit type — defaulting to OTHER; "
+                "услуги без вердикта (%d): %s",
+                len(undecided),
+                "; ".join(undecided),
+            )
             result.add(VisitType.OTHER)
 
         return result

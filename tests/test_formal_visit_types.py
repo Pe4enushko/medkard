@@ -378,3 +378,26 @@ async def test_psychological_counselling_is_neither_visit_nor_research():
     assert v.classify_code("B03.070.001") is v.NO_GUESS
     assert v.classify_code("B03.070.002") is v.NO_GUESS
     assert v.classify_code("B03.070.003") is VisitType.LAB_RESEARCH_INTERVENTION
+
+
+async def test_other_names_the_services_it_could_not_classify(caplog):
+    """OTHER должен говорить, на чём именно споткнулся.
+
+    Без этого по логу не понять ни причину, ни сколько карт туда падает, —
+    а решать, какие правила давать типу OTHER, можно только посмотрев на них.
+    """
+    import logging
+
+    v = FormalValidator()
+    with caplog.at_level(logging.WARNING):
+        got = await v.get_visit_types(
+            _visit(services=[
+                {"Код": "B05.023.002.001", "Наименование": "Услуги по медицинской реабилитации"},
+                {"Артикул": "X-1", "Наименование": "Забор материала"},
+            ])
+        )
+    assert got == {VisitType.OTHER}
+    text = caplog.text
+    assert "B05.023.002.001" in text
+    assert "Забор материала" in text
+    assert "без кода" in text
