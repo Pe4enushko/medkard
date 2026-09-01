@@ -115,13 +115,48 @@ _VISIT_TYPE_RULE_KEY: dict[VisitType, str] = {
     VisitType.OTHER:                     "other",
 }
 
+class _NoGuess(Enum):
+    """Вердикт таблицы «не гадать»."""
+
+    TOKEN = auto()
+
+
+NO_GUESS = _NoGuess.TOKEN
+"""Код опознан таблицей, и она запрещает разбор наименования.
+
+Три разных исхода, которые раньше сводились к двум:
+
+* вид визита — таблица знает ответ;
+* ``None`` — таблица кода не знает, пусть решает наименование;
+* ``NO_GUESS`` — таблица знает код и знает, что наименованию верить нельзя.
+
+Третьего не было, и B04.070.002 «Индивидуальное краткое профилактическое
+консультирование» становилось профилактическим осмотром: на него садились
+четыре правила 404н про объём ПМО.
+"""
+
+
+# Коды, где «первичное», «повторное», «профилактическое» в наименовании
+# относятся к самой услуге, а не к виду приёма. Список получен прогоном
+# разбора наименования по всей номенклатуре 804н (scripts/checks/
+# check-nmu-classifier.py): во всех прочих строках наименование не врёт,
+# поэтому глушить его целиком по специальности нельзя — у B01.056.002,
+# B01.070.002/003/006/007/009 и у диспансерных приёмов B04 оно единственный
+# верный источник.
+_NAME_DESCRIBES_SERVICE: dict[str, str] = {
+    "B04.070": "профилактическое консультирование (индивидуальное краткое и "
+               "углублённое, групповое) и школы для пациентов: «первичное» и "
+               "«повторное» сказано про консультирование, приёмом оно не является",
+}
+
+
 class _CodeRule(NamedTuple):
-    """Совпадение по частям кода номенклатуры; None — «любое значение»."""
+    """Совпадение по частям кода номенклатуры; None в begin/middle/end — «любое значение»."""
 
     begin: str | None      # начало кода: раздел и подраздел, «A», «B01», «B04»
     middle: str | None     # середина: специальность врача
     end: str | None        # конец: вид приёма внутри специальности
-    visit_type: VisitType | None   # None — вердикта нет, решает наименование
+    visit_type: VisitType | _NoGuess | None   # None — решает наименование; NO_GUESS — и оно врёт
 
 
 # Специальности (середина кода), у которых окончания .001/.002 — не пара
@@ -170,6 +205,9 @@ _B04_NOT_A_PAIR: dict[str, str] = {
 #
 # Сверка таблицы с приказом: scripts/checks/check-nmu-classifier.py <804н.pdf>.
 _CODE_RULES: tuple[_CodeRule, ...] = (
+    # Первыми — коды, у которых врёт наименование: ниже стоят ряды, отдающие
+    # разбор наименования, и они бы перехватили эти коды.
+    *(_CodeRule(prefix, None, None, NO_GUESS) for prefix in _NAME_DESCRIBES_SERVICE),
     # Лабораторные, инструментальные исследования и вмешательства. Их тысячи,
     # конкретную услугу правила отбирают через applies_to.service_code_prefixes.
     _CodeRule("A", None, None, VisitType.LAB_RESEARCH_INTERVENTION),
@@ -186,8 +224,13 @@ _CODE_RULES: tuple[_CodeRule, ...] = (
 )
 
 
-def classify_code(code: str) -> VisitType | None:
-    """Тип визита по коду номенклатуры, или None если код о типе ничего не говорит."""
+def classify_code(code: str) -> VisitType | _NoGuess | None:
+    """Тип визита по коду номенклатуры.
+
+    ``None`` — таблица кода не знает, решать по наименованию.
+    ``NO_GUESS`` — таблица код знает и вердикта не выносит; наименованию здесь
+    верить нельзя, см. ``_NAME_DESCRIBES_SERVICE``.
+    """
     parts = code.split(".")
     middle = parts[1] if len(parts) > 1 else ""
     end = parts[2] if len(parts) > 2 else ""
@@ -199,6 +242,27 @@ def classify_code(code: str) -> VisitType | None:
         if rule.end is not None and rule.end != end:
             continue
         return rule.visit_type
+    return None
+
+
+def classify_name(name: str) -> VisitType | None:
+    """Тип визита по наименованию услуги, или None если оно молчит.
+
+    Запасной разбор: применяется к услугам, о которых таблица кодов ничего не
+    сказала. Проверять его надо на всей номенклатуре 804н, а не на примерах —
+    ошибки здесь выглядят правдоподобно (scripts/checks/check-nmu-classifier.py).
+    """
+    name = name.lower()
+    if "повторн" in name:
+        return VisitType.REPEAT
+    if "первичн" in name:
+        return VisitType.PRIMARY
+    if "диспансерн" in name:
+        # «Диспансерный приём», но не «диспансеризация»: у неё
+        # другая основа (диспансериз-), и она как раз ПМО по 404н.
+        return VisitType.DISPENSARY
+    if "профилактическ" in name:
+        return VisitType.PROPHYLACTIC
     return None
 
 
@@ -229,10 +293,12 @@ class FormalValidator:
         2. Per-service NMU code scan:
            - matched by ``_CODE_RULES`` (begin / middle / end of the code)
              → its visit type; ``A*`` wins over the rest of the service
-           - anything the table leaves undecided → no verdict, step 3 decides
+           - matched by ``_NAME_DESCRIBES_SERVICE`` → ``NO_GUESS``: the service
+             is barred from step 3, its name describes the service itself
+           - a code the table does not know → no verdict, step 3 decides
         3. Keyword fallback on ``Наименование`` — for every service the codes
-           left undecided, not only for services without a code at all:
-           повторн / первичн / диспансерн / профилактическ
+           left undecided and did not bar, not only for services without a code
+           at all: повторн / первичн / диспансерн / профилактическ
         4. A service neither step decided contributes nothing; OTHER is the
            answer only when no service contributed anything at all.
         """
@@ -258,6 +324,11 @@ class FormalValidator:
                 continue
 
             svc_type: VisitType | None = None
+            # Хотя бы один код услуги попал в списки исключений: наименование
+            # у таких услуг содержит «первичный»/«профилактическое», но приёмом
+            # они не являются. Флаг копится отдельно от вердикта — определённый
+            # вердикт другого кода той же строки он не должен перебивать.
+            name_guess_forbidden = False
 
             for raw in svc.values():
                 if not raw:
@@ -273,28 +344,20 @@ class FormalValidator:
                         # услуги этой строки.
                         svc_type = code_type
                         break
-                    if svc_type is None and code_type is not None:
+                    if code_type is NO_GUESS:
+                        name_guess_forbidden = True
+                    elif svc_type is None and code_type is not None:
                         svc_type = code_type
                 else:
                     continue
                 break  # inner for-raw broke via A-code, propagate
 
-            if svc_type is None:
+            if svc_type is None and not name_guess_forbidden:
                 # ── keyword fallback for this service ─────────────────────────
                 # Достижим и тогда, когда код у услуги есть, но словарь 804н его
                 # не знает: раньше такой код молча становился OTHER и глушил
                 # разбор наименования.
-                name: str = (svc.get("Наименование") or "").lower()
-                if "повторн" in name:
-                    svc_type = VisitType.REPEAT
-                elif "первичн" in name:
-                    svc_type = VisitType.PRIMARY
-                elif "диспансерн" in name:
-                    # «Диспансерный приём», но не «диспансеризация»: у неё
-                    # другая основа (диспансериз-), и она как раз ПМО по 404н.
-                    svc_type = VisitType.DISPENSARY
-                elif "профилактическ" in name:
-                    svc_type = VisitType.PROPHYLACTIC
+                svc_type = classify_name(svc.get("Наименование") or "")
 
             if svc_type is not None:
                 result.add(svc_type)

@@ -218,8 +218,8 @@ def test_code_table_never_yields_a_type_no_rule_uses():
 
     used = {t for rule in v._RULES for t in rule["applies_to"]["visit_types"]} - {"all"}
     for rule in v._CODE_RULES:
-        if rule.visit_type is None:
-            continue
+        if not isinstance(rule.visit_type, v.VisitType):
+            continue  # NO_GUESS — вердикта нет
         assert v._VISIT_TYPE_RULE_KEY[rule.visit_type] in used, rule
 
 
@@ -257,3 +257,71 @@ async def test_dispensary_name_does_not_catch_дispanserizatsiya():
         _visit(services=[{"Наименование": "Профилактический осмотр в рамках диспансеризации"}])
     )
     assert got == {VisitType.PROPHYLACTIC}
+
+
+async def test_prophylactic_counselling_is_not_a_prophylactic_examination():
+    """B04.070.* — консультирование, а не профилактический осмотр по 404н.
+
+    Наименование «Индивидуальное краткое профилактическое консультирование»
+    содержит «профилактическ», и разбор наименования делал из него
+    профилактический осмотр: на карту садились четыре правила 404н про объём
+    ПМО, которых консультирование не обязано выполнять.
+    """
+    v = FormalValidator()
+    got = await v.get_visit_types(
+        _visit(services=[{
+            "Код": "B04.070.002",
+            "Наименование": "Индивидуальное краткое профилактическое консультирование "
+                            "по коррекции факторов риска развития неинфекционных заболеваний",
+        }])
+    )
+    assert got == {VisitType.OTHER}
+
+
+async def test_counselling_marked_primary_is_not_a_primary_visit():
+    """У B04.070.003/004 «первичное»/«повторное» сказано про консультирование."""
+    v = FormalValidator()
+    got = await v.get_visit_types(
+        _visit(services=[{
+            "Код": "B04.070.003",
+            "Наименование": "Индивидуальное углубленное профилактическое консультирование "
+                            "по коррекции факторов риска развития неинфекционных заболеваний первичное",
+        }])
+    )
+    assert VisitType.PRIMARY not in got
+    assert VisitType.PROPHYLACTIC not in got
+
+
+async def test_barred_code_does_not_mute_a_decided_code_of_the_same_service():
+    """Запрет глушит только разбор наименования, не вердикт соседнего кода.
+
+    В одной строке услуги приходят и Артикул клиники, и Код, и КодЕГИСЗ:
+    запрет по одному из них не должен отменять определённый вид приёма,
+    вынесенный по другому.
+    """
+    v = FormalValidator()
+    got = await v.get_visit_types(
+        _visit(services=[{
+            "Код": "B04.070.002",
+            "КодЕГИСЗ": "B01.047.001",
+            "Наименование": "Профилактическое консультирование",
+        }])
+    )
+    assert got == {VisitType.PRIMARY}
+
+
+async def test_name_still_decides_where_the_table_only_forbids_the_ending_rule():
+    """Списки _NOT_A_PAIR запрещают правило окончания, но не наименование.
+
+    У B01.070.006 окончание .006 ничего не значит, а наименование —
+    единственный верный источник; сверено прогоном по всей номенклатуре 804н.
+    """
+    v = FormalValidator()
+    got = await v.get_visit_types(
+        _visit(services=[{
+            "Код": "B01.070.006",
+            "Наименование": "Прием (осмотр, консультация) врача по паллиативной "
+                            "медицинской помощи первичный",
+        }])
+    )
+    assert got == {VisitType.PRIMARY}

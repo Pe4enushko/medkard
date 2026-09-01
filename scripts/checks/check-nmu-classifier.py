@@ -34,7 +34,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from audit.formal_structure.validator import VisitType, classify_code  # noqa: E402
+from audit.formal_structure.validator import (  # noqa: E402
+    NO_GUESS,
+    VisitType,
+    classify_code,
+    classify_name,
+)
 
 # В PDF часть кодов набрана кириллической «В» — нормализуем обе раскладки.
 _CODE_RE = re.compile(r"[BВ]0[1-5]\.\d{3}\.\d{3}")
@@ -95,11 +100,19 @@ def main(argv: list[str]) -> int:
     contradictions: list[str] = []
     extra: list[str] = []
     uncovered: list[str] = []
+    barred: list[str] = []
     agreed = Counter()
 
     for code, name in entries:
         from_code = classify_code(code)
         from_name = _by_name(name)
+        if from_code is NO_GUESS:
+            # Ради этих строк _NAME_DESCRIBES_SERVICE и заведён: разбор
+            # наименования выносит вердикт, а услуга приёмом не является.
+            loose = classify_name(name)
+            if loose is not None:
+                barred.append(f"{code} → наименование дало бы {loose.name}: {name}")
+            continue
         if from_code is None and from_name is None:
             continue
         if from_code is None:
@@ -118,6 +131,12 @@ def main(argv: list[str]) -> int:
         print(f"    {line[:110]}")
     if len(uncovered) > args.show:
         print(f"    … ещё {len(uncovered) - args.show}")
+
+    print(f"остановлено списками исключений (иначе наименование соврало бы): {len(barred)}")
+    for line in barred[: args.show]:
+        print(f"    {line[:110]}")
+    if len(barred) > args.show:
+        print(f"    … ещё {len(barred) - args.show}")
 
     for label, items in (("ПРОТИВОРЕЧИЕ", contradictions), ("ЛИШНЕЕ", extra)):
         for line in items:
