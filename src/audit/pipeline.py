@@ -25,6 +25,7 @@ from functools import wraps
 from typing import Any
 
 from audit.diagnosis.clinic_recs import _is_age_eligible, _patient_age
+from audit.deterministic import DeterministicValidator
 from audit.diagnosis.validator import DiagnosisValidator
 from audit.filters import CardFilter
 from audit.formal_structure.validator import FormalValidator
@@ -92,6 +93,10 @@ def _traced_card_audit(method):
             return result
 
     return wrapper
+
+
+# Правила читаются один раз: файл не меняется в проде, а визитов в пачке тысячи.
+_DETERMINISTIC = DeterministicValidator()
 
 
 class AuditPipeline:
@@ -278,6 +283,23 @@ class AuditPipeline:
                 traceback=traceback.format_exc(),
             )
             raise
+        # Детерминистичные правила: то же представление находки, без обращения
+        # к модели, поэтому идут в тот же результат и отдельного места в отчёте
+        # не занимают.
+        trace_emit("checker.started", checker="deterministic")
+        try:
+            deterministic_raw = await _DETERMINISTIC.validate(visit)
+        except Exception as exc:
+            trace_emit(
+                "checker.failed",
+                checker="deterministic",
+                exception=exc,
+                traceback=traceback.format_exc(),
+            )
+            raise
+        trace_emit("checker.completed", checker="deterministic", output=deterministic_raw)
+        formal_raw = formal_raw + deterministic_raw
+
         formal_result = FormalStructureResult(
             findings=[
                 FormalFinding(
