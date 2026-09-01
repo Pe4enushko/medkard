@@ -325,3 +325,56 @@ async def test_name_still_decides_where_the_table_only_forbids_the_ending_rule()
         }])
     )
     assert got == {VisitType.PRIMARY}
+
+
+async def test_diagnostic_complex_is_not_a_primary_visit():
+    """B03 — «сложные диагностические услуги» (п. 5.1 приказа), а не приём.
+
+    B03.005.003 «Исследование сосудисто-тромбоцитарного первичного гемостаза»
+    разбор наименования делал первичным приёмом: раздела B03 в таблице не было
+    вовсе, и код проваливался в наименование.
+    """
+    got = await FormalValidator().get_visit_types(
+        _visit(services=[{
+            "Код": "B03.005.003",
+            "Наименование": "Исследование сосудисто-тромбоцитарного первичного гемостаза",
+        }])
+    )
+    assert got == {VisitType.LAB_RESEARCH_INTERVENTION}
+
+
+async def test_nursing_care_and_rehabilitation_are_no_visit_type():
+    """B02 сестринский уход и B05 реабилитация — не приём ни одного нашего типа."""
+    v = FormalValidator()
+    for code in ("B02.003.003", "B05.023.002.001"):
+        got = await v.get_visit_types(
+            _visit(services=[{"Код": code, "Наименование": "услуга"}])
+        )
+        assert got == {VisitType.OTHER}, code
+
+
+async def test_four_group_code_never_reads_the_third_group_as_the_ending():
+    """B01.003.004.001 — «Местная анестезия», а не первичный приём.
+
+    Окончание читается только у кода из трёх групп. Брать последнюю группу
+    тоже нельзя: тогда .001 и .002 анестезии станут первичным и повторным
+    приёмом.
+    """
+    import audit.formal_structure.validator as v
+
+    assert v.classify_code("B01.003.004.001") is None
+    assert v.classify_code("B01.003.004.002") is None
+    # три группы — правило работает как прежде
+    assert v.classify_code("B01.003.001") is VisitType.PRIMARY
+
+
+async def test_psychological_counselling_is_neither_visit_nor_research():
+    """B03.070.001/002 — консультирование, но не диагностический комплекс.
+
+    Именно два кода, а не весь B03.070: с .003 там идут настоящие комплексы.
+    """
+    import audit.formal_structure.validator as v
+
+    assert v.classify_code("B03.070.001") is v.NO_GUESS
+    assert v.classify_code("B03.070.002") is v.NO_GUESS
+    assert v.classify_code("B03.070.003") is VisitType.LAB_RESEARCH_INTERVENTION

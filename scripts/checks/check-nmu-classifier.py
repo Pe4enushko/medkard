@@ -101,11 +101,20 @@ def main(argv: list[str]) -> int:
     extra: list[str] = []
     uncovered: list[str] = []
     barred: list[str] = []
+    by_section = Counter()
     agreed = Counter()
 
     for code, name in entries:
         from_code = classify_code(code)
         from_name = _by_name(name)
+        if code[:3] in ("B02", "B03", "B05"):
+            # Вердикт вынесен разделом кода — это цитата из п. 5.1 приказа.
+            # Сверять его с наименованием не с чем: _by_name знает только
+            # шаблоны приёмов, а тут уход, диагностические комплексы и
+            # реабилитация. Исключения из раздела проверяются ниже.
+            if from_code is not NO_GUESS:
+                by_section[code[:3]] += 1
+                continue
         if from_code is NO_GUESS:
             # Ради этих строк _NAME_DESCRIBES_SERVICE и заведён: разбор
             # наименования выносит вердикт, а услуга приёмом не является.
@@ -125,7 +134,8 @@ def main(argv: list[str]) -> int:
             agreed[from_code.name] += 1
 
     print(f"записей раздела B: {len(entries)}")
-    print(f"совпало: {sum(agreed.values())} {dict(agreed)}")
+    print(f"вердикт по разделу кода (п. 5.1 приказа): {sum(by_section.values())} {dict(sorted(by_section.items()))}")
+    print(f"эвристика окончания совпала с наименованием: {sum(agreed.values())} {dict(agreed)}")
     print(f"не покрыто таблицей (разбирается по наименованию): {len(uncovered)}")
     for line in uncovered[: args.show]:
         print(f"    {line[:110]}")
@@ -143,7 +153,10 @@ def main(argv: list[str]) -> int:
             print(f"{label}: {line[:130]}", file=sys.stderr)
 
     failed = len(contradictions) + len(extra)
-    print(f"\nошибок таблицы: {failed}")
+    # Ноль здесь значит «эвристика окончания не разошлась с наименованиями на
+    # текущей редакции 804н», а не «правило верное»: приказ окончания не
+    # расшифровывает, см. комментарий к _CODE_RULES.
+    print(f"\nрасхождений эвристики окончания с наименованиями 804н: {failed}")
     return 1 if failed else 0
 
 
