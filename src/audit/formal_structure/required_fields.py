@@ -23,6 +23,19 @@ _PARAM_KEY = "Параметр"
 _VALUE_KEY = "Значение"
 _ALL_KEY = "all"
 
+# Типы визита, которые ничего не утверждают о записи приёма. Они появляются
+# от отдельной строки услуг или от кода МКБ и не отменяют требований к самой
+# записи: взятие крови не освобождает первичный приём от анамнеза.
+#
+# В пересечении наборов такой тип обнулял всё — своего набора у него нет,
+# а пересечение с пустым множеством пусто. На карте «педиатр B01.031.001,
+# диагнозы J06.9 + Z11.1» проверялось 6 полей вместо 12: пропадали оба
+# анамнеза, прививочный анамнез, жалобы, рекомендации и анамнез заболевания.
+_NOT_ABOUT_THE_RECORD: frozenset[str] = frozenset({
+    "lab_research_intervention",
+    "prophylactic_tuberculin",
+})
+
 _DEFAULT_PATH = Path(__file__).resolve().parents[3] / "resources" / "required_fields.json"
 
 _templates: list[dict[str, Any]] | None = None
@@ -84,6 +97,10 @@ def missing_required_fields(
     требуется только то, что требует каждый из них: набор одного типа не
     должен становиться замечанием из-за того, что услуга попала во второй.
 
+    В пересечении участвуют только типы, которые что-то утверждают о записи
+    приёма: ``_NOT_ABOUT_THE_RECORD`` из него исключены, иначе одна строка
+    услуг или один код МКБ обнуляли бы все требования по типу.
+
     Пустой список — и когда всё на месте, и когда шаблон записи неизвестен.
     """
     labels = _filled_labels(inspection_data)
@@ -96,16 +113,17 @@ def missing_required_fields(
 
     required: dict[str, list[Any]] = template.get("required") or {}
     common = [_slot(entry) for entry in (required.get(_ALL_KEY) or [])]
+    keys = sorted(visit_type_keys - _NOT_ABOUT_THE_RECORD)
     per_type = [
         {_slot(entry) for entry in (required.get(key) or [])}
-        for key in sorted(visit_type_keys)
+        for key in keys
     ]
     shared = set.intersection(*per_type) if per_type else set()
 
     expected = common + [
         slot for slot in dict.fromkeys(
             _slot(entry)
-            for key in sorted(visit_type_keys)
+            for key in keys
             for entry in (required.get(key) or [])
         )
         if slot in shared

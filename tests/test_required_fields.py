@@ -98,3 +98,50 @@ def test_one_slot_may_arrive_under_either_name():
     labels = _CORE + _ANAMNESIS + ["Жалобы на момент осмотра", "Анамнез заболевания", "Рекомендации"]
 
     assert missing_required_fields(_inspection(labels), {"primary"}) == []
+
+
+def test_lab_service_does_not_switch_off_primary_visit_requirements():
+    """Взятие крови не освобождает первичный приём от анамнеза.
+
+    Наборы полей по типам берутся пересечением, а своего набора у
+    лабораторного типа нет. Пока он в пересечении участвовал, одна строка
+    услуг обнуляла все требования первичного приёма — оставались только
+    общие поля.
+    """
+    labels = _CORE + ["Жалобы на момент осмотра", "Рекомендации и назначения"]
+    only_primary = missing_required_fields(_inspection(labels), {"primary"})
+    with_lab = missing_required_fields(
+        _inspection(labels), {"primary", "lab_research_intervention"}
+    )
+    assert with_lab == only_primary
+    assert "Анамнез заболевания" in with_lab
+
+
+def test_tuberculin_diagnosis_does_not_switch_off_primary_requirements():
+    """Тот же механизм срабатывал от кода МКБ, без всякой лаборатории.
+
+    Z11.1 в диагнозах добавляет PROPHYLACTIC_TUBERCULIN к обычному приёму,
+    и до этой правки на карте «педиатр + J06.9 + Z11.1» проверялось шесть
+    полей вместо двенадцати. У Алёнки IcdFilter пропускает в аудит только
+    карты, где Z11.1 стоит рядом с другим диагнозом, — то есть ровно эти.
+    """
+    labels = _CORE + _ANAMNESIS
+    only_primary = missing_required_fields(_inspection(labels), {"primary"})
+    with_tuberculin = missing_required_fields(
+        _inspection(labels), {"primary", "prophylactic_tuberculin"}
+    )
+    assert with_tuberculin == only_primary
+    assert "Жалобы на момент осмотра" in with_tuberculin
+
+
+def test_two_appointment_types_still_intersect():
+    """Исключение узкое: типы, которые о записи что-то утверждают, как прежде.
+
+    Карта, попавшая и в первичный, и в повторный приём, не обязана
+    удовлетворять требованиям обоих — иначе набор одного становится
+    замечанием из-за второго.
+    """
+    labels = _CORE
+    both = missing_required_fields(_inspection(labels), {"primary", "repeat"})
+    assert "Анамнез заболевания" not in both
+    assert "Рекомендации и назначения" in both
