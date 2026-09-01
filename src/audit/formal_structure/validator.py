@@ -186,7 +186,8 @@ _B04_NOT_A_PAIR: dict[str, str] = {
     "025": "школа для пациентов на хроническом гемодиализе",
     "040": "школа для больных с заболеваниями суставов и позвоночника",
     "058": "школа для эндокринологических пациентов с нарушениями роста",
-    "070": "школы профилактики и профилактическое консультирование",
+    # 070 здесь не нужен: весь B04.070 перехватывает _NAME_DESCRIBES_SERVICE,
+    # ряд с этой серединой был бы недостижим.
 }
 
 # Классификатор кода услуги. Проверяется сверху вниз, побеждает первое
@@ -278,6 +279,46 @@ def classify_code(code: str) -> VisitType | _NoGuess | None:
     return None
 
 
+# Коды МКБ, по которым вид приёма читается из самого диагноза.
+#
+# Опора — 274н прил. 4 п. 9.13: посещения делятся на «по заболеванию (коды
+# A00 - T98)» и «с профилактическими и иными целями (коды Z00 - Z99)». Класс Z
+# описывает не болезнь, а повод обращения, и для части кодов повод назван
+# однозначно.
+#
+# Отрицательных признаков здесь нет намеренно. Z02 (административные цели),
+# Z08/Z09 («последующее обследование»), Z37/Z38 (родовспоможение) означали бы
+# «этот приём НЕ такой-то», а отменять чужой вердикт тут нечем: шаг умеет
+# только добавлять тип. Требований к полям под них в нормативке тоже не нашлось
+# (по Z02 — приказ 29н, но его состав Заключения вне нашего контура данных,
+# см. пункт 9 в docs/…/2026-08-31-field-requirements-backlog.md).
+_ICD_EXACT: dict[str, VisitType] = {
+    # Скрининг на туберкулёз: свой порядок 190н, и 211н п. 3 прямо выводит его
+    # из детских профосмотров — поэтому отдельный тип, а не PROPHYLACTIC.
+    "Z11.1": VisitType.PROPHYLACTIC_TUBERCULIN,
+}
+_ICD_PREFIXES: tuple[tuple[str, VisitType], ...] = (
+    ("Z00", VisitType.PROPHYLACTIC),   # осмотр лиц без жалоб и установленного диагноза
+    ("Z10", VisitType.PROPHYLACTIC),   # рутинная проверка здоровья групп населения
+    ("Z11", VisitType.PROPHYLACTIC),   # скрининг на инфекции; Z11.1 перехвачен выше
+    ("Z12", VisitType.PROPHYLACTIC),   # скрининг на злокачественные новообразования
+    ("Z13", VisitType.PROPHYLACTIC),   # скрининг на прочие болезни
+    ("Z34", VisitType.DISPENSARY),     # наблюдение нормальной беременности
+    ("Z35", VisitType.DISPENSARY),     # наблюдение беременности высокого риска
+)
+
+
+def classify_icd(code: str) -> VisitType | None:
+    """Вид приёма по коду МКБ, или None если код о нём ничего не говорит."""
+    code = code.strip().upper()
+    if code in _ICD_EXACT:
+        return _ICD_EXACT[code]
+    for prefix, visit_type in _ICD_PREFIXES:
+        if code.startswith(prefix):
+            return visit_type
+    return None
+
+
 def classify_name(name: str) -> VisitType | None:
     """Тип визита по наименованию услуги, или None если оно молчит.
 
@@ -322,7 +363,8 @@ class FormalValidator:
         """Determine all visit types present in a visit by checking each service.
 
         Each service entry is classified independently:
-        1. Z11.1 among visit["Диагнозы"][].КодМКБ → always adds PROPHYLACTIC_TUBERCULIN.
+        1. ``visit["Диагнозы"][].КодМКБ`` through ``classify_icd`` — Z-codes name
+           the reason for the visit, so they add a type regardless of services.
         2. Per-service NMU code scan:
            - matched by ``_CODE_RULES`` (begin / middle / end of the code)
              → its visit type; ``A*`` wins over the rest of the service
@@ -337,14 +379,14 @@ class FormalValidator:
         """
         result: set[VisitType] = set()
 
-        # ── Z11.1 always adds PROPHYLACTIC_TUBERCULIN ─────────────────────────
+        # ── Z-коды диагнозов добавляют тип независимо от услуг ────────────────
         diagnoses: list = visit.get("Диагнозы") or []
-        if any(
-            str(d.get("КодМКБ") or "").strip().upper() == "Z11.1"
-            for d in diagnoses
-            if isinstance(d, dict)
-        ):
-            result.add(VisitType.PROPHYLACTIC_TUBERCULIN)
+        for d in diagnoses:
+            if not isinstance(d, dict):
+                continue
+            icd_type = classify_icd(str(d.get("КодМКБ") or ""))
+            if icd_type is not None:
+                result.add(icd_type)
 
         # услуги, не давшие вида приёма: пишутся в лог, когда карта уходит в
         # OTHER. Без них по логу не понять ни почему, ни сколько таких карт.

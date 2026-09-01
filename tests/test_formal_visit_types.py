@@ -401,3 +401,63 @@ async def test_other_names_the_services_it_could_not_classify(caplog):
     assert "B05.023.002.001" in text
     assert "Забор материала" in text
     assert "без кода" in text
+
+
+async def test_z_codes_name_the_reason_for_the_visit():
+    """274н прил. 4 п. 9.13 делит посещения на «по заболеванию» и «Z00-Z99».
+
+    До этого из всего класса Z читался один Z11.1.
+    """
+    v = FormalValidator()
+    cases = {
+        "Z00.1": VisitType.PROPHYLACTIC,
+        "Z12.4": VisitType.PROPHYLACTIC,
+        "Z13.9": VisitType.PROPHYLACTIC,
+        "Z10.0": VisitType.PROPHYLACTIC,
+        "Z34.0": VisitType.DISPENSARY,
+        "Z35.5": VisitType.DISPENSARY,
+    }
+    for code, expected in cases.items():
+        got = await v.get_visit_types(_visit(diagnoses=[{"КодМКБ": code}]))
+        assert expected in got, (code, got)
+
+
+async def test_tuberculin_screening_is_not_a_general_prophylactic_examination():
+    """Z11.1 — свой порядок 190н; 211н п. 3 выводит его из детских профосмотров.
+
+    Иначе на туберкулинодиагностику сели бы правила 404н про объём ПМО.
+    """
+    got = await FormalValidator().get_visit_types(_visit(diagnoses=[{"КодМКБ": "Z11.1"}]))
+    assert VisitType.PROPHYLACTIC_TUBERCULIN in got
+    assert VisitType.PROPHYLACTIC not in got
+    # соседи по рубрике — обычный скрининг
+    got = await FormalValidator().get_visit_types(_visit(diagnoses=[{"КодМКБ": "Z11.8"}]))
+    assert VisitType.PROPHYLACTIC in got
+    assert VisitType.PROPHYLACTIC_TUBERCULIN not in got
+
+
+async def test_negative_z_codes_add_nothing():
+    """Z02, Z08/Z09, Z37/Z38 означали бы «приём НЕ такой-то» — отменять нечем.
+
+    Шаг по диагнозам умеет только добавлять тип. Требований к полям под эти
+    коды в нормативке тоже не нашлось.
+    """
+    v = FormalValidator()
+    for code in ("Z02.0", "Z08.1", "Z09.9", "Z37.0", "Z38.0"):
+        got = await v.get_visit_types(
+            _visit(diagnoses=[{"КодМКБ": code}], services=[{"Наименование": "нечто"}])
+        )
+        assert got == {VisitType.OTHER}, (code, got)
+
+
+async def test_z95_implant_codes_are_not_a_visit_type():
+    """Z95.x — импланты, повод обращения ими не задан.
+
+    В перечнях 168н они есть как диагнозы для наблюдения, но вид приёма
+    определяет не диагноз, а услуга.
+    """
+    got = await FormalValidator().get_visit_types(
+        _visit(diagnoses=[{"КодМКБ": "Z95.1"}],
+               services=[{"Код": "B01.047.002", "Наименование": "Прием терапевта повторный"}])
+    )
+    assert got == {VisitType.REPEAT}
