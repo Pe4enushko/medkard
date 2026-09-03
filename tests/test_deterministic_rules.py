@@ -42,6 +42,19 @@ def test_every_rule_carries_its_source_and_issue():
         assert rule.get("verified_at"), rule["rule_id"]
 
 
+def test_rule_without_a_normative_source_says_so_out_loud():
+    """Пустой source — это заявление «нормативного основания нет».
+
+    Правило внутренней непротиворечивости имеет право существовать, но не имеет
+    права выглядеть нормативным: сослаться на приказ, который такого не требует,
+    хуже, чем не сослаться вовсе.
+    """
+    for rule in _DOC["rules"]:
+        if rule.get("source"):
+            continue
+        assert "НОРМАТИВНОГО ОСНОВАНИЯ НЕТ" in rule["source_ref"], rule["rule_id"]
+
+
 def test_disabled_rule_says_why():
     for rule in _DOC["rules"]:
         if not rule.get("enabled", True):
