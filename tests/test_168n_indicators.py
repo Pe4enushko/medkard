@@ -81,6 +81,13 @@ def test_free_text_of_a_doctor_matches_the_same_groups():
     assert {"weight_bmi", "blood_pressure", "heart_rate"} <= found
 
 
+def test_smoking_is_recognised_however_the_doctor_puts_it():
+    """Приказ пишет «статус курения», врач — «не курит» или «некурящий»."""
+    for text in ("статус курения", "Не курит", "курит 10 лет", "Некурящий",
+                 "отрицает курение", "курильщик со стажем"):
+        assert "smoking" in groups_in_text(text), text
+
+
 # ── коды МКБ ──────────────────────────────────────────────────────────────────
 
 def test_every_row_of_the_appendices_yields_codes():

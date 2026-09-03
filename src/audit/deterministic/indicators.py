@@ -78,7 +78,15 @@ def _codes_of(cell: str) -> list[str]:
     return codes
 
 
-def required_groups(icd_code: str) -> set[str]:
+# Приложение 3 (предопухолевые состояния) из скоупа правил исключено: из его
+# 55 строк 44 не содержат ни одного измеримого показателя — только заключения
+# врача вида «отсутствие данных о ЗНО по результатам биопсии». Проверить их
+# сравнением нельзя, а оставшиеся 11 требуют онкомаркёров и УЗИ, то есть услуг,
+# а не полей осмотра.
+_MEASURABLE_APPENDICES = ("1", "2")
+
+
+def required_groups(icd_code: str, appendices: tuple[str, ...] = _MEASURABLE_APPENDICES) -> set[str]:
     """Ряды показателей, которых 168н требует при этом коде МКБ.
 
     Пункт 9, последний абзац: при нескольких заболеваниях перечень «должен
@@ -90,6 +98,22 @@ def required_groups(icd_code: str) -> set[str]:
         return set()
     required: set[str] = set()
     for row in _rows():
+        if row["приложение"] not in appendices:
+            continue
         if any(code.startswith(c) for c in _codes_of(row["код_мкб"])):
             required |= groups_in_text(row["контролируемые_показатели"])
     return required
+
+
+def missing_indicators(icd_codes: list[str], inspection_text: str) -> list[str]:
+    """Названия показателей, которых 168н требует по диагнозам, а в записи их нет.
+
+    Объединение по всем диагнозам карты — так велит пункт 9 приказа.
+    """
+    required: set[str] = set()
+    for code in icd_codes:
+        required |= required_groups(code)
+    if not required:
+        return []
+    found = groups_in_text(inspection_text)
+    return sorted(group_name(g) for g in required - found)

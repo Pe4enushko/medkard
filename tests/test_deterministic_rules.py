@@ -135,3 +135,111 @@ async def test_disabled_rule_never_fires():
         _visit(services=[{"Код": "A04.10.002", "Наименование": "УЗИ сердца"}])
     )
     assert "ПРОТОКОЛ_БЕЗ_НОМЕРА_МЕДКАРТЫ" not in got
+
+
+# ── контролируемые показатели 168н ────────────────────────────────────────────
+
+import json as _json
+import tempfile
+
+import pytest
+
+
+@pytest.fixture(scope="module")
+def indicators_validator():
+    """Правило заведено выключенным до эвала — включаем копию только для теста."""
+    doc = _json.loads(_RULES_PATH.read_text(encoding="utf-8"))
+    for rule in doc["rules"]:
+        if rule["rule_id"] == "dispensary_controlled_indicators":
+            rule["enabled"] = True
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+        _json.dump(doc, f, ensure_ascii=False)
+        path = f.name
+    return DeterministicValidator(path)
+
+
+_INDICATORS_FLAG = "НЕ_ОТРАЖЕНЫ_КОНТРОЛИРУЕМЫЕ_ПОКАЗАТЕЛИ"
+_DISPENSARY = [{"Код": "B04.047.001", "Наименование": "Диспансерный приём терапевта"}]
+
+
+def _card(age=54, icd="I10", services=None, text="Жалоб нет"):
+    return {
+        "Прием": {"GUID": "g"},
+        "Пациент": {"AGE": age},
+        "Диагнозы": [{"КодМКБ": icd}],
+        "Услуги": services or _DISPENSARY,
+        "ДанныеОсмотра": [{"Параметр": "Осмотр", "Значение": text}],
+    }
+
+
+async def _issue(v, card):
+    for f in await v.validate(card):
+        if f["flag"] == _INDICATORS_FLAG:
+            return f["issue"]
+    return None
+
+
+async def test_missing_indicators_are_listed_in_one_finding(indicators_validator):
+    """Медиана — шесть показателей на строку; шесть отдельных замечаний врач
+    прочитал бы как шесть дефектов."""
+    issue = await _issue(indicators_validator, _card())
+    assert issue is not None
+    assert issue.count(":") == 1
+    assert "Артериальное давление" in issue and "ЧСС" not in issue.split(":")[0]
+
+
+async def test_indicator_written_by_the_doctor_is_counted(indicators_validator):
+    """Приказ пишет «АД, ЧСС», врач — «АД 130/80, пульс 72». Это те же показатели."""
+    issue = await _issue(
+        indicators_validator,
+        _card(text="Вес 82 кг, ИМТ 27,1. АД 130/80, пульс 72. Окружность талии 94 см. Не курит."),
+    )
+    assert issue is not None
+    for named in ("Артериальное давление", "Частота сердечных сокращений",
+                  "Вес, индекс массы тела", "Окружность талии", "Статус курения"):
+        assert named not in issue, named
+
+
+async def test_rule_is_silent_on_a_diagnosis_outside_the_appendices(indicators_validator):
+    assert await _issue(indicators_validator, _card(icd="J06.9")) is None
+
+
+async def test_rule_is_silent_on_an_ordinary_visit(indicators_validator):
+    """168н — про диспансерное наблюдение. На острой пневмонии J12 требовать
+    вес и статус курения было бы неверно; тип приёма это отсекает."""
+    ordinary = [{"Код": "B01.047.001", "Наименование": "Приём терапевта первичный"}]
+    assert await _issue(indicators_validator, _card(services=ordinary)) is None
+    assert await _issue(indicators_validator, _card(icd="J12.9", services=ordinary)) is None
+
+
+async def test_rule_is_silent_for_minors(indicators_validator):
+    """168н п. 1 — взрослые 18 лет и старше; несовершеннолетние по 192н,
+    а в нём перечней с кодами МКБ нет."""
+    assert await _issue(indicators_validator, _card(age=12)) is None
+
+
+async def test_unknown_age_keeps_the_rule_silent(indicators_validator):
+    card = _card()
+    card["Пациент"] = {}
+    assert await _issue(indicators_validator, card) is None
+
+
+async def test_indicators_of_several_diagnoses_are_united(indicators_validator):
+    """168н п. 9: перечень «должен включать все параметры, соответствующие
+    каждому заболеванию»."""
+    card = _card()
+    card["Диагнозы"] = [{"КодМКБ": "I10"}, {"КодМКБ": "E11"}]
+    both = await _issue(indicators_validator, card)
+    card["Диагнозы"] = [{"КодМКБ": "I10"}]
+    one = await _issue(indicators_validator, card)
+    assert len(both) > len(one)
+    assert "Гликированный гемоглобин" in both and "Гликированный гемоглобин" not in one
+
+
+async def test_rule_stays_disabled_in_the_shipped_file():
+    """Включать только после эвала: список недостающего может оказаться длинным
+    почти на каждом диспансерном приёме."""
+    doc = _json.loads(_RULES_PATH.read_text(encoding="utf-8"))
+    rule = next(r for r in doc["rules"] if r["rule_id"] == "dispensary_controlled_indicators")
+    assert rule["enabled"] is False
+    assert rule["disabled_reason"]

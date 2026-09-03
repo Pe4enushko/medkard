@@ -24,16 +24,21 @@ import re
 from pathlib import Path
 from typing import Any
 
+from audit.deterministic.indicators import missing_indicators
 from audit.formal_structure.validator import (
     NMU_RE,
     FormalValidator,
     _VISIT_TYPE_RULE_KEY,
 )
+from parsers.json_parser import patient_age as _patient_age
 
 logger = logging.getLogger(__name__)
 
 _RULES_PATH = Path(__file__).parent / "deterministic_rules.json"
 _ALL = "all"
+# Та же граница, что в formal_structure и в audit.diagnosis.clinic_recs:
+# 168н адресован взрослым «в возрасте 18 лет и старше» (п. 1).
+_ADULT_AGE = 18
 
 # Классы МКБ-10, требующие кода внешней причины, и сами коды внешних причин.
 # S — травмы по областям тела, T — отравления и прочие последствия внешних
@@ -83,31 +88,45 @@ def _inspection_text(visit: dict[str, Any]) -> str:
 
 
 # ── Проверки ──────────────────────────────────────────────────────────────────
-# Каждая возвращает True, когда требование НАРУШЕНО, — то есть когда надо
-# завести находку.
+# Каждая возвращает None, когда требование выполнено, и строку, когда нарушено.
+# Строка — уточнение к тексту правила: пустая, если уточнять нечего.
 
 
-def _check_icd_present(visit: dict[str, Any], check: dict[str, Any]) -> bool:
-    return not _icd_codes(visit)
+def _check_icd_present(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    return None if _icd_codes(visit) else ""
 
 
-def _check_icd_external_cause(visit: dict[str, Any], check: dict[str, Any]) -> bool:
+def _check_icd_external_cause(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
     codes = _icd_codes(visit)
-    if not any(code.startswith(_INJURY_CLASSES) for code in codes):
-        return False
-    return not any(code.startswith(_EXTERNAL_CAUSE_CLASSES) for code in codes)
+    injuries = [c for c in codes if c.startswith(_INJURY_CLASSES)]
+    if not injuries:
+        return None
+    if any(code.startswith(_EXTERNAL_CAUSE_CLASSES) for code in codes):
+        return None
+    return ", ".join(sorted(set(injuries)))
 
 
-def _check_json_nonempty(visit: dict[str, Any], check: dict[str, Any]) -> bool:
-    return not (visit.get(check["block"]) or [])
+def _check_json_nonempty(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    return None if (visit.get(check["block"]) or []) else ""
 
 
-def _check_regex_in_text(visit: dict[str, Any], check: dict[str, Any]) -> bool:
-    return re.search(check["pattern"], _inspection_text(visit)) is None
+def _check_regex_in_text(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    return None if re.search(check["pattern"], _inspection_text(visit)) else ""
 
 
-def _check_regex_absent(visit: dict[str, Any], check: dict[str, Any]) -> bool:
-    return re.search(check["pattern"], _inspection_text(visit)) is not None
+def _check_regex_absent(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    return "" if re.search(check["pattern"], _inspection_text(visit)) else None
+
+
+def _check_controlled_indicators(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    """Контролируемые показатели 168н по диагнозам карты.
+
+    Одна находка на карту со списком недостающего, а не по находке на
+    показатель: медиана — шесть показателей на строку перечня, и врач прочитал
+    бы шесть отдельных замечаний как шесть дефектов.
+    """
+    missing = missing_indicators(_icd_codes(visit), _inspection_text(visit))
+    return ", ".join(missing) if missing else None
 
 
 _CHECKS = {
@@ -116,6 +135,7 @@ _CHECKS = {
     "json_nonempty": _check_json_nonempty,
     "regex_in_text": _check_regex_in_text,
     "regex_absent": _check_regex_absent,
+    "controlled_indicators": _check_controlled_indicators,
 }
 
 
@@ -144,6 +164,16 @@ class DeterministicValidator:
         types = applies.get("visit_types") or []
         if types and not (_ALL in types or type_keys & set(types)):
             return False
+
+        # Возраст неизвестен — правило с возрастным скоупом не применяется:
+        # трактуем None в сторону молчания, как и остальной аудит.
+        age_group = applies.get("age_group", _ALL)
+        if age_group != _ALL:
+            age = _patient_age(visit.get("Пациент") or {})
+            if age is None:
+                return False
+            if age_group != ("child" if age < _ADULT_AGE else "adult"):
+                return False
 
         prefixes = applies.get("service_prefixes") or []
         if prefixes:
@@ -192,10 +222,13 @@ class DeterministicValidator:
                     check.get("kind"),
                 )
                 continue
-            if handler(visit, check):
-                findings.append({
-                    "flag": rule["flag_code"],
-                    "issue": rule["issue"],
-                    "source": rule.get("source", ""),
-                })
+            detail = handler(visit, check)
+            if detail is None:
+                continue
+            issue = rule["issue"] + (f": {detail}" if detail else "")
+            findings.append({
+                "flag": rule["flag_code"],
+                "issue": issue,
+                "source": rule.get("source", ""),
+            })
         return findings
