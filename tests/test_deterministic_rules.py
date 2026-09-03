@@ -108,34 +108,40 @@ async def test_repeat_visit_is_out_of_scope():
 # ── внешняя причина при травме ────────────────────────────────────────────────
 
 async def test_injury_without_external_cause_is_flagged():
-    got = await _flags(_visit(diagnoses=[{"КодМКБ": "S52.5"}], services=_REPEAT))
+    got = await _flags(_visit(diagnoses=[{"КодМКБ": "S52.5"}]))
     assert "ТРАВМА_БЕЗ_КОДА_ВНЕШНЕЙ_ПРИЧИНЫ" in got
 
 
 async def test_poisoning_counts_as_injury():
-    got = await _flags(_visit(diagnoses=[{"КодМКБ": "T36.0"}], services=_REPEAT))
+    got = await _flags(_visit(diagnoses=[{"КодМКБ": "T36.0"}]))
     assert "ТРАВМА_БЕЗ_КОДА_ВНЕШНЕЙ_ПРИЧИНЫ" in got
 
 
 async def test_injury_with_external_cause_is_clean():
-    got = await _flags(
-        _visit(diagnoses=[{"КодМКБ": "S52.5"}, {"КодМКБ": "W01.0"}], services=_REPEAT)
-    )
+    got = await _flags(_visit(diagnoses=[{"КодМКБ": "S52.5"}, {"КодМКБ": "W01.0"}]))
     assert "ТРАВМА_БЕЗ_КОДА_ВНЕШНЕЙ_ПРИЧИНЫ" not in got
 
 
 async def test_card_without_injury_is_not_asked_for_a_cause():
-    got = await _flags(_visit(diagnoses=[{"КодМКБ": "J06.9"}], services=_REPEAT))
+    got = await _flags(_visit(diagnoses=[{"КодМКБ": "J06.9"}]))
+    assert "ТРАВМА_БЕЗ_КОДА_ВНЕШНЕЙ_ПРИЧИНЫ" not in got
+
+
+async def test_external_cause_is_not_required_on_a_repeat_visit():
+    """Строка «Внешняя причина при травмах» стоит в разделе первичного приёма.
+
+    Раздел «Медицинское наблюдение в динамике» её не содержит: там дата,
+    жалобы, данные наблюдения, назначения, препараты, лист нетрудоспособности
+    и рецепты. Первая редакция правила требовала больше, чем форма.
+    """
+    got = await _flags(_visit(diagnoses=[{"КодМКБ": "S52.5"}], services=_REPEAT))
     assert "ТРАВМА_БЕЗ_КОДА_ВНЕШНЕЙ_ПРИЧИНЫ" not in got
 
 
 async def test_external_cause_is_searched_across_all_diagnoses():
     """Проблемный лист приходит целиком: код причины может стоять не рядом."""
     got = await _flags(
-        _visit(
-            diagnoses=[{"КодМКБ": "I10"}, {"КодМКБ": "S52.5"}, {"КодМКБ": "Y04.0"}],
-            services=_REPEAT,
-        )
+        _visit(diagnoses=[{"КодМКБ": "I10"}, {"КодМКБ": "S52.5"}, {"КодМКБ": "Y04.0"}])
     )
     assert "ТРАВМА_БЕЗ_КОДА_ВНЕШНЕЙ_ПРИЧИНЫ" not in got
 
@@ -381,3 +387,55 @@ async def test_verdict_comes_from_the_code_not_from_the_service_name():
     card = _consultation("", "Повторная")
     card["Услуги"] = [{"Наименование": "Прием (осмотр, консультация) врача-невролога первичный"}]
     assert _CONTRADICTION_FLAG not in await _flags(card)
+
+
+
+# ── наименование услуги по ЕГИСЗ ──────────────────────────────────────────────
+
+_NAME_FLAG = "НАИМЕНОВАНИЕ_УСЛУГИ_НЕ_ПО_НОМЕНКЛАТУРЕ"
+_NEUROLOGIST = "Прием (осмотр, консультация) врача-невролога первичный"
+
+
+def _egisz(code, name, **extra):
+    return {
+        "Прием": {"GUID": "g"}, "Пациент": {"AGE": 40},
+        "Диагнозы": [{"КодМКБ": "I10"}], "ДанныеОсмотра": [],
+        "Услуги": [{"КодЕГИСЗ": code, "НаименованиеЕГИСЗ": name, **extra}],
+    }
+
+
+async def test_egisz_name_matching_the_order_is_clean():
+    assert _NAME_FLAG not in await _flags(_egisz("B01.023.001", _NEUROLOGIST))
+
+
+async def test_typography_is_not_a_mismatch():
+    """Клиника роняет дефис, ставит двойные пробелы и «е» вместо «ё»."""
+    assert _NAME_FLAG not in await _flags(
+        _egisz("B01.023.001", "Прием  (осмотр, консультация) врача невролога первичный")
+    )
+
+
+async def test_name_with_the_doctor_surname_is_a_mismatch():
+    got = await _flags(_egisz("B01.023.001", _NEUROLOGIST + " Чепухина Л.А."))
+    assert _NAME_FLAG in got
+
+
+async def test_own_free_form_name_is_never_compared():
+    """Поле «Наименование» клиника заполняет свободно — сверять его не с чем.
+
+    Замер: у МДС НаименованиеЕГИСЗ во всех 18 175 строках услуг — побайтовая
+    копия собственного наименования, а КодЕГИСЗ пуст.
+    """
+    card = _egisz("", "Приём невролога Чепухина Л.А.", Артикул="B01.023.001",
+                  Наименование="Приём невролога Чепухина Л.А.")
+    assert _NAME_FLAG not in await _flags(card)
+
+
+async def test_empty_egisz_name_is_not_a_mismatch():
+    """Пустое поле — это другой дефект, у него своё правило про код."""
+    assert _NAME_FLAG not in await _flags(_egisz("B01.023.001", ""))
+
+
+async def test_code_missing_from_our_dump_is_skipped():
+    """Выгрузка заморожена на редакции 24.09.2020: незнание не дефект карты."""
+    assert _NAME_FLAG not in await _flags(_egisz("B01.999.999", "Что-то новое"))

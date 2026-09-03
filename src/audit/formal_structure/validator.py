@@ -15,7 +15,6 @@ rule in its own atomic LLM request via LLM.validations.validate_rule.
 from __future__ import annotations
 
 import asyncio
-import csv
 import json
 import logging
 import re
@@ -24,6 +23,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from audit import nomenclature
 from LLM.chinese_detector import ChineseDetector
 from audit.formal_structure.required_fields import missing_required_fields
 from LLM.validations import validate_rule
@@ -265,24 +265,19 @@ _B04_NAME_PREFIXES: tuple[tuple[str, VisitType], ...] = (
     ("Диспансерный прием", VisitType.DISPENSARY),
     ("Профилактический прием", VisitType.PROPHYLACTIC),
 )
-_NOMENCLATURE = Path(__file__).resolve().parents[3] / "resources" / "nomenclature-804n.csv"
-
-
 @lru_cache(maxsize=1)
 def _codes_named_in_the_order() -> dict[str, VisitType]:
-    """Коды, вид приёма которых назван в самом наименовании из 804н."""
+    """Коды, вид приёма которых назван в самом наименовании из 804н.
+
+    Пустая выгрузка означает, что вид приёма определяется только эвристикой
+    окончаний, как было до её появления.
+    """
     named: dict[str, VisitType] = {}
-    try:
-        with open(_NOMENCLATURE, encoding="utf-8", newline="") as f:
-            for row in csv.DictReader(f):
-                for prefix, visit_type in _B04_NAME_PREFIXES:
-                    if row["name"].startswith(prefix):
-                        named[row["code"].strip().upper()] = visit_type
-                        break
-    except OSError:
-        # Выгрузки нет — остаётся эвристика окончаний, как было до неё.
-        logger.warning("[formal] %s не прочитан: вид приёма по коду определяется "
-                       "только эвристикой окончаний", _NOMENCLATURE)
+    for code, name in nomenclature.names().items():
+        for prefix, visit_type in _B04_NAME_PREFIXES:
+            if name.startswith(prefix):
+                named[code] = visit_type
+                break
     return named
 
 

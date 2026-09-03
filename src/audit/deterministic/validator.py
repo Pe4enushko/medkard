@@ -24,6 +24,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from audit import nomenclature
 from audit.deterministic.indicators import missing_indicators
 from audit.formal_structure.validator import (
     NMU_RE,
@@ -196,6 +197,46 @@ def _check_visit_type_contradiction(visit: dict[str, Any], check: dict[str, Any]
             f"а в записи указана {said[declared]} консультация")
 
 
+# Клиника роняет дефис («врача невролога»), ставит двойные пробелы и пишет «е»
+# вместо «ё». Это не расхождение наименований, а типографика.
+_TYPO = re.compile(r"[\s\-\u2010-\u2015]+")
+
+
+def _same_name(a: str, b: str) -> bool:
+    norm = lambda s: _TYPO.sub(" ", s.lower().replace("ё", "е")).strip(" .;")
+    return norm(a) == norm(b)
+
+
+def _check_egisz_name(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    """НаименованиеЕГИСЗ против наименования из 804н под тем же кодом.
+
+    Сверяется ТОЛЬКО пара КодЕГИСЗ + НаименованиеЕГИСЗ, и только когда оба
+    заполнены. Собственное поле «Наименование» клиника заполняет свободно —
+    «Прием (осмотр, консультация) врача невролога  Чепухина Л.А.» вместо
+    «…врача-невролога первичный», — и сверять его не с чем.
+
+    Замер 2026-09-03: у Алёнки, где пара заполнена, наименование совпадает с
+    приказом точно в 92,2% строк услуг и не расходится ни разу. У МДС
+    НаименованиеЕГИСЗ во всех 18 175 строках — побайтовая копия собственного
+    наименования, а КодЕГИСЗ пуст, поэтому правило туда не заходит.
+    """
+    wrong: list[str] = []
+    for service in (visit.get("Услуги") or []):
+        if not isinstance(service, dict):
+            continue
+        code = str(service.get("КодЕГИСЗ") or "").strip().upper()
+        name = str(service.get("НаименованиеЕГИСЗ") or "").strip()
+        if not code or not name or not NMU_RE.fullmatch(code):
+            continue
+        expected = nomenclature.name_of(code)
+        # Кода нет в нашей выгрузке — она заморожена на редакции 24.09.2020.
+        # Это незнание с нашей стороны, а не дефект карты.
+        if expected is None or _same_name(name, expected):
+            continue
+        wrong.append(f"{code} — «{name}», по номенклатуре «{expected}»")
+    return "; ".join(wrong) if wrong else None
+
+
 def _check_controlled_indicators(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
     """Контролируемые показатели 168н по диагнозам карты.
 
@@ -215,6 +256,7 @@ _CHECKS = {
     "regex_absent": _check_regex_absent,
     "service_code_present": _check_service_code_present,
     "visit_type_contradiction": _check_visit_type_contradiction,
+    "egisz_name_matches_804n": _check_egisz_name,
     "controlled_indicators": _check_controlled_indicators,
 }
 
