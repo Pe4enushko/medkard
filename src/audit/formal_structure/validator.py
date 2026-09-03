@@ -15,9 +15,11 @@ rule in its own atomic LLM request via LLM.validations.validate_rule.
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import logging
 import re
+from functools import lru_cache
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -254,13 +256,50 @@ _CODE_RULES: tuple[_CodeRule, ...] = (
 )
 
 
+# Раздел B04 не нуждается в эвристике окончаний: приказ сам называет эти услуги
+# «Диспансерный прием (осмотр, консультация) врача-X» и «Профилактический прием
+# …». Берём вердикт из наименования ПРИКАЗА, а не из того, как услугу назвала
+# клиника, — 15 диспансерных и 12 профилактических кодов таблица окончаний не
+# ловит, и до этого они держались на словах клиники.
+_B04_NAME_PREFIXES: tuple[tuple[str, VisitType], ...] = (
+    ("Диспансерный прием", VisitType.DISPENSARY),
+    ("Профилактический прием", VisitType.PROPHYLACTIC),
+)
+_NOMENCLATURE = Path(__file__).resolve().parents[3] / "resources" / "nomenclature-804n.csv"
+
+
+@lru_cache(maxsize=1)
+def _codes_named_in_the_order() -> dict[str, VisitType]:
+    """Коды, вид приёма которых назван в самом наименовании из 804н."""
+    named: dict[str, VisitType] = {}
+    try:
+        with open(_NOMENCLATURE, encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                for prefix, visit_type in _B04_NAME_PREFIXES:
+                    if row["name"].startswith(prefix):
+                        named[row["code"].strip().upper()] = visit_type
+                        break
+    except OSError:
+        # Выгрузки нет — остаётся эвристика окончаний, как было до неё.
+        logger.warning("[formal] %s не прочитан: вид приёма по коду определяется "
+                       "только эвристикой окончаний", _NOMENCLATURE)
+    return named
+
+
 def classify_code(code: str) -> VisitType | _NoGuess | None:
     """Тип визита по коду номенклатуры.
+
+    Сначала — коды, вид приёма которых назван в наименовании из 804н
+    (``_codes_named_in_the_order``); наименованию клиники при этом не верим.
 
     ``None`` — таблица кода не знает, решать по наименованию.
     ``NO_GUESS`` — таблица код знает и вердикта не выносит; наименованию здесь
     верить нельзя, см. ``_NAME_DESCRIBES_SERVICE``.
     """
+    named = _codes_named_in_the_order().get(code)
+    if named is not None:
+        return named
+
     parts = code.split(".")
     middle = parts[1] if len(parts) > 1 else ""
     # Окончание читается только у кода из трёх групп. У четырёхгруппового

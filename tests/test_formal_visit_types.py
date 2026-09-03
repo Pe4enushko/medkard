@@ -461,3 +461,36 @@ async def test_z95_implant_codes_are_not_a_visit_type():
                services=[{"Код": "B01.047.002", "Наименование": "Прием терапевта повторный"}])
     )
     assert got == {VisitType.REPEAT}
+
+
+async def test_dispensary_visit_is_recognised_by_the_code_the_order_names():
+    """Приказ сам называет услугу диспансерным приёмом — наименованию клиники не верим.
+
+    B04.015.003 «Диспансерный прием (осмотр, консультация) врача-кардиолога»
+    таблица окончаний не ловит: .003 не входит в пару .001/.002. До явного
+    списка такой код держался на том, что клиника напишет слово «диспансерный»
+    в своём наименовании; если она назовёт приём обычным, вид визита терялся.
+    """
+    got = await FormalValidator().get_visit_types(
+        _visit(services=[{"Код": "B04.015.003", "Наименование": "Приём кардиолога"}])
+    )
+    assert got == {VisitType.DISPENSARY}
+
+
+async def test_prophylactic_visit_is_recognised_the_same_way():
+    got = await FormalValidator().get_visit_types(
+        _visit(services=[{"Код": "B04.015.004", "Наименование": "Приём детского кардиолога"}])
+    )
+    assert got == {VisitType.PROPHYLACTIC}
+
+
+def test_every_code_the_order_names_is_covered():
+    """Список берётся из выгрузки 804н, а не пишется руками."""
+    import audit.formal_structure.validator as v
+
+    named = v._codes_named_in_the_order()
+    assert len(named) > 80, len(named)
+    assert named["B04.047.001"] is VisitType.DISPENSARY
+    assert named["B04.047.002"] is VisitType.PROPHYLACTIC
+    # школы и консультирование так не называются и в список не попадают
+    assert "B04.070.002" not in named
