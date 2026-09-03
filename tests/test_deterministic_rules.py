@@ -243,3 +243,59 @@ async def test_rule_stays_disabled_in_the_shipped_file():
     rule = next(r for r in doc["rules"] if r["rule_id"] == "dispensary_controlled_indicators")
     assert rule["enabled"] is False
     assert rule["disabled_reason"]
+
+
+# ── услуга без кода номенклатуры ──────────────────────────────────────────────
+
+_NO_CODE_FLAG = "УСЛУГА_БЕЗ_КОДА_НОМЕНКЛАТУРЫ"
+
+
+def _with_services(services):
+    return {
+        "Прием": {"GUID": "g"},
+        "Пациент": {"AGE": 40},
+        "Диагнозы": [{"КодМКБ": "J06.9"}],
+        "Услуги": services,
+        "ДанныеОсмотра": [],
+    }
+
+
+async def test_service_without_any_code_is_flagged():
+    """Техничка интеграции: «каждый элемент содержит КодЕГИСЗ», «все поля
+    обязательны». Без кода услугу не сопоставить с 804н и не собрать СЭМД."""
+    got = await _flags(_with_services(
+        [{"КодЕГИСЗ": "", "Артикул": "", "Код": "00000003324",
+          "Наименование": "Прием интегративный (осмотр, консультация) врача акушера-гинеколога"}]
+    ))
+    assert _NO_CODE_FLAG in got
+
+
+async def test_code_in_artikul_is_enough():
+    """На боевых картах КодЕГИСЗ пуст, а код лежит в Артикул.
+
+    Такая услуга с 804н сопоставима — замечание врачу было бы шумом; это
+    дефект интеграции, а не записи приёма.
+    """
+    got = await _flags(_with_services(
+        [{"КодЕГИСЗ": "", "Артикул": "B01.023.001",
+          "Наименование": "Прием (осмотр, консультация) врача невролога  Чепухина Л.А."}]
+    ))
+    assert _NO_CODE_FLAG not in got
+
+
+async def test_finding_names_the_service_that_lacks_the_code():
+    """Иначе врач не поймёт, к какой из услуг замечание."""
+    issue = None
+    for f in await DeterministicValidator().validate(_with_services([
+        {"Артикул": "B01.023.001", "Наименование": "Приём невролога"},
+        {"Артикул": "", "Наименование": "Массаж"},
+    ])):
+        if f["flag"] == _NO_CODE_FLAG:
+            issue = f["issue"]
+    assert issue is not None
+    assert "Массаж" in issue and "невролога" not in issue
+
+
+async def test_a_visit_without_services_at_all_is_not_flagged():
+    """Пустой массив услуг — отдельный случай, здесь сообщать не о чем."""
+    assert _NO_CODE_FLAG not in await _flags(_with_services([]))

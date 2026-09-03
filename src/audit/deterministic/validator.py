@@ -118,6 +118,27 @@ def _check_regex_absent(visit: dict[str, Any], check: dict[str, Any]) -> str | N
     return "" if re.search(check["pattern"], _inspection_text(visit)) else None
 
 
+def _check_service_code_present(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    """Услуги, у которых кода номенклатуры нет ни в одном поле строки.
+
+    Ищем во всех полях, а не только в КодЕГИСЗ: на боевых картах код сплошь и
+    рядом лежит в Артикул, а КодЕГИСЗ пуст. Такая услуга сопоставима с 804н,
+    и замечание на неё было бы шумом — это дефект интеграции, не записи.
+    """
+    nameless: list[str] = []
+    for service in (visit.get("Услуги") or []):
+        if not isinstance(service, dict):
+            continue
+        if any(
+            NMU_RE.fullmatch(token.strip())
+            for raw in service.values() if raw
+            for token in str(raw).split()
+        ):
+            continue
+        nameless.append(str(service.get("Наименование") or "").strip() or "без наименования")
+    return "; ".join(nameless) if nameless else None
+
+
 def _check_controlled_indicators(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
     """Контролируемые показатели 168н по диагнозам карты.
 
@@ -135,6 +156,7 @@ _CHECKS = {
     "json_nonempty": _check_json_nonempty,
     "regex_in_text": _check_regex_in_text,
     "regex_absent": _check_regex_absent,
+    "service_code_present": _check_service_code_present,
     "controlled_indicators": _check_controlled_indicators,
 }
 
