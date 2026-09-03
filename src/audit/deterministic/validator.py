@@ -28,7 +28,9 @@ from audit.deterministic.indicators import missing_indicators
 from audit.formal_structure.validator import (
     NMU_RE,
     FormalValidator,
+    VisitType,
     _VISIT_TYPE_RULE_KEY,
+    classify_code,
 )
 from parsers.json_parser import patient_age as _patient_age
 
@@ -139,6 +141,61 @@ def _check_service_code_present(visit: dict[str, Any], check: dict[str, Any]) ->
     return "; ".join(nameless) if nameless else None
 
 
+def _declared_visit_type(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    """Вид приёма так, как его объявил врач в записи.
+
+    Имена полей и значения задаются правилом, а не зашиты в код: у каждой
+    клиники свой шаблон записи, и добавление второй — это данные, не правки.
+    """
+    wanted = [f.casefold() for f in (check.get("fields") or [])]
+    patterns = {key: re.compile(rx, re.I) for key, rx in (check.get("values") or {}).items()}
+    for item in (visit.get("ДанныеОсмотра") or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("Параметр") or "").strip().casefold() not in wanted:
+            continue
+        value = str(item.get("Значение") or "").strip()
+        for key, rx in patterns.items():
+            if rx.search(value):
+                return key
+    return None
+
+
+_PAIR = {VisitType.PRIMARY: "primary", VisitType.REPEAT: "repeat"}
+
+
+def _check_visit_type_contradiction(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    """Код услуги говорит одно, запись врача — другое.
+
+    Сверяется именно вердикт КОДА, а не итоговый тип визита: тип может быть
+    выведен из наименования услуги, и тогда сравнивать было бы не с чем —
+    наименование и запись оба пишет клиника.
+    """
+    declared = _declared_visit_type(visit, check)
+    if declared is None:
+        return None
+    from_codes = {
+        _PAIR[verdict]
+        for service in (visit.get("Услуги") or []) if isinstance(service, dict)
+        for raw in service.values() if raw
+        for token in str(raw).split()
+        if NMU_RE.fullmatch(token.strip())
+        for verdict in [classify_code(token.strip().upper().replace("В", "B").replace("А", "A"))]
+        if verdict in _PAIR
+    }
+    # Обе половины пары в одной карте — сравнивать не с чем, это не расхождение.
+    if len(from_codes) != 1:
+        return None
+    by_code = from_codes.pop()
+    if by_code == declared:
+        return None
+    words = {"primary": "первичному", "repeat": "повторному"}
+    said = {"primary": "первичная", "repeat": "повторная"}
+    return (f"код услуги соответствует {words[by_code]} приёму "
+            f"(окончание {'.001' if by_code == 'primary' else '.002'} по номенклатуре 804н), "
+            f"а в записи указана {said[declared]} консультация")
+
+
 def _check_controlled_indicators(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
     """Контролируемые показатели 168н по диагнозам карты.
 
@@ -157,6 +214,7 @@ _CHECKS = {
     "regex_in_text": _check_regex_in_text,
     "regex_absent": _check_regex_absent,
     "service_code_present": _check_service_code_present,
+    "visit_type_contradiction": _check_visit_type_contradiction,
     "controlled_indicators": _check_controlled_indicators,
 }
 

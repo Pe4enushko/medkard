@@ -299,3 +299,72 @@ async def test_finding_names_the_service_that_lacks_the_code():
 async def test_a_visit_without_services_at_all_is_not_flagged():
     """Пустой массив услуг — отдельный случай, здесь сообщать не о чем."""
     assert _NO_CODE_FLAG not in await _flags(_with_services([]))
+
+
+# ── вид приёма против кода услуги ─────────────────────────────────────────────
+
+_CONTRADICTION_FLAG = "ВИД_ПРИЁМА_НЕ_СООТВЕТСТВУЕТ_КОДУ_УСЛУГИ"
+
+
+def _consultation(code, said, param="Консультация перв/повтор"):
+    return {
+        "Прием": {"GUID": "g"},
+        "Пациент": {"AGE": 40},
+        "Диагнозы": [{"КодМКБ": "I10"}],
+        "Услуги": [{"КодЕГИСЗ": code, "Наименование": "Приём невролога"}],
+        "ДанныеОсмотра": [{"Параметр": param, "Значение": said}],
+    }
+
+
+async def test_repeat_visit_billed_as_primary_is_flagged():
+    """МДС выставляет все консультации кодом .001 независимо от записи.
+
+    Замер на выгрузках: 697 карт из 8874. 804н разводит окончания .001 и .002
+    («…врача-невролога первичный» / «…повторный»), клиника этим не пользуется.
+    """
+    assert _CONTRADICTION_FLAG in await _flags(_consultation("B01.023.001", "Повторная"))
+
+
+async def test_the_opposite_direction_is_flagged_too():
+    assert _CONTRADICTION_FLAG in await _flags(_consultation("B01.023.002", "Первичная"))
+
+
+async def test_agreement_is_silent():
+    for code, said in (("B01.023.001", "Первичная"), ("B01.023.002", "Повторная")):
+        assert _CONTRADICTION_FLAG not in await _flags(_consultation(code, said)), code
+
+
+async def test_value_outside_the_pair_is_not_a_contradiction():
+    """В поле встречается «Прием в медицинском центре» — это не вид приёма."""
+    got = await _flags(_consultation("B01.023.001", "Прием в медицинском центре"))
+    assert _CONTRADICTION_FLAG not in got
+
+
+async def test_planning_field_is_not_read_as_a_visit_type():
+    """«Консультация (повт.план итд)» — план следующей явки, не текущий приём.
+
+    Там пишут «повторная с результатами обследования»; искать в этом поле
+    «повторн» нельзя. Правило читает только поля из своего списка.
+    """
+    got = await _flags(_consultation(
+        "B01.023.001", "повторная с результатами обследования",
+        param="Консультация (повт.план итд)",
+    ))
+    assert _CONTRADICTION_FLAG not in got
+
+
+async def test_both_halves_of_the_pair_in_one_card_are_not_a_contradiction():
+    """Приём и первичный, и повторный в одной карте — сравнивать не с чем."""
+    card = _consultation("B01.023.001", "Повторная")
+    card["Услуги"].append({"КодЕГИСЗ": "B01.023.002", "Наименование": "Приём невролога повторный"})
+    assert _CONTRADICTION_FLAG not in await _flags(card)
+
+
+async def test_verdict_comes_from_the_code_not_from_the_service_name():
+    """Наименование и запись пишет одна и та же клиника — сверять их бессмысленно.
+
+    Услуга без кода: вердикту кода взяться неоткуда, расхождения нет.
+    """
+    card = _consultation("", "Повторная")
+    card["Услуги"] = [{"Наименование": "Прием (осмотр, консультация) врача-невролога первичный"}]
+    assert _CONTRADICTION_FLAG not in await _flags(card)
