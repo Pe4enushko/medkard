@@ -18,6 +18,8 @@ _DOC = json.loads(_RULES_PATH.read_text(encoding="utf-8"))
 def _visit(diagnoses=None, services=None, inspection=None):
     return {
         "Прием": {"GUID": "test-guid"},
+        # взрослый по умолчанию: правила на форме 025/у детей не касаются
+        "Пациент": {"AGE": 40},
         "Диагнозы": diagnoses or [],
         "Услуги": services or [{"Код": "B01.047.001", "Наименование": "Прием терапевта первичный"}],
         "ДанныеОсмотра": inspection or [],
@@ -532,3 +534,33 @@ async def test_prescriptions_are_not_in_the_minimum():
         ["Жалобы", "Анамнез заболевания", "Объективные данные"], _PRIMARY_SVC,
     )
     assert await _minimum_issue(card) is None
+
+
+# ── форма 025/у — только для взрослых ─────────────────────────────────────────
+
+def test_rules_based_on_form_025u_are_scoped_to_adults():
+    """Приложение № 2 к 274н, п. 1: форма 025/у — для ВЗРОСЛОГО населения.
+
+    Утверждённой формы амбулаторной карты ребёнка не существует: ф. 112/у
+    утверждена приказом Минздрава СССР от 04.10.1980 № 1030, утратившим силу.
+    Косвенное подтверждение — 209н п. 10: четыре карты перечислены с указанием
+    приказа и приложения, а «медицинская документация несовершеннолетнего» —
+    без ссылки.
+    """
+    for rule in _DOC["rules"]:
+        if rule.get("source") != "274n":
+            continue
+        assert rule["applies_to"].get("age_group") == "adult", rule["rule_id"]
+
+
+async def test_minimum_is_silent_for_a_child():
+    """У детской клиники записи по 025/у не проверяются — форма не про них."""
+    card = _record([], _PRIMARY_SVC)
+    card["Пациент"] = {"AGE": 7}
+    assert await _minimum_issue(card) is None
+
+
+async def test_minimum_still_works_for_an_adult():
+    card = _record([], _PRIMARY_SVC)
+    card["Пациент"] = {"AGE": 40}
+    assert await _minimum_issue(card) is not None
