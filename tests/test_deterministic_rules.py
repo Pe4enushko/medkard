@@ -439,3 +439,96 @@ async def test_empty_egisz_name_is_not_a_mismatch():
 async def test_code_missing_from_our_dump_is_skipped():
     """Выгрузка заморожена на редакции 24.09.2020: незнание не дефект карты."""
     assert _NAME_FLAG not in await _flags(_egisz("B01.999.999", "Что-то новое"))
+
+
+# ── нормативный минимум записи по 274н ────────────────────────────────────────
+
+_MINIMUM_FLAG = "НЕ_ЗАПОЛНЕН_НОРМАТИВНЫЙ_МИНИМУМ_ЗАПИСИ"
+_PRIMARY_SVC = [{"Код": "B01.047.001", "Наименование": "Приём терапевта первичный"}]
+_REPEAT_SVC = [{"Код": "B01.047.002", "Наименование": "Приём терапевта повторный"}]
+
+
+def _record(fields, services):
+    return {
+        "Прием": {"GUID": "g"}, "Пациент": {"AGE": 40},
+        "Диагнозы": [{"КодМКБ": "I10"}], "Услуги": services,
+        "ДанныеОсмотра": [{"Параметр": n, "Значение": "заполнено"} for n in fields],
+    }
+
+
+async def _minimum_issue(card):
+    for f in await DeterministicValidator().validate(card):
+        if f["flag"] == _MINIMUM_FLAG:
+            return f["issue"]
+    return None
+
+
+async def test_primary_visit_needs_complaints_anamnesis_and_objective_data():
+    """Раздел «Записи врачей-специалистов» формы 025/у."""
+    issue = await _minimum_issue(_record([], _PRIMARY_SVC))
+    assert issue is not None
+    for slot in ("Жалобы", "Анамнез заболевания, жизни", "Объективные данные"):
+        assert slot in issue, slot
+
+
+async def test_full_primary_record_is_clean():
+    card = _record(
+        ["Жалобы на момент осмотра", "Анамнез заболевания", "Объективные данные"],
+        _PRIMARY_SVC,
+    )
+    assert await _minimum_issue(card) is None
+
+
+async def test_slot_is_matched_by_word_stem_not_by_exact_name():
+    """У МДС 180 разных имён: «Жалобы невролог», «Анамнез кардиолог»."""
+    card = _record(
+        ["Жалобы невролог", "Анамнез невролог", "Объективные данные невролог"],
+        _PRIMARY_SVC,
+    )
+    assert await _minimum_issue(card) is None
+
+
+async def test_repeat_visit_is_not_asked_for_anamnesis():
+    """Раздел «Медицинское наблюдение в динамике» анамнеза не содержит.
+
+    Замер это подтверждает: у Алёнки анамнез есть на 91% первичных приёмов и
+    на 11,4% повторных.
+    """
+    issue = await _minimum_issue(_record(["Жалобы", "Динамика состояния"], _REPEAT_SVC))
+    assert issue is None
+
+
+async def test_repeat_visit_needs_dynamics_instead():
+    issue = await _minimum_issue(_record(["Жалобы"], _REPEAT_SVC))
+    assert issue is not None
+    assert "Данные наблюдения в динамике" in issue
+    assert "Анамнез" not in issue
+
+
+async def test_empty_field_does_not_count_as_filled():
+    """1С не присылает незаполненное поле, но пустая строка встречается."""
+    card = _record([], _PRIMARY_SVC)
+    card["ДанныеОсмотра"] = [{"Параметр": "Жалобы", "Значение": "  "}]
+    assert "Жалобы" in (await _minimum_issue(card) or "")
+
+
+async def test_minimum_does_not_depend_on_a_known_template():
+    """274н обязателен для всех — в отличие от required_fields.json.
+
+    Отсутствие слота в шаблоне клиники это дефект шаблона, а не повод
+    промолчать; шаблон здесь не спрашивается вовсе.
+    """
+    card = _record(["Совершенно незнакомое поле"], _PRIMARY_SVC)
+    assert await _minimum_issue(card) is not None
+
+
+async def test_prescriptions_are_not_in_the_minimum():
+    """Визит может законно ничего не назначать.
+
+    У МДС слот назначений заполнен в 22,9% карт и называется иначе — «План
+    лечения», «Рекомендованное лечение».
+    """
+    card = _record(
+        ["Жалобы", "Анамнез заболевания", "Объективные данные"], _PRIMARY_SVC,
+    )
+    assert await _minimum_issue(card) is None

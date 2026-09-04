@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -237,6 +238,39 @@ def _check_egisz_name(visit: dict[str, Any], check: dict[str, Any]) -> str | Non
     return "; ".join(wrong) if wrong else None
 
 
+@lru_cache(maxsize=1)
+def _record_minimum() -> tuple[dict[str, Any], ...]:
+    path = Path(__file__).resolve().parents[3] / "resources" / "274n_record_minimum.json"
+    return tuple(json.loads(path.read_text(encoding="utf-8"))["slots"])
+
+
+def _check_record_minimum(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    """Нормативный минимум записи приёма по форме 025/у.
+
+    В отличие от ``formal_structure.required_fields``, к шаблону клиники НЕ
+    привязан и привязан быть не может: 274н обязателен для всех, и если в
+    шаблоне клиники нет слота под жалобы — это дефект шаблона, а не повод
+    промолчать. ``required_fields`` остаётся настройкой конкретной клиники,
+    здесь же общий для всех минимум.
+
+    Имя слота ищется по основе слова: у МДС 180 разных имён полей —
+    «Жалобы невролог», «Жалобы кардиолог», «Жалобы терапевт».
+    """
+    types = check.get("visit_types") or []
+    names = [
+        str(item.get("Параметр") or "").casefold()
+        for item in (visit.get("ДанныеОсмотра") or [])
+        if isinstance(item, dict) and str(item.get("Значение") or "").strip()
+    ]
+    missing = [
+        slot["name"]
+        for slot in _record_minimum()
+        if set(slot["visit_types"]) & set(types)
+        and not any(p in name for name in names for p in slot["patterns"])
+    ]
+    return ", ".join(missing) if missing else None
+
+
 def _check_controlled_indicators(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
     """Контролируемые показатели 168н по диагнозам карты.
 
@@ -257,6 +291,7 @@ _CHECKS = {
     "service_code_present": _check_service_code_present,
     "visit_type_contradiction": _check_visit_type_contradiction,
     "egisz_name_matches_804n": _check_egisz_name,
+    "record_minimum": _check_record_minimum,
     "controlled_indicators": _check_controlled_indicators,
 }
 
@@ -344,6 +379,8 @@ class DeterministicValidator:
                     check.get("kind"),
                 )
                 continue
+            if check["kind"] == "record_minimum":
+                check = {**check, "visit_types": sorted(visit_types)}
             detail = handler(visit, check)
             if detail is None:
                 continue

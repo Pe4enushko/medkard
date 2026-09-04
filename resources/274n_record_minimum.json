@@ -1,0 +1,31 @@
+{
+  "format_version": 1,
+  "source": "приказ МЗ РФ от 13.05.2025 № 274н, приложение № 1, форма 025/у",
+  "revised_at": "2026-09-04",
+  "slots": [
+    {
+      "id": "complaints",
+      "name": "Жалобы",
+      "visit_types": ["primary", "repeat"],
+      "patterns": ["жалоб"]
+    },
+    {
+      "id": "anamnesis",
+      "name": "Анамнез заболевания, жизни",
+      "visit_types": ["primary"],
+      "patterns": ["анамнез"]
+    },
+    {
+      "id": "objective",
+      "name": "Объективные данные",
+      "visit_types": ["primary"],
+      "patterns": ["объективн", "status praesens", "статус"]
+    },
+    {
+      "id": "dynamics",
+      "name": "Данные наблюдения в динамике",
+      "visit_types": ["repeat"],
+      "patterns": ["динамик"]
+    }
+  ]
+}
