@@ -494,3 +494,31 @@ def test_every_code_the_order_names_is_covered():
     assert named["B04.047.002"] is VisitType.PROPHYLACTIC
     # школы и консультирование так не называются и в список не попадают
     assert "B04.070.002" not in named
+
+
+def test_form_025u_rules_are_not_scoped_to_children_only():
+    """Правило на форме 025/у не может применяться только к детям.
+
+    274н прил. 2 п. 1 адресует форму 025/у ВЗРОСЛОМУ населению. Правило с
+    source=274n и age_group=child ссылается на источник, который к его
+    собственной аудитории не относится, и при этом молчит на всех, к кому
+    источник относится. Так было у diagnosis_required до 2026-09-09: критичная
+    проверка «в записи должен быть диагноз» не запускалась ни на одном взрослом
+    приёме — остаток времён единственного детского клиента.
+    """
+    import audit.formal_structure.validator as v
+
+    child_only = [
+        rule["rule_id"]
+        for rule in v._RULES
+        if rule.get("source") == "274n"
+        and rule["applies_to"].get("age_group") == "child"
+    ]
+    assert not child_only, f"правила на 025/у заперты на детях: {child_only}"
+
+
+def test_diagnosis_required_covers_adults():
+    import audit.formal_structure.validator as v
+
+    rule = next(r for r in v._RULES if r["rule_id"] == "diagnosis_required")
+    assert rule["applies_to"]["age_group"] == "all"
