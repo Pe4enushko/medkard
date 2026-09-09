@@ -522,3 +522,36 @@ def test_diagnosis_required_covers_adults():
 
     rule = next(r for r in v._RULES if r["rule_id"] == "diagnosis_required")
     assert rule["applies_to"]["age_group"] == "all"
+
+
+def test_repeat_visit_rules_stay_inside_the_dynamics_section():
+    """На повторном приёме нельзя требовать того, чего нет в разделе формы.
+
+    Форма 025/у делит запись надвое. «Записи врачей-специалистов» (первичный
+    приём) содержат строки «Объективные данные» и «Диагноз основного
+    заболевания: код по МКБ»; «Медицинское наблюдение в динамике» (повторный) —
+    только Дату, Жалобы, Данные наблюдения в динамике, Назначения,
+    Лекарственные препараты, Листок нетрудоспособности, Льготные рецепты и
+    Врача. Приложение 2 п. 14 требований сверх строк не добавляет.
+
+    До 2026-09-09 два критичных правила требовали на повторном приёме
+    объективный осмотр и диагноз, ссылаясь на 274н.
+    """
+    import audit.formal_structure.validator as v
+
+    forbidden = {"objective_exam", "diagnosis", "anamnesis"}
+    offenders = []
+    for rule in v._RULES:
+        if rule.get("source") != "274n":
+            continue
+        types = rule["applies_to"]["visit_types"]
+        if "repeat" not in types and "all" not in types:
+            continue
+        overreach = forbidden & set(rule.get("targets") or [])
+        if overreach:
+            offenders.append((rule["rule_id"], sorted(overreach)))
+
+    assert not offenders, (
+        "правила на 274н требуют на повторном приёме строк, которых нет "
+        f"в разделе «Медицинское наблюдение в динамике»: {offenders}"
+    )
