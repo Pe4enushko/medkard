@@ -654,6 +654,51 @@ class DoneCardsStorage(BaseStorage):
             )
             return cur.rowcount
 
+    async def list_formal_results_to_backfill(
+        self, *, limit: int = 0, after_id: str = ""
+    ) -> list[dict[str, Any]]:
+        """Cards with at least one formal finding written before rule
+        snapshots existed (no rule_id key), plus the patient block the
+        script needs to tell the adult and child dispensary rules apart.
+
+        Serves the one-off scripts/hacks/backfill-rule-snapshot.py and goes
+        away with it. Keyset-paged by id like list_diag_results_to_backfill:
+        a finding the script cannot resolve (shared flag, unknown age) stays
+        without the key, and with LIMIT/OFFSET its card would be re-read
+        forever. limit=0 — no cap.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT id::text AS id, formal_result, card_data -> 'Пациент' AS patient
+                FROM done_cards
+                WHERE jsonb_typeof(formal_result) = 'array'
+                  AND (%(after)s = '' OR id > %(after)s::uuid)
+                  AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements(formal_result) AS finding
+                      WHERE NOT (finding ? 'rule_id'))
+                ORDER BY id
+                LIMIT NULLIF(%(limit)s, 0)
+                """,
+                {"limit": limit, "after": after_id},
+            )
+            return list(await cur.fetchall())
+
+    async def set_formal_result(self, *, card_id: str, formal_json: str) -> int:
+        """Rewrite formal_result of one card. Returns rows changed.
+
+        Second half of the same backfill: the script builds the list, this
+        only writes it. updated_at moves by trigger (migration 022), and the
+        engine replica picks the card up on its incremental sync.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "UPDATE done_cards SET formal_result = %(data)s::jsonb WHERE id = %(id)s::uuid",
+                {"id": card_id, "data": formal_json},
+            )
+            return cur.rowcount
+
     async def set_diag_result(
         self, *, card_id: str, diag_json: str, diag_errors: list[str] | None = None
     ) -> int:
