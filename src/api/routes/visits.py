@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from api import demo_doctors
 from api.auth import require_org_access
 from api.models import CheckResponse, DoctorEntry, PushResponse
+from parsers.doctor import normalize_doctor
 from parsers.excel import build_empty_report_bytes
 from reporting.api_formatter import ApiFormatter
 from storage.done_cards_storage import DoneCardsStorage
@@ -153,6 +154,11 @@ async def push(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Card has none of Пациент/Услуги/Диагнозы — looks like an empty shell, not a real visit",
         )
+
+    # Clinics send the doctor in their own shape; the stored card is always in
+    # ours (parsers/doctor.py). Runs before the stamp below on purpose: the
+    # stamp keys off Прием.Врач_код, and a real code must keep it out.
+    card = normalize_doctor(card)
 
     async with DoneCardsStorage() as storage:
         # ВРЕМЕННЫЙ КОСТЫЛЬ (api/demo_doctors.py): 1С не шлёт врача, а показать

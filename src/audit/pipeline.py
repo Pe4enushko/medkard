@@ -39,6 +39,7 @@ from audit.graph_trace import (
 from audit.icd_check.validator import check_icd_codes
 from audit.models import FormalFinding, FormalStructureResult
 from storage.models.result import SNAPSHOT_FIELDS
+from parsers.doctor import normalize_doctor
 from parsers.inspection_labels import normalize_visit_labels
 from parsers.json_parser import AppointmentParser
 from storage.done_cards_storage import DoneCardsStorage
@@ -151,7 +152,9 @@ class AuditPipeline:
                 organization_id=self._org_id
             )
 
-        appointments = AppointmentParser.split(raw_input)
+        # Our doctor form from here on (parsers/doctor.py): ignored, broken and
+        # audited cards all reach done_cards through this list.
+        appointments = [normalize_doctor(v) for v in AppointmentParser.split(raw_input)]
         pending, ignored_visits, skipped_done, skipped_strategy = (
             self._card_filter.filter(appointments, done_guids)
         )

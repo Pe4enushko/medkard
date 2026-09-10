@@ -124,3 +124,15 @@ async def test_process_day_dry_run_writes_nothing():
 
     assert storage.replaced == {}
     assert totals["updated"] == 1
+
+
+def test_visit_priem_is_in_our_doctor_form():
+    # 1C Alenka sends the doctor at the top of the card; the Прием block that
+    # replaces the stored one must already carry Врач/Врач_код (parsers/doctor.py).
+    guid, priem = backfill._visit_priem({
+        "Прием": {"GUID": "AB-1", "DATE": "09.09.2026"},
+        "Врач": {"GUID": "0a99d563", "FIO": "Правкина И. Г.", "SPECIALIZATION": "Педиатр"},
+    })
+    assert guid == "AB-1"
+    assert priem["Врач"] == "Правкина И. Г."
+    assert priem["Врач_код"] == "0a99d563"

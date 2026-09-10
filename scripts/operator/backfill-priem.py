@@ -37,6 +37,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from integrations.one_c import AlenkaOneCClient, MdsOneCClient, OneCClient
 from parsers.json_parser import AppointmentParser
+from parsers.doctor import normalize_doctor
 from storage.done_cards_storage import DoneCardsStorage
 
 ONE_C_CLIENTS: dict[str, type[OneCClient]] = {
@@ -66,7 +67,9 @@ def _date_range(since: datetime, until: datetime) -> Iterator[datetime]:
 
 
 def _visit_priem(visit: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
-    priem = visit.get("Прием") or {}
+    # Same doctor form as the push route and the nightly pipeline: the block
+    # replaces the stored one whole, so it must be in our form already.
+    priem = normalize_doctor(visit).get("Прием") or {}
     guid = priem.get("GUID")
     return (str(guid) if guid else None), priem
 
