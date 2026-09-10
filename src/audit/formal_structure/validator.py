@@ -533,6 +533,10 @@ class FormalValidator:
         age: only ``age_group="all"`` rules are kept, so an unknown age can
         never widen the rule set into the wrong cohort.
 
+        ``applies_to.age_below`` is the numeric escape hatch for thresholds the
+        three groups cannot express — 323-ФЗ ст. 54 ч. 2 draws one at 15 years,
+        where a minor consents on their own. An unknown age fails it too.
+
         ICD matching: a rule carrying ``applies_to.icd_prefixes`` passes only if
         one of ``icd_codes`` starts with one of those prefixes.  Without codes
         such a rule never applies.
@@ -560,6 +564,12 @@ class FormalValidator:
             if rule_age != "all" and rule_age != age_group:
                 # age_group is None when the age is unknown: nothing but "all"
                 # can match, which is the deliberate narrow side of the fork.
+                continue
+            age_below = applies.get("age_below")
+            if age_below is not None and not (
+                patient_age is not None and patient_age < int(age_below)
+            ):
+                # Unknown age takes the narrow side here too.
                 continue
             prefixes = applies.get("icd_prefixes") or []
             if prefixes and not any(c.startswith(p) for c in codes for p in prefixes):
