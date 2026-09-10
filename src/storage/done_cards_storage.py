@@ -614,6 +614,46 @@ class DoneCardsStorage(BaseStorage):
             )
             return await cur.fetchall()
 
+    async def list_cards_with_top_level_doctor(
+        self, *, limit: int = 0, after_id: str = ""
+    ) -> list[dict[str, Any]]:
+        """Cards whose top-level Врач block still carries GUID or FIO — the
+        shape 1C Alenka sends, not our form (parsers/doctor.py).
+
+        Serves the one-off scripts/hacks/backfill-alenka-doctors.py and goes
+        away with it. Keyset-paged by id like list_diag_results_to_backfill;
+        a rewritten card drops out of the predicate, so plain LIMIT would do,
+        but the cursor keeps a dry run from re-reading the same page forever.
+        limit=0 — no cap.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT id::text AS id, card_data
+                FROM done_cards
+                WHERE card_data -> 'Врач' ?| array['GUID', 'FIO']
+                  AND (%(after)s = '' OR id > %(after)s::uuid)
+                ORDER BY id
+                LIMIT NULLIF(%(limit)s, 0)
+                """,
+                {"limit": limit, "after": after_id},
+            )
+            return list(await cur.fetchall())
+
+    async def set_card_data(self, *, card_id: str, card_json: str) -> int:
+        """Rewrite card_data of one card whole. Returns rows changed.
+
+        Second half of the same backfill: the script builds the card, this
+        only writes it. updated_at moves by trigger (migration 022), and the
+        engine replica picks the card up on its incremental sync.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "UPDATE done_cards SET card_data = %(data)s::jsonb WHERE id = %(id)s::uuid",
+                {"id": card_id, "data": card_json},
+            )
+            return cur.rowcount
+
     async def set_diag_result(
         self, *, card_id: str, diag_json: str, diag_errors: list[str] | None = None
     ) -> int:
