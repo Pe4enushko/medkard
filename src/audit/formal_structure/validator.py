@@ -26,6 +26,7 @@ from LLM.chinese_detector import ChineseDetector
 from audit.formal_structure.required_fields import missing_required_fields
 from LLM.validations import validate_rule
 from LLM.visit_classifier import VisitClassifier
+from storage.models.result import SNAPSHOT_FIELDS
 from parsers.json_parser import patient_age as _patient_age
 
 _chinese_detector = ChineseDetector()
@@ -53,6 +54,15 @@ _PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
 
 # ── Flag → regulatory source lookup ───────────────────────────────────────────
 _FLAG_SOURCE: dict[str, str] = {r["flag_code"]: r.get("source", "") for r in _RULES}
+
+# Empty snapshot for findings that come from no rule — the template-fields check
+# and the NMU contradiction. Written explicitly so every finding has one shape.
+_EMPTY_SNAPSHOT: dict[str, str] = {key: "" for key in SNAPSHOT_FIELDS}
+
+
+def _rule_snapshot(rule: dict) -> dict[str, str]:
+    """Rule fields frozen into every finding it produces (see SNAPSHOT_FIELDS)."""
+    return {key: rule.get(key, "") for key in SNAPSHOT_FIELDS}
 _ALL_FLAGS: list[str] = list(_FLAG_SOURCE)
 
 _VERIFIED_DATES: list[str] = sorted(r["verified_at"] for r in _RULES if r.get("verified_at"))
@@ -543,7 +553,7 @@ class FormalValidator:
         tokens = 0
         for rule, (rule_findings, rule_tokens) in zip(rules, atomic_results, strict=True):
             findings.extend(
-                {**finding, "source": rule.get("source", "")}
+                {**finding, **_rule_snapshot(rule)}
                 for finding in rule_findings
             )
             tokens += rule_tokens
@@ -559,12 +569,12 @@ class FormalValidator:
         if unfilled:
             logger.info("[formal] %s", unfilled["issue"])
             # источника в rules.json нет: набор считан по боевым картам клиники
-            findings.append({**unfilled, "source": ""})
+            findings.append({**unfilled, **_EMPTY_SNAPSHOT})
 
         contradiction = self._check_nmu_keyword_contradiction(visit)
         if contradiction:
             logger.warning("[formal] NMU/keyword contradiction: %s", contradiction["issue"])
             # NMU contradictions are always kept; source is not from rules.json
-            findings.append({**contradiction, "source": ""})
+            findings.append({**contradiction, **_EMPTY_SNAPSHOT})
 
         return findings, tokens

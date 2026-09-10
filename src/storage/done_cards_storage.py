@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 def _formal_json(formal: FormalStructureResult) -> str:
     return json.dumps(
-        [{"flag": f.flag, "issue": f.issue, "source": f.source, "comment": f.comment} for f in formal.findings],
+        # to_dict, not a field list of its own: the rule snapshot added six of
+        # them, and a second list would silently fall behind the first.
+        [f.to_dict() for f in formal.findings],
         ensure_ascii=False,
     )
 

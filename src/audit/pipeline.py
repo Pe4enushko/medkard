@@ -38,6 +38,7 @@ from audit.graph_trace import (
 )
 from audit.icd_check.validator import check_icd_codes
 from audit.models import FormalFinding, FormalStructureResult
+from storage.models.result import SNAPSHOT_FIELDS
 from parsers.inspection_labels import normalize_visit_labels
 from parsers.json_parser import AppointmentParser
 from storage.done_cards_storage import DoneCardsStorage
@@ -283,8 +284,8 @@ class AuditPipeline:
                 FormalFinding(
                     flag=f["flag"],
                     issue=f["issue"],
-                    source=f.get("source", ""),
                     comment=f.get("comment", ""),
+                    **{key: f.get(key, "") for key in SNAPSHOT_FIELDS},
                 )
                 for f in formal_raw
             ]

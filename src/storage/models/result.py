@@ -94,6 +94,13 @@ class GuidelineSource:
     sections: list[GuidelineSourceSection] = field(default_factory=list)
 
 
+# Rule fields frozen into every finding it produces. All are 1:1 values from
+# rules.json — no parsing. The verbatim citation and the split of source_ref
+# into document/section are absent on purpose: both need the excerpt files
+# (docs/superpowers/research/2026-08-18-npa-pdf/) read by hand.
+SNAPSHOT_FIELDS = ("rule_id", "source", "severity", "source_ref", "expectation", "verified_at")
+
+
 @dataclass
 class FormalFinding:
     """One finding from the formal-structure check."""
@@ -102,6 +109,14 @@ class FormalFinding:
     issue: str
     source: str = ""
     comment: str = ""
+    # Rule snapshot taken at check time, not a reference resolved later: the
+    # catalogue is revised (rules.json carries revised_at) and a source can
+    # lapse on a calendar date — 560н gave way to 359н on 01.09.2026.
+    rule_id: str = ""
+    severity: str = ""
+    source_ref: str = ""
+    expectation: str = ""
+    verified_at: str = ""
 
     def pretty_format(self) -> str:
         s = f"    [{self.flag}] {self.issue}"
@@ -112,7 +127,13 @@ class FormalFinding:
         return s
 
     def to_dict(self) -> dict:
-        return {"flag": self.flag, "issue": self.issue, "source": self.source, "comment": self.comment}
+        return {
+            "flag": self.flag,
+            "issue": self.issue,
+            "source": self.source,
+            "comment": self.comment,
+            **{key: getattr(self, key) for key in SNAPSHOT_FIELDS if key != "source"},
+        }
 
 
 @dataclass
