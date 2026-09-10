@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-Backfill the "Прием" block in done_cards.card_data from 1C.
+Backfill the visit metadata — the "Прием" and "Врач" blocks — in
+done_cards.card_data from 1C.
+
+Only those two blocks: they describe the visit and the doctor. The patient
+side of the card (Пациент, Услуги, Диагнозы, ДанныеОсмотра) is never touched,
+and nothing is re-audited.
 
 1C now returns more fields inside "Прием" than older stored cards carry.
 This script walks the period day by day — one sequential 1C request per
@@ -10,7 +15,7 @@ the rest of card_data is untouched. Cards whose stored block already
 equals the fresh one are not written.
 
 Run from project root:
-    python scripts/operator/backfill-priem.py ORG --since YYYY-MM-DD [--until YYYY-MM-DD] [--dry-run] [-y]
+    python scripts/operator/backfill-priem-metadata.py ORG --since YYYY-MM-DD [--until YYYY-MM-DD] [--dry-run] [-y]
 
 Options:
     ORG        1C organization: Alenka or MDS
@@ -66,17 +71,24 @@ def _date_range(since: datetime, until: datetime) -> Iterator[datetime]:
         day += timedelta(days=1)
 
 
-def _visit_priem(visit: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
-    # Same doctor form as the push route and the nightly pipeline: the block
-    # replaces the stored one whole, so it must be in our form already.
-    priem = normalize_doctor(visit).get("Прием") or {}
+def _visit_metadata(
+    visit: dict[str, Any],
+) -> tuple[str | None, dict[str, Any], dict[str, Any] | None]:
+    """(guid, Прием block, Врач block or None when 1C sent none).
+
+    Same doctor form as the push route and the nightly pipeline: both blocks
+    replace the stored ones whole, so they must be in our form already.
+    """
+    visit = normalize_doctor(visit)
+    priem = visit.get("Прием") or {}
+    doctor = visit.get("Врач")
     guid = priem.get("GUID")
-    return (str(guid) if guid else None), priem
+    return (str(guid) if guid else None), priem, (doctor if isinstance(doctor, dict) else None)
 
 
 def _setup_logging(debug: bool = False) -> Path:
     LOGS_DIR.mkdir(exist_ok=True)
-    log_file = LOGS_DIR / f"backfill-priem_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_file = LOGS_DIR / f"backfill-priem-metadata_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     logging.basicConfig(
         level=logging.DEBUG if debug else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -144,28 +156,37 @@ async def _process_day(
     total = len(visits)
 
     for idx, visit in enumerate(visits, 1):
-        guid, priem = _visit_priem(visit)
+        guid, priem, doctor = _visit_metadata(visit)
         totals["visits"] += 1
         if not guid:
             totals["no_guid"] += 1
             log.warning("📅 %s: [%d/%d] visit without Прием.GUID skipped", day, idx, total)
             continue
 
-        stored = await storage.get_priem(guid)
+        stored = await storage.get_visit_metadata(guid)
         if stored is None:
             day_missing += 1
             log.info("📅 %s: [%d/%d] no done_cards row for guid=%s", day, idx, total, guid)
             continue
 
-        if stored == priem:
+        # A doctor block 1C did not send leaves the stored one alone rather
+        # than dropping it.
+        doctor_changed = doctor is not None and stored["Врач"] != doctor
+        if stored["Прием"] == priem and not doctor_changed:
             day_unchanged += 1
             log.info("📅 %s: [%d/%d] guid=%s already up to date", day, idx, total, guid)
             continue
 
         if not dry_run:
-            await storage.replace_priem(card_guid=guid, priem=json.dumps(priem, ensure_ascii=False))
+            await storage.replace_visit_metadata(
+                card_guid=guid,
+                priem=json.dumps(priem, ensure_ascii=False),
+                doctor=None if not doctor_changed else json.dumps(doctor, ensure_ascii=False),
+            )
         day_changed += 1
-        log.info("📅 %s: [%d/%d] guid=%s %s — %s", day, idx, total, guid, verb, _diff_keys(stored, priem))
+        log.info("📅 %s: [%d/%d] guid=%s %s — %s%s", day, idx, total, guid, verb,
+                 _diff_keys(stored["Прием"], priem),
+                 "; Врач: " + _diff_keys(stored["Врач"] or {}, doctor) if doctor_changed else "")
 
     totals["updated"] += day_changed
     totals["unchanged"] += day_unchanged

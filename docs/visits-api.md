@@ -170,7 +170,7 @@ Pull-API для организаций, интегрирующихся с medkar
 
 Точки входа три, и все до записи в `done_cards`: `POST /visits/push` (до
 штампа демо-врачей — штамп смотрит на `Врач_код` и настоящий код его
-останавливает), ночной пул 1С, `scripts/operator/backfill-priem.py`. Карты,
+останавливает), ночной пул 1С, `scripts/operator/backfill-priem-metadata.py`. Карты,
 лёгшие до этого как пришли, догоняет `scripts/hacks/backfill-alenka-doctors.py`.
 
 ## Демо-врач (scripts/hacks/seed-demo-doctor.py)

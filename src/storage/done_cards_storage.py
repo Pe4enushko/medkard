@@ -467,6 +467,51 @@ class DoneCardsStorage(BaseStorage):
             row = await cur.fetchone()
         return row["priem"] if row else None
 
+    async def get_visit_metadata(self, card_guid: str) -> dict | None:
+        """{"Прием": ..., "Врач": ...} of a stored card, or None if no row matches.
+
+        The two blocks scripts/operator/backfill-priem-metadata.py refreshes
+        from 1C. A block the card lacks comes back as None. Matching is
+        case-insensitive, same as get_priem.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT card_data -> 'Прием' AS priem, card_data -> 'Врач' AS doctor "
+                "FROM done_cards "
+                "WHERE lower(card_guid) = lower(%(guid)s) AND card_data IS NOT NULL",
+                {"guid": card_guid},
+            )
+            row = await cur.fetchone()
+        return {"Прием": row["priem"], "Врач": row["doctor"]} if row else None
+
+    async def replace_visit_metadata(
+        self, *, card_guid: str, priem: str, doctor: str | None
+    ) -> bool:
+        """Replace the "Прием" block, and the "Врач" block when *doctor* is
+        given, with the fresh 1C ones. Each block is overwritten whole; the
+        rest of card_data is untouched. Returns True if a row was updated.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE done_cards
+                SET card_data = CASE
+                    WHEN %(doctor)s::text IS NULL
+                        THEN jsonb_set(card_data, '{Прием}', %(priem)s::jsonb)
+                    ELSE jsonb_set(jsonb_set(card_data, '{Прием}', %(priem)s::jsonb),
+                                   '{Врач}', %(doctor)s::jsonb)
+                END
+                WHERE lower(card_guid) = lower(%(guid)s)
+                  AND card_data IS NOT NULL
+                RETURNING id::text
+                """,
+                {"guid": card_guid, "priem": priem, "doctor": doctor},
+            )
+            row = await cur.fetchone()
+        if row:
+            logger.info("💾 done_cards REPLACE_VISIT_METADATA OK id=%s guid=%s", row["id"], card_guid)
+        return row is not None
+
     async def replace_priem(self, *, card_guid: str, priem: str) -> bool:
         """Replace the "Прием" block of card_data with the fresh 1C one.
 

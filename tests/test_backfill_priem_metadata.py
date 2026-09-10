@@ -4,8 +4,8 @@ from datetime import datetime
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
-    "backfill_priem",
-    Path(__file__).resolve().parent.parent / "scripts" / "operator" / "backfill-priem.py")
+    "backfill_priem_metadata",
+    Path(__file__).resolve().parent.parent / "scripts" / "operator" / "backfill-priem-metadata.py")
 backfill = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(backfill)
 
@@ -34,15 +34,15 @@ def test_parse_date_accepts_iso_only():
         raise AssertionError("expected SystemExit for non-ISO date")
 
 
-def test_visit_priem_extracts_guid():
-    guid, priem = backfill._visit_priem({"Прием": {"GUID": "AB-1", "DATE": "01.07.2026"}})
+def test_visit_metadata_extracts_guid():
+    guid, priem, _ = backfill._visit_metadata({"Прием": {"GUID": "AB-1", "DATE": "01.07.2026"}})
     assert guid == "AB-1"
     assert priem == {"GUID": "AB-1", "DATE": "01.07.2026"}
 
 
-def test_visit_priem_missing_block():
-    assert backfill._visit_priem({"Пациент": {}}) == (None, {})
-    assert backfill._visit_priem({"Прием": {"DATE": "01.07.2026"}}) == (None, {"DATE": "01.07.2026"})
+def test_visit_metadata_missing_block():
+    assert backfill._visit_metadata({"Пациент": {}}) == (None, {}, None)
+    assert backfill._visit_metadata({"Прием": {"DATE": "01.07.2026"}}) == (None, {"DATE": "01.07.2026"}, None)
 
 
 def test_diff_keys_reports_set_and_dropped():
@@ -62,15 +62,22 @@ class _FakeClient:
 
 
 class _FakeStorage:
+    """stored: guid -> Прием block, or (Прием, Врач) pair for cards with a doctor block."""
+
     def __init__(self, stored):
         self._stored = stored
         self.replaced = {}
 
-    async def get_priem(self, card_guid):
-        return self._stored.get(card_guid)
+    async def get_visit_metadata(self, card_guid):
+        value = self._stored.get(card_guid)
+        if value is None:
+            return None
+        if isinstance(value, tuple):
+            return {"Прием": value[0], "Врач": value[1]}
+        return {"Прием": value, "Врач": None}
 
-    async def replace_priem(self, *, card_guid, priem):
-        self.replaced[card_guid] = json.loads(priem)
+    async def replace_visit_metadata(self, *, card_guid, priem, doctor):
+        self.replaced[card_guid] = (json.loads(priem), None if doctor is None else json.loads(doctor))
         return True
 
 
@@ -111,7 +118,7 @@ async def test_process_day_replaces_block_wholesale_dropping_stale_keys():
 
     await backfill._process_day(_d("2026-07-01"), client, storage, False, totals)
 
-    assert storage.replaced["g1"] == {"GUID": "g1", "DATE": "01.07.2026"}
+    assert storage.replaced["g1"][0] == {"GUID": "g1", "DATE": "01.07.2026"}
     assert totals["updated"] == 1
 
 
@@ -126,13 +133,50 @@ async def test_process_day_dry_run_writes_nothing():
     assert totals["updated"] == 1
 
 
-def test_visit_priem_is_in_our_doctor_form():
-    # 1C Alenka sends the doctor at the top of the card; the Прием block that
-    # replaces the stored one must already carry Врач/Врач_код (parsers/doctor.py).
-    guid, priem = backfill._visit_priem({
-        "Прием": {"GUID": "AB-1", "DATE": "09.09.2026"},
-        "Врач": {"GUID": "0a99d563", "FIO": "Правкина И. Г.", "SPECIALIZATION": "Педиатр"},
-    })
+ALENKA_VISIT = {
+    "Прием": {"GUID": "AB-1", "DATE": "09.09.2026"},
+    "Врач": {"GUID": "0a99d563", "FIO": "Правкина И. Г.", "SPECIALIZATION": "Педиатр"},
+}
+
+
+def test_visit_metadata_is_in_our_doctor_form():
+    # 1C Alenka sends the doctor at the top of the card; both blocks that
+    # replace the stored ones must already be in our form (parsers/doctor.py).
+    guid, priem, doctor = backfill._visit_metadata(ALENKA_VISIT)
     assert guid == "AB-1"
     assert priem["Врач"] == "Правкина И. Г."
     assert priem["Врач_код"] == "0a99d563"
+    assert doctor == {"SPECIALIZATION": "Педиатр"}
+
+
+async def test_process_day_replaces_doctor_block_too():
+    client = _FakeClient([ALENKA_VISIT])
+    storage = _FakeStorage({"AB-1": {"GUID": "AB-1", "DATE": "09.09.2026"}})
+    totals = _totals()
+
+    await backfill._process_day(_d("2026-09-09"), client, storage, False, totals)
+
+    priem, doctor = storage.replaced["AB-1"]
+    assert priem["Врач_код"] == "0a99d563"
+    assert doctor == {"SPECIALIZATION": "Педиатр"}
+
+
+async def test_process_day_sees_a_changed_doctor_block_alone():
+    client = _FakeClient([{"Прием": {"GUID": "g1", "DATE": "01.07.2026"}, "Врач": {"SPECIALIZATION": "Невролог"}}])
+    storage = _FakeStorage({"g1": ({"GUID": "g1", "DATE": "01.07.2026"}, {"SPECIALIZATION": "Терапевт"})})
+    totals = _totals()
+
+    await backfill._process_day(_d("2026-07-01"), client, storage, False, totals)
+
+    assert storage.replaced["g1"][1] == {"SPECIALIZATION": "Невролог"}
+    assert totals["updated"] == 1
+
+
+async def test_process_day_keeps_stored_doctor_when_1c_sends_none():
+    client = _FakeClient([{"Прием": {"GUID": "g1", "DATE": "02.07.2026"}}])
+    storage = _FakeStorage({"g1": ({"GUID": "g1", "DATE": "01.07.2026"}, {"SPECIALIZATION": "Терапевт"})})
+    totals = _totals()
+
+    await backfill._process_day(_d("2026-07-01"), client, storage, False, totals)
+
+    assert storage.replaced["g1"][1] is None

@@ -14,7 +14,7 @@ with a third shape gets a third branch here, nowhere else.
 
 Called at every point where a card enters done_cards: POST /visits/push
 (before the demo-doctor stamp, so the stamp sees a real code and stays out),
-the nightly 1C pipeline, and scripts/operator/backfill-priem.py.
+the nightly 1C pipeline, and scripts/operator/backfill-priem-metadata.py.
 """
 
 from __future__ import annotations
