@@ -49,10 +49,60 @@ def is_row_start(cells):
     return bool(re.fullmatch(r"\d+\.?", n)) and bool(code)
 
 
+def column_bounds(table):
+    """Границы семи колонок по первой полной строке и верх таблицы.
+
+    Верх нужен, чтобы отрезать колонтитул: на странице без таблицы он
+    переносится на две строки, и вторая («проведения диспансерного») мимо
+    NOISE проходит.
+    """
+    for row in table.rows:
+        if len(row.cells) >= 7 and all(c is not None for c in row.cells[:7]):
+            return [(c[0], c[2]) for c in row.cells[:7]], table.bbox[1]
+    return None
+
+
+def rows_by_columns(page, layout):
+    """Страница без распознанной таблицы: слова раскладываются по колонкам.
+
+    find_tables() не видит таблицу на страницах, целиком занятых продолжением
+    одной высокой строки, — у такой страницы нет горизонтальных линий. Первая
+    выгрузка эти страницы молча пропускала, и из середины строк выпадал текст
+    (прил. 2 № 1 и № 3 — стр. 28, 29, 32; прил. 1 — стр. 25; прил. 2 — стр. 41).
+    Границы колонок берутся с ближайшей предыдущей страницы с таблицей: вёрстка
+    приложения одна. Всё ниже линии сносок и выше верха таблицы отбрасывается.
+    """
+    bounds, top = layout
+    words = page.get_text("words")
+    cut = min(
+        (w[1] for w in words if w[4].startswith("-----")),
+        default=float("inf"),
+    )
+    lines = {}
+    for x0, y0, x1, y1, text, block, line, _ in words:
+        if y0 >= cut or y1 <= top:
+            continue
+        lines.setdefault((block, line), []).append((x0, y0, x1, text))
+    cols = [[] for _ in bounds]
+    for key in sorted(lines, key=lambda k: (lines[k][0][1], lines[k][0][0])):
+        line_text = " ".join(w[3] for w in lines[key])
+        if NOISE.search(line_text):
+            continue
+        for x0, y0, x1, text in lines[key]:
+            centre = (x0 + x1) / 2
+            for i, (left, right) in enumerate(bounds):
+                if left <= centre <= right:
+                    cols[i].append((y0, x0, text))
+                    break
+    return [" ".join(t for _, _, t in sorted(c)) for c in cols]
+
+
 doc = pymupdf.open(SRC)
 records = []
 appendix = None
 skipped_header_rows = 0
+layout = None
+recovered_pages = []
 
 for pno in range(doc.page_count):
     page = doc[pno]
@@ -62,8 +112,17 @@ for pno in range(doc.page_count):
         appendix = int(m.group(1))
     if appendix is None:
         continue
-    for table in page.find_tables().tables:
-        for cells in table.extract():
+    tables = page.find_tables().tables
+    for table in tables:
+        layout = column_bounds(table) or layout
+    if not tables and layout and records and records[-1]["appendix"] == appendix:
+        recovered = rows_by_columns(page, layout)
+        if any(v.strip() for v in recovered[2:]):
+            recovered_pages.append(pno + 1)
+            tables = [None]
+    for table in tables:
+        extracted = [recovered] if table is None else table.extract()
+        for cells in extracted:
             cells = list(cells) + [""] * (7 - len(cells))
             cells = cells[:7]
             vals = [clean(c) for c in cells]
@@ -109,3 +168,4 @@ for r in records:
     by_app[r["appendix"]] = by_app.get(r["appendix"], 0) + 1
 print("записей:", len(records), "по приложениям:", dict(sorted(by_app.items())))
 print("пропущено строк без записи:", skipped_header_rows)
+print("страницы, восстановленные раскладкой по колонкам:", recovered_pages)
