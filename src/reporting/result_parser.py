@@ -18,6 +18,7 @@ from storage.models.result import (
     GuidelineSource,
     GuidelineSourceSection,
     IcdCodingIssue,
+    SNAPSHOT_FIELDS,
     IssueSource,
 )
 
@@ -44,7 +45,14 @@ def build_manifest_meta(guidelines: list[Guideline]) -> dict[str, dict]:
 def parse_formal(data: list[dict]) -> FormalStructureResult:
     return FormalStructureResult(
         findings=[
-            FormalFinding(flag=f["flag"], issue=f.get("issue", ""), source=f.get("source", ""), comment=f.get("comment", ""))
+            FormalFinding(
+                flag=f["flag"],
+                issue=f.get("issue", ""),
+                comment=f.get("comment", ""),
+                # Rows written before the snapshot existed yield empty fields:
+                # that reads as "no snapshot", not "rule without a source".
+                **{key: f.get(key, "") for key in SNAPSHOT_FIELDS},
+            )
             for f in (data or [])
         ]
     )

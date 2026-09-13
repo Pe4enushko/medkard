@@ -234,8 +234,9 @@ async def test_multiple_pushes_in_one_day_aggregate_in_metrics_view(alenka_org_i
 
 
 @pytest.mark.asyncio
-async def test_replace_priem_on_pending_card_does_not_log(alenka_org_id: str):
-    """replace_priem (scripts/operator/backfill-priem.py's write path) never touches
+async def test_replace_visit_metadata_on_pending_card_does_not_log(alenka_org_id: str):
+    """replace_visit_metadata (scripts/operator/backfill-priem-metadata.py's write
+    path; replace_priem is the same UPDATE for one block) never touches
     status or pushed_at, so it must not fire the push_log trigger even when
     it happens to run against a row that is already status='pending' — the
     exact scenario Finding 1 of the final review flagged as a phantom-push
@@ -247,8 +248,8 @@ async def test_replace_priem_on_pending_card_does_not_log(alenka_org_id: str):
             # The trigger is BEFORE UPDATE, so the very first upsert_pending
             # (an INSERT — no prior row) never fires it. Push a second time
             # over that pending row so there is one genuine push_log row on
-            # the books, then exercise replace_priem against that same
-            # already-pending row.
+            # the books, then exercise replace_visit_metadata against that
+            # same already-pending row.
             await storage.upsert_pending(
                 card_guid=guid, card_data=_card(guid), organization_id=alenka_org_id
             )
@@ -259,15 +260,16 @@ async def test_replace_priem_on_pending_card_does_not_log(alenka_org_id: str):
             rows_after_push = await _push_log_rows(storage, guid)
             assert len(rows_after_push) == 1, "sanity: the second push (pending -> pending) logged exactly one row"
 
-            updated = await storage.replace_priem(
+            updated = await storage.replace_visit_metadata(
                 card_guid=guid,
                 priem=json.dumps({"GUID": guid, "DATE": "02.08.2026"}, ensure_ascii=False),
+                doctor=json.dumps({"SPECIALIZATION": "Терапевт"}, ensure_ascii=False),
             )
-            assert updated is True, "sanity: replace_priem found and updated the row"
+            assert updated is True, "sanity: replace_visit_metadata found and updated the row"
 
             rows_after_replace = await _push_log_rows(storage, guid)
             assert len(rows_after_replace) == 1, (
-                "replace_priem on an already-pending row must not add a new "
+                "replace_visit_metadata on an already-pending row must not add a new "
                 "push_log row — it is not a push"
             )
     finally:

@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 def _formal_json(formal: FormalStructureResult) -> str:
     return json.dumps(
-        [{"flag": f.flag, "issue": f.issue, "source": f.source, "comment": f.comment} for f in formal.findings],
+        # to_dict, not a field list of its own: the rule snapshot added six of
+        # them, and a second list would silently fall behind the first.
+        [f.to_dict() for f in formal.findings],
         ensure_ascii=False,
     )
 
@@ -465,6 +467,51 @@ class DoneCardsStorage(BaseStorage):
             row = await cur.fetchone()
         return row["priem"] if row else None
 
+    async def get_visit_metadata(self, card_guid: str) -> dict | None:
+        """{"Прием": ..., "Врач": ...} of a stored card, or None if no row matches.
+
+        The two blocks scripts/operator/backfill-priem-metadata.py refreshes
+        from 1C. A block the card lacks comes back as None. Matching is
+        case-insensitive, same as get_priem.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT card_data -> 'Прием' AS priem, card_data -> 'Врач' AS doctor "
+                "FROM done_cards "
+                "WHERE lower(card_guid) = lower(%(guid)s) AND card_data IS NOT NULL",
+                {"guid": card_guid},
+            )
+            row = await cur.fetchone()
+        return {"Прием": row["priem"], "Врач": row["doctor"]} if row else None
+
+    async def replace_visit_metadata(
+        self, *, card_guid: str, priem: str, doctor: str | None
+    ) -> bool:
+        """Replace the "Прием" block, and the "Врач" block when *doctor* is
+        given, with the fresh 1C ones. Each block is overwritten whole; the
+        rest of card_data is untouched. Returns True if a row was updated.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE done_cards
+                SET card_data = CASE
+                    WHEN %(doctor)s::text IS NULL
+                        THEN jsonb_set(card_data, '{Прием}', %(priem)s::jsonb)
+                    ELSE jsonb_set(jsonb_set(card_data, '{Прием}', %(priem)s::jsonb),
+                                   '{Врач}', %(doctor)s::jsonb)
+                END
+                WHERE lower(card_guid) = lower(%(guid)s)
+                  AND card_data IS NOT NULL
+                RETURNING id::text
+                """,
+                {"guid": card_guid, "priem": priem, "doctor": doctor},
+            )
+            row = await cur.fetchone()
+        if row:
+            logger.info("💾 done_cards REPLACE_VISIT_METADATA OK id=%s guid=%s", row["id"], card_guid)
+        return row is not None
+
     async def replace_priem(self, *, card_guid: str, priem: str) -> bool:
         """Replace the "Прием" block of card_data with the fresh 1C one.
 
@@ -611,6 +658,91 @@ class DoneCardsStorage(BaseStorage):
                 {"limit": limit, "after": after_id},
             )
             return await cur.fetchall()
+
+    async def list_cards_with_top_level_doctor(
+        self, *, limit: int = 0, after_id: str = ""
+    ) -> list[dict[str, Any]]:
+        """Cards whose top-level Врач block still carries GUID or FIO — the
+        shape 1C Alenka sends, not our form (parsers/doctor.py).
+
+        Serves the one-off scripts/hacks/backfill-alenka-doctors.py and goes
+        away with it. Keyset-paged by id like list_diag_results_to_backfill;
+        a rewritten card drops out of the predicate, so plain LIMIT would do,
+        but the cursor keeps a dry run from re-reading the same page forever.
+        limit=0 — no cap.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT id::text AS id, card_data
+                FROM done_cards
+                WHERE card_data -> 'Врач' ?| array['GUID', 'FIO']
+                  AND (%(after)s = '' OR id > %(after)s::uuid)
+                ORDER BY id
+                LIMIT NULLIF(%(limit)s, 0)
+                """,
+                {"limit": limit, "after": after_id},
+            )
+            return list(await cur.fetchall())
+
+    async def set_card_data(self, *, card_id: str, card_json: str) -> int:
+        """Rewrite card_data of one card whole. Returns rows changed.
+
+        Second half of the same backfill: the script builds the card, this
+        only writes it. updated_at moves by trigger (migration 022), and the
+        engine replica picks the card up on its incremental sync.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "UPDATE done_cards SET card_data = %(data)s::jsonb WHERE id = %(id)s::uuid",
+                {"id": card_id, "data": card_json},
+            )
+            return cur.rowcount
+
+    async def list_formal_results_to_backfill(
+        self, *, limit: int = 0, after_id: str = ""
+    ) -> list[dict[str, Any]]:
+        """Cards with at least one formal finding written before rule
+        snapshots existed (no rule_id key), plus the patient block the
+        script needs to tell the adult and child dispensary rules apart.
+
+        Serves the one-off scripts/hacks/backfill-rule-snapshot.py and goes
+        away with it. Keyset-paged by id like list_diag_results_to_backfill:
+        a finding the script cannot resolve (shared flag, unknown age) stays
+        without the key, and with LIMIT/OFFSET its card would be re-read
+        forever. limit=0 — no cap.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT id::text AS id, formal_result, card_data -> 'Пациент' AS patient
+                FROM done_cards
+                WHERE jsonb_typeof(formal_result) = 'array'
+                  AND (%(after)s = '' OR id > %(after)s::uuid)
+                  AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements(formal_result) AS finding
+                      WHERE NOT (finding ? 'rule_id'))
+                ORDER BY id
+                LIMIT NULLIF(%(limit)s, 0)
+                """,
+                {"limit": limit, "after": after_id},
+            )
+            return list(await cur.fetchall())
+
+    async def set_formal_result(self, *, card_id: str, formal_json: str) -> int:
+        """Rewrite formal_result of one card. Returns rows changed.
+
+        Second half of the same backfill: the script builds the list, this
+        only writes it. updated_at moves by trigger (migration 022), and the
+        engine replica picks the card up on its incremental sync.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                "UPDATE done_cards SET formal_result = %(data)s::jsonb WHERE id = %(id)s::uuid",
+                {"id": card_id, "data": formal_json},
+            )
+            return cur.rowcount
 
     async def set_diag_result(
         self, *, card_id: str, diag_json: str, diag_errors: list[str] | None = None
