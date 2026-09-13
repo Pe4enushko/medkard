@@ -120,7 +120,7 @@ services (`A03.*`, `A11.*`, `A16.*`); a drug prescription inside an ordinary
    вернуть несколько замечаний на одно правило, и все получали один и тот же флаг.
    `comment` стоит в схеме первым, чтобы модель выписала факты из карты до решения.
    Применимость правила здесь не спрашивается — её решил шаг 3.
-7. Runs `_check_nmu_keyword_contradiction(visit)` — a deterministic check that appends `NMU_CODE_CONTRADICTION` if a `B01` NMU suffix contradicts the service name (`.001` + «повторный» or `.002` + «первичный»).
+7. The code-vs-name contradiction (`NMU_CODE_CONTRADICTION`: `.001` + «повторный» or `.002` + «первичный») is no longer raised here. Since 2026-09-13 it is the deterministic rule `service_name_matches_code` (`src/audit/deterministic/deterministic_rules.json`), which carries a rule snapshot; the check itself is `nmu_keyword_contradiction(visit)` in this module.
 
 Returns the combined findings list and summed token count. An empty findings
 list means no defects were detected.

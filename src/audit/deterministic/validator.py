@@ -6,8 +6,8 @@
 недетерминированный ответ на детерминированный вопрос.
 
 Правила лежат в ``deterministic_rules.json`` рядом. Находки возвращаются в том
-же виде, что у ``FormalValidator.validate`` — ``{"flag", "issue", "source"}``,
-поэтому отчёт и хранилище не трогаются вовсе.
+же виде, что у ``FormalValidator.validate`` — ``flag``, ``issue`` и слепок
+правила (``SNAPSHOT_FIELDS``), поэтому отчёт и хранилище не трогаются вовсе.
 
 Чего здесь намеренно нет: проверок полей ``ДанныеОсмотра``. Они уже живут в
 ``formal_structure.required_fields`` и привязаны к шаблону записи — 1С не
@@ -32,7 +32,9 @@ from audit.formal_structure.validator import (
     FormalValidator,
     VisitType,
     _VISIT_TYPE_RULE_KEY,
+    _rule_snapshot,
     classify_code,
+    nmu_keyword_contradiction,
 )
 from parsers.json_parser import patient_age as _patient_age
 
@@ -163,6 +165,11 @@ def _declared_visit_type(visit: dict[str, Any], check: dict[str, Any]) -> str | 
     return None
 
 
+def _check_service_name_contradiction(visit: dict[str, Any], check: dict[str, Any]) -> str | None:
+    """Наименование услуги у клиники называет не тот вид приёма, что её код."""
+    return nmu_keyword_contradiction(visit)
+
+
 _PAIR = {VisitType.PRIMARY: "primary", VisitType.REPEAT: "repeat"}
 
 
@@ -290,6 +297,7 @@ _CHECKS = {
     "regex_absent": _check_regex_absent,
     "service_code_present": _check_service_code_present,
     "visit_type_contradiction": _check_visit_type_contradiction,
+    "service_name_contradiction": _check_service_name_contradiction,
     "egisz_name_matches_804n": _check_egisz_name,
     "record_minimum": _check_record_minimum,
     "controlled_indicators": _check_controlled_indicators,
@@ -355,7 +363,7 @@ class DeterministicValidator:
         visit: dict[str, Any],
         visit_types: set[str] | None = None,
     ) -> list[dict[str, str]]:
-        """Находки по включённым правилам.
+        """Находки по включённым правилам, каждая со слепком своего правила.
 
         *visit_types* — ключи типов визита из ``rules.json``. Если не переданы,
         считаются здесь же: классификация не ходит в модель и стоит дёшево.
@@ -388,6 +396,6 @@ class DeterministicValidator:
             findings.append({
                 "flag": rule["flag_code"],
                 "issue": issue,
-                "source": rule.get("source", ""),
+                **_rule_snapshot(rule),
             })
         return findings

@@ -112,3 +112,12 @@ def test_run_dry_run_writes_nothing():
     totals = asyncio.run(backfill._run(storage, rules=RULES, limit=0, batch=10, apply=False))
     assert totals["cards"] == 1
     assert storage.written == {}
+
+
+def test_catalogue_covers_deterministic_flags():
+    """Детерминированные замечания лежат в том же formal_result — их правило тоже находится."""
+    nmu = {"flag": "NMU_CODE_CONTRADICTION", "issue": "код против наименования", "source": "", "comment": ""}
+    findings, counts = backfill.snapshot([nmu], {"AGE": 40}, backfill.CATALOGUE)
+    assert findings[0]["rule_id"] == "service_name_matches_code"
+    assert findings[0]["severity"] == "незначительный"
+    assert counts["snapshotted"] == 1

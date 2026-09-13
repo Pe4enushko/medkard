@@ -57,6 +57,37 @@ def test_rule_without_a_normative_source_says_so_out_loud():
         assert "НОРМАТИВНОГО ОСНОВАНИЯ НЕТ" in rule["source_ref"], rule["rule_id"]
 
 
+def test_every_rule_carries_a_full_snapshot():
+    """Находка печатается со слепком правила — пустых полей в нём быть не должно.
+
+    Слепок читают отчёт и опрос врачей в движке: замечание без expectation туда
+    не попадает вовсе, без severity — теряет степень.
+    """
+    from storage.models.result import SNAPSHOT_FIELDS
+
+    for rule in _DOC["rules"]:
+        for key in SNAPSHOT_FIELDS:
+            assert rule.get(key), f"{rule['rule_id']}.{key} пусто"
+
+
+async def test_finding_carries_the_snapshot_of_its_rule():
+    rule = next(r for r in _DOC["rules"] if r["rule_id"] == "primary_visit_has_coded_diagnosis")
+    finding = next(
+        f for f in await DeterministicValidator().validate(_visit())
+        if f["flag"] == rule["flag_code"]
+    )
+    for key in ("rule_id", "source", "severity", "source_ref", "expectation", "verified_at"):
+        assert finding[key] == rule[key], key
+
+
+def test_flags_do_not_collide_with_the_formal_catalogue():
+    """Оба каталога пишут в один formal_result, и бэкфилл слепка ищет правило по флагу."""
+    from audit.formal_structure.validator import _RULES
+
+    formal = {r["flag_code"] for r in _RULES}
+    assert not formal & {r["flag_code"] for r in _DOC["rules"]}
+
+
 def test_disabled_rule_says_why():
     for rule in _DOC["rules"]:
         if not rule.get("enabled", True):
@@ -564,3 +595,36 @@ async def test_minimum_still_works_for_an_adult():
     card = _record([], _PRIMARY_SVC)
     card["Пациент"] = {"AGE": 40}
     assert await _minimum_issue(card) is not None
+
+
+# ── наименование услуги против кода ───────────────────────────────────────────
+
+_NAME_VS_CODE_FLAG = "NMU_CODE_CONTRADICTION"
+
+
+def _named(name, code):
+    return _visit(services=[{"Код": code, "Наименование": name}])
+
+
+async def test_service_named_repeat_but_coded_primary_is_flagged():
+    assert _NAME_VS_CODE_FLAG in await _flags(_named("Прием невролога повторный", "B01.023.001"))
+
+
+async def test_service_name_may_add_details_to_the_code():
+    """Письмо Минздрава от 04.07.2018 № 17-2/10/2-4323: организация может
+    «дополнительно конкретизировать» услугу. «Главного врача» — уточнение, не противоречие."""
+    got = await _flags(_named(
+        "Прием (осмотр, консультация) главного врача-невролога первичный", "B01.023.001"))
+    assert _NAME_VS_CODE_FLAG not in got
+
+
+async def test_formal_validator_no_longer_raises_the_name_contradiction(monkeypatch):
+    """Проверка переехала в детерминированный каталог — без модели и со слепком.
+
+    Двойной вызов дал бы два замечания на одно расхождение, и одно — без слепка.
+    """
+    import audit.formal_structure.validator as fv
+
+    monkeypatch.setattr(fv.FormalValidator, "get_rules", lambda self, *a, **k: [])
+    findings, _ = await fv.FormalValidator().validate(_named("Прием невролога повторный", "B01.023.001"))
+    assert _NAME_VS_CODE_FLAG not in {f["flag"] for f in findings}

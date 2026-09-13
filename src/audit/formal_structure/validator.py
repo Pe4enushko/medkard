@@ -57,8 +57,8 @@ _PROMPT_TEMPLATE: str = _PROMPT_PATH.read_text(encoding="utf-8")
 # ── Flag → regulatory source lookup ───────────────────────────────────────────
 _FLAG_SOURCE: dict[str, str] = {r["flag_code"]: r.get("source", "") for r in _RULES}
 
-# Empty snapshot for findings that come from no rule — the template-fields check
-# and the NMU contradiction. Written explicitly so every finding has one shape.
+# Empty snapshot for findings that come from no rule — the template-fields check.
+# Written explicitly so every finding has one shape.
 _EMPTY_SNAPSHOT: dict[str, str] = {key: "" for key in SNAPSHOT_FIELDS}
 
 
@@ -394,6 +394,52 @@ _LLM_LABEL_TO_TYPE: dict[str, VisitType] = {
 }
 
 
+def nmu_keyword_contradiction(visit: dict[str, Any]) -> str | None:
+    """Why the NMU code and the service name disagree, or None if they do not.
+
+    Both sides are read the same way as in ``get_visit_types``: the code
+    through ``classify_code``, the name through the same word stems. A code
+    the table leaves undecided (not an appointment, «прочее» group, or a
+    clinic-internal article) makes no primary/repeat claim and cannot
+    contradict anything. The check itself is a rule of the deterministic
+    catalogue (``service_name_matches_code``).
+    """
+    services: list = visit.get("Услуги") or []
+    for svc in services:
+        if not isinstance(svc, dict):
+            continue
+        name: str = (svc.get("Наименование") or "").lower()
+        name_type: VisitType | None = None
+        if "повторн" in name:
+            name_type = VisitType.REPEAT
+        elif "первичн" in name:
+            name_type = VisitType.PRIMARY
+        if name_type is None:
+            continue
+        for raw in svc.values():
+            if not raw:
+                continue
+            for token in str(raw).split():
+                m = NMU_RE.match(token.strip())
+                if not m:
+                    continue
+                code = m.group(0).upper().replace("В", "B").replace("А", "A")
+                code_type = classify_code(code)
+                if code_type not in (VisitType.PRIMARY, VisitType.REPEAT):
+                    continue
+                if code_type is name_type:
+                    continue
+                expected = "повторному" if code_type is VisitType.REPEAT else "первичному"
+                suffix = ".002" if code_type is VisitType.REPEAT else ".001"
+                claimed = "«повторный»" if name_type is VisitType.REPEAT else "«первичный»"
+                return (
+                    f"код {code} соответствует {expected} приёму "
+                    f"(окончание {suffix} по номенклатуре 804н), "
+                    f"но наименование услуги содержит {claimed}"
+                )
+    return None
+
+
 class FormalValidator:
     """Validates the formal structure of a single ambulatory visit record.
 
@@ -626,51 +672,9 @@ class FormalValidator:
         return _PROMPT_TEMPLATE
 
     def _check_nmu_keyword_contradiction(self, visit: dict[str, Any]) -> dict[str, str] | None:
-        """Return a NMU_CODE_CONTRADICTION finding if NMU code and service name disagree.
-
-        Both sides are read the same way as in ``get_visit_types``: the code
-        through ``classify_code``, the name through the same word stems. A code
-        the table leaves undecided (not an appointment, «прочее» group, or a
-        clinic-internal article) makes no primary/repeat claim and cannot
-        contradict anything.
-        """
-        services: list = visit.get("Услуги") or []
-        for svc in services:
-            if not isinstance(svc, dict):
-                continue
-            name: str = (svc.get("Наименование") or "").lower()
-            name_type: VisitType | None = None
-            if "повторн" in name:
-                name_type = VisitType.REPEAT
-            elif "первичн" in name:
-                name_type = VisitType.PRIMARY
-            if name_type is None:
-                continue
-            for raw in svc.values():
-                if not raw:
-                    continue
-                for token in str(raw).split():
-                    m = NMU_RE.match(token.strip())
-                    if not m:
-                        continue
-                    code = m.group(0).upper().replace("В", "B").replace("А", "A")
-                    code_type = classify_code(code)
-                    if code_type not in (VisitType.PRIMARY, VisitType.REPEAT):
-                        continue
-                    if code_type is name_type:
-                        continue
-                    expected = "повторному" if code_type is VisitType.REPEAT else "первичному"
-                    suffix = ".002" if code_type is VisitType.REPEAT else ".001"
-                    claimed = "«повторный»" if name_type is VisitType.REPEAT else "«первичный»"
-                    return {
-                        "flag": "NMU_CODE_CONTRADICTION",
-                        "issue": (
-                            f"NMU-код {code} соответствует {expected} приёму "
-                            f"(окончание {suffix} по номенклатуре 804н), "
-                            f"но наименование услуги содержит {claimed}"
-                        ),
-                    }
-        return None
+        """NMU_CODE_CONTRADICTION finding, or None. See ``nmu_keyword_contradiction``."""
+        detail = nmu_keyword_contradiction(visit)
+        return {"flag": "NMU_CODE_CONTRADICTION", "issue": detail} if detail else None
 
     def _check_missing_required_fields(
         self,
@@ -761,11 +765,5 @@ class FormalValidator:
             logger.info("[formal] %s", unfilled["issue"])
             # источника в rules.json нет: набор считан по боевым картам клиники
             findings.append({**unfilled, **_EMPTY_SNAPSHOT})
-
-        contradiction = self._check_nmu_keyword_contradiction(visit)
-        if contradiction:
-            logger.warning("[formal] NMU/keyword contradiction: %s", contradiction["issue"])
-            # NMU contradictions are always kept; source is not from rules.json
-            findings.append({**contradiction, **_EMPTY_SNAPSHOT})
 
         return findings, tokens

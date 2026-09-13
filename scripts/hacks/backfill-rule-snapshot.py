@@ -8,8 +8,8 @@ WHY THIS EXISTS: аудит теперь кладёт в каждое форма
 эталон для проверки ответов врача. У замечаний, записанных раньше, есть только
 flag и короткий ярлык source, и эталона у них нет.
 
-Скрипт проходит по таким замечаниям один раз и берёт слепок из ТЕКУЩЕГО
-rules.json по флагу. Это текущая редакция правила, а не та, что действовала
+Скрипт проходит по таким замечаниям один раз и берёт слепок по флагу из
+ТЕКУЩИХ каталогов — rules.json и deterministic_rules.json. Это текущая редакция правила, а не та, что действовала
 при проверке: исторических версий каталога нет, а правила почти не меняются —
 в основном добавляются новые.
 
@@ -18,9 +18,10 @@ rules.json по флагу. Это текущая редакция правил�
 и в валидаторе; возраст не читается — замечание остаётся без слепка и
 считается как ambiguous, чтобы его было видно.
 
-Флаг, которого нет в каталоге (незаполненные поля шаблона, противоречие НМУ,
-флаг ушедшего правила), получает пустой слепок — ту же форму, что живой аудит
-пишет синтетическим замечаниям.
+Флаг, которого нет ни в одном каталоге (незаполненные поля шаблона, флаг
+ушедшего правила), получает пустой слепок — ту же форму, что живой аудит пишет
+синтетическим замечаниям. Противоречие НМУ (NMU_CODE_CONTRADICTION) с
+2026-09-13 — правило service_name_matches_code детерминированного каталога.
 
 Запускать из корня проекта (dry-run без -y):
 
@@ -47,12 +48,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from audit.deterministic.validator import _RULES_PATH as _DETERMINISTIC_PATH
 from audit.formal_structure.validator import _ADULT_AGE, _RULES, _rule_snapshot
 from parsers.json_parser import patient_age
 from storage.done_cards_storage import DoneCardsStorage
 from storage.models.result import SNAPSHOT_FIELDS
 
 _EMPTY_SNAPSHOT = {key: "" for key in SNAPSHOT_FIELDS}
+
+# Both catalogues write into the same formal_result, so a flag is looked up in both.
+CATALOGUE: list[dict] = _RULES + json.loads(
+    _DETERMINISTIC_PATH.read_text(encoding="utf-8"))["rules"]
 
 
 def _pick_rule(candidates: list[dict], patient: dict) -> dict | None:
@@ -148,9 +154,9 @@ async def main() -> None:
     if args.batch <= 0:
         raise SystemExit(f"--batch must be positive, got {args.batch}")
 
-    print(f"Правил в каталоге: {len(_RULES)}")
+    print(f"Правил в каталогах: {len(CATALOGUE)}")
     async with DoneCardsStorage() as storage:
-        totals = await _run(storage, rules=_RULES, limit=args.limit,
+        totals = await _run(storage, rules=CATALOGUE, limit=args.limit,
                             batch=args.batch, apply=args.apply)
 
     print(f"\nЗамечаний: со слепком правила {totals['snapshotted']}, "
