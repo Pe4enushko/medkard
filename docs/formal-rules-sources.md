@@ -5,7 +5,7 @@
 сверялись. Обновляется при каждой ревизии правил; запись о ревизии — в
 `docs/formal-rules-revision-log.md`, раздел «Нормативка».
 
-Дата последней ревизии: **2026-08-21** (поле `revised_at` в `rules.json`).
+Дата последней ревизии: **2026-09-13** (поле `revised_at` в `rules.json`).
 
 Колонка «Прочитано» — по чему сверена формулировка: «PDF» — официальная
 публикация с pravo.gov.ru (**первоначальная редакция, без поправок**), «HTML» —
@@ -17,8 +17,8 @@
 
 | Ярлык | Документ | Действует | Прочитано | Правила |
 |---|---|---|---|---|
-| `323-FZ` | Федеральный закон от 21.11.2011 № 323-ФЗ «Об основах охраны здоровья граждан в Российской Федерации» — ст. 2 п. 21, ст. 20 ч. 1, 6, 7, ст. 37 ч. 1 п. 3–4, ст. 54, ст. 70 ч. 2, 5, 6 | бессрочно, редакция на дату сверки | RTF КонсультантПлюс | `diagnosis_should_be_supported`, `management_should_follow_diagnosis`, `followup_needed_for_nontrivial_case`, `diagnosis_justification_presence`, `consent_for_intervention_outside_list`, `legal_representative_info` |
-| `274n` | приказ МЗ РФ от 13.05.2025 № 274н «Об утверждении унифицированных форм медицинской документации … в амбулаторных условиях, и порядков по их заполнению» (форма 025/у) | 01.09.2025–01.09.2031 | PDF целиком: прил. 1 (форма 025/у), прил. 2 (п. 10–24), прил. 3–4 (талон 025-1/у) | `visit_meta_required`, `primary_core_sections_required`, `repeat_core_sections_required`, `repeat_needs_context_or_dynamics`, `diagnosis_required`, `objective_exam_required`, `plan_vs_result_separation`, `service_specialty_visit_alignment`, `placeholder_values_are_defect`, `duplicate_semantic_blocks_are_defect`, `manipulation_technique_and_outcome`, `injection_procedure_completeness` |
+| `323-FZ` | Федеральный закон от 21.11.2011 № 323-ФЗ «Об основах охраны здоровья граждан в Российской Федерации» — ст. 2 п. 21, ст. 20 ч. 1, 6, 7, ст. 37 ч. 1 п. 3–4, ст. 54, ст. 70 ч. 2, 5, 6 | бессрочно, редакция на дату сверки | RTF КонсультантПлюс | `diagnosis_should_be_supported`, `management_should_follow_diagnosis`, `followup_needed_for_nontrivial_case`, `diagnosis_justification_presence`, `consent_for_intervention_outside_list` |
+| `274n` | приказ МЗ РФ от 13.05.2025 № 274н «Об утверждении унифицированных форм медицинской документации … в амбулаторных условиях, и порядков по их заполнению» (форма 025/у) | 01.09.2025–01.09.2031 | PDF целиком: прил. 1 (форма 025/у), прил. 2 (п. 10–24), прил. 3–4 (талон 025-1/у) | `visit_meta_required`, `primary_core_sections_required`, `repeat_needs_context_or_dynamics`, `diagnosis_required`, `objective_exam_required`, `plan_vs_result_separation`, `service_specialty_visit_alignment`, `placeholder_values_are_defect`, `duplicate_semantic_blocks_are_defect`, `manipulation_technique_and_outcome`, `injection_procedure_completeness` |
 | `1094n` | приказ МЗ РФ от 24.11.2021 № 1094н «Об утверждении Порядка назначения лекарственных препаратов…» | 01.03.2022–01.03.2028 | PDF: прил. 1 п. 2, 5, 7, 17, 29, 32 | `treatment_dosage_clarity`, `prescription_by_trade_name`, `off_standard_prescription_needs_vk` |
 | `404n` | приказ МЗ РФ от 27.04.2021 № 404н «Об утверждении Порядка проведения профилактического медицинского осмотра и диспансеризации … взрослого населения» (ред. 15.06.2026 № 620н) | до 01.07.2027 | PDF (первоначальная ред.): п. 14, 16, 17, 18, 20, 22, 23; HTML (ред. 620н): анти-HCV | `adult_prophylactic_scope`, `adult_prophylactic_health_group`, `adult_prophylactic_counselling`, `adult_prophylactic_marker` |
 | `168n` | приказ МЗ РФ от 15.03.2022 № 168н «Об утверждении порядка проведения диспансерного наблюдения за взрослыми» (ред. 28.02.2024 № 91н) | до 01.09.2028 | PDF (первоначальная ред.): п. 4, 13, 14, 15, прил. 1–3 | `dispensary_followup_adult` |
@@ -32,7 +32,9 @@
 | `190n` | приказ МЗ РФ от 11.04.2025 № 190н «Об утверждении порядка и сроков проведения профилактических медицинских осмотров граждан в целях выявления туберкулёза» | 01.09.2025–01.09.2031 | PDF: п. 7, 18, 19 | `tuberculin_objective_data_required`, `tuberculin_specialist_examination_if_pathology`, `tuberculin_conclusion_required` |
 | `icd10` | МКБ-10 — справочник, не нормативный правовой акт (переход на МКБ-11 в РФ не завершён) | — | — | `icd_text_alignment`, `too_general_icd_for_rich_detail` |
 
-Правило `has_typos` источника не имеет — это внутренний стандарт качества.
+Без источника — внутренние стандарты качества: `has_typos` и `legal_representative_info`. Второе до 2026-09-10 ссылалось на 323-ФЗ ст. 20 ч. 1 и ст. 54 и требовало ФИО сопровождающего; ни 323-ФЗ, ни форма 025/у такой записи не требуют, подробности — в `source_ref` правила.
+
+`repeat_core_sections_required` удалено 2026-09-13 слиянием в `repeat_needs_context_or_dynamics`.
 
 ## Документы, на которые ссылаются `source_ref`, но не ярлыки
 
