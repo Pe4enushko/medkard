@@ -82,7 +82,6 @@ the repository.
 Loads `rules.json` (done once at module import). Returns rules where:
 - `applies_to.visit_types` contains `"all"` or overlaps with the resolved visit type keys.
 - `applies_to.age_group` is `"all"`, or matches the derived group (`"child"` if `age < 18`, `"adult"` otherwise — the boundary 404н draws with «граждане в возрасте 18 лет и старше»). When `patient_age=None` the card gave no usable age and **only `age_group="all"` rules are kept**: an unknown age must never widen the rule set into the wrong cohort. `Пациент.AGE` is read by `parsers.json_parser.patient_age`, the single parser shared with the clinical-guideline lookup — `AGE = 0` is an infant, not a missing value.
-- `applies_to.age_below` is a numeric threshold the three age groups cannot express: the rule applies only when `patient_age < age_below`. It exists for 323-ФЗ ст. 54 ч. 2, which lets a minor who has turned 15 consent on their own — so `legal_representative_info` is pointless for 15–17-year-olds even though they sit in the `child` group. An unknown age fails it, the same narrow side `age_group` takes. The two filters compose: a rule may carry both, and both must pass.
 
 Deduplicates by `flag_code` — the first matching rule wins. Two rules may share a flag on purpose (`test_flag_codes_are_unique_except_shared_pairs`), so such a pair must stay mutually exclusive through `applies_to`; otherwise the second one is dropped silently.
 
