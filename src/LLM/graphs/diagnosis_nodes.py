@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from audit.graph_trace import emit as trace_emit
 from LLM.prompt_context import today_block
+from parsers.study_abbreviations import is_study_abbreviation
 from LLM.graphs.diagnosis_state import (
     Aspect,
     Chunk,
@@ -287,7 +288,20 @@ async def extract_drugs(
                                     "content": _VERBATIM_REPROACH.format(bad=", ".join(bad))}]
         if bad:
             logger.warning("[extract_drugs] выдуманные упоминания отброшены: %s", bad)
-        mentions = [{"as_written": written} for written in good]
+        # «КАК», «ОАМ», «ЭКГ» из плана обследования модель выдаёт как препараты.
+        # В реестр они идти не должны: короткий запрос там находит случайную
+        # лексему (так «аск» вытащил коллаген для спортсменов, см. grls/lookup.py).
+        studies = [written for written in good if is_study_abbreviation(written)]
+        if studies:
+            logger.info("[extract_drugs] аббревиатуры исследований отброшены: %s", studies)
+            trace_emit(
+                "medicine.extraction.studies_dropped",
+                dx_code=state.get("dx_code"),
+                dropped=studies,
+            )
+        mentions = [
+            {"as_written": written} for written in good if written not in studies
+        ]
         update = {"drug_mentions": mentions, "tokens": tokens}
         trace_emit(
             "graph.node.completed",

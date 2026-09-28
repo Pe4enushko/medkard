@@ -691,6 +691,23 @@ async def test_extract_drugs_drops_invention_that_survives_the_second_try() -> N
     assert len(client.calls) == 2
 
 
+async def test_extract_drugs_drops_study_abbreviations() -> None:
+    """План обследования — не назначение: «КАК» и «ОАМ» в реестр не идут.
+
+    Случай карты ЦДЗ-00867066 за 24.09.2026: «Рекомендовано: 1. Контроль ЭКГ
+    2. КАК 3. ОАМ». Короткий запрос в реестре находит случайную лексему, и
+    справка о клиническом анализе крови уезжает судье как справка о препарате.
+    """
+    client = _Client('{"items":[{"as_written":"КАК"},{"as_written":"ОАМ"},{"as_written":"Дона"}]}')
+
+    update = await extract_drugs(
+        {"visit_context": "Рекомендовано: КАК, ОАМ, Дона 1500 мг"},
+        client=client,
+    )
+
+    assert update["drug_mentions"] == [{"as_written": "Дона"}]
+
+
 async def test_extract_drugs_verbatim_check_ignores_case_and_line_breaks() -> None:
     """Врач переносит строки и пишет как придётся — придираться к этому нельзя,
     иначе проверка начнёт выбрасывать верные упоминания."""

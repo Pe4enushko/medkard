@@ -14,7 +14,6 @@ apply to *all* visit types are the easy ones to trip by accident:
 
   ОТСУТСТВУЮТ_МЕТАДАННЫЕ_ВИЗИТА       — date, age, sex, service must be present
   ОБНАРУЖЕНЫ_ЗАГЛУШКИ                 — no "-", "уточнить", "б/д" stand-ins
-  ДУБЛИРОВАНИЕ_СМЫСЛОВЫХ_БЛОКОВ       — do not repeat a block in two Параметр's
   НЕСООТВЕТСТВИЕ_УСЛУГИ_И_ВИЗИТА      — service, specialty and visit type must agree
   НЕСООТВЕТСТВИЕ_МКБ_И_ТЕКСТА_ДИАГНОЗА— diagnosis text must match its ICD code
   ОРФОГРАФИЧЕСКИЕ_ОШИБКИ              — proofread the Russian
