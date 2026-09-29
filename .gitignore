@@ -1,5 +1,7 @@
 # Environment / secrets
 .env
+.env.dev
+.env.bak.*
 
 # PDFs (source data — not committed)
 pdfs/

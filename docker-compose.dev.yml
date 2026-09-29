@@ -1,0 +1,27 @@
+name: medkard-dev
+
+# Local dev database for the audit pipeline and the e2e suite. Bound to the
+# loopback interface only: nothing here is reachable from the network, which is
+# why trust auth is acceptable and no password lives in this file. The app role
+# still gets a real password — scripts/dev/deploy_dev.sh generates it and writes
+# it to .env.dev, so a switched .env is a working .env.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: medkard-dev-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:${MEDKARD_DEV_PORT:-55432}:5432"
+    volumes:
+      - medkard-dev-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  medkard-dev-db:

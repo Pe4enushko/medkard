@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Stage 1 of the dev stand: start the container, create the database, migrate it
+# and remember the credentials in .env.dev. Idempotent — safe to re-run.
+#
+# Never touches .env: switching the checkout over is stage 3 (switch_env.sh).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+COMPOSE_FILE="$ROOT/docker-compose.dev.yml"
+DEV_ENV="$ROOT/.env.dev"
+
+DB_NAME="${MEDKARD_DEV_DB:-medkard_dev}"
+DB_USER="${MEDKARD_DEV_USER:-medkard_dev}"
+DB_PORT="${MEDKARD_DEV_PORT:-55432}"
+HEALTH_TIMEOUT_SECONDS="${MEDKARD_DEV_HEALTH_TIMEOUT:-120}"
+
+usage() {
+    cat <<'EOF'
+Usage: deploy_dev.sh
+
+Starts the local dev Postgres (docker-compose.dev.yml), creates the role and
+database, enables the extensions, applies migrations/*.sql and writes the
+connection parameters to .env.dev.
+
+Environment overrides: MEDKARD_DEV_DB, MEDKARD_DEV_USER, MEDKARD_DEV_PORT,
+MEDKARD_DEV_HEALTH_TIMEOUT.
+EOF
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage; exit 0 ;;
+        *) echo "unknown argument: $arg" >&2; exit 2 ;;
+    esac
+done
+
+command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
+docker compose version >/dev/null 2>&1 || { echo "ERROR: 'docker compose' not available" >&2; exit 1; }
+command -v psql >/dev/null || { echo "ERROR: psql not found (install postgresql-client)" >&2; exit 1; }
+
+echo "==> starting container"
+MEDKARD_DEV_PORT="$DB_PORT" docker compose -f "$COMPOSE_FILE" up -d
+
+echo "==> waiting for health (up to ${HEALTH_TIMEOUT_SECONDS}s)"
+deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SECONDS ))
+until [[ "$(docker inspect -f '{{.State.Health.Status}}' medkard-dev-db 2>/dev/null)" == "healthy" ]]; do
+    if (( $(date +%s) > deadline )); then
+        echo "ERROR: container did not become healthy; see: docker logs medkard-dev-db" >&2
+        exit 1
+    fi
+    sleep 2
+done
+
+# Superuser connection. Auth is trust (loopback only), so no password is needed
+# here; the generated one below matters only to the application.
+admin() { psql -h 127.0.0.1 -p "$DB_PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"; }
+
+# A password is generated once and then reused: the role already exists on a
+# re-run, and rewriting it would invalidate whatever .env already carries.
+if [[ -f "$DEV_ENV" ]] && grep -q '^POSTGRES_PASSWORD=' "$DEV_ENV"; then
+    DB_PASSWORD="$(grep '^POSTGRES_PASSWORD=' "$DEV_ENV" | head -1 | cut -d= -f2-)"
+else
+    DB_PASSWORD="$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 24)"
+fi
+
+echo "==> role and database"
+admin -q <<SQL
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${DB_USER}') THEN
+        CREATE ROLE ${DB_USER} LOGIN;
+    END IF;
+END
+\$\$;
+ALTER ROLE ${DB_USER} WITH PASSWORD '${DB_PASSWORD}' CREATEDB;
+SQL
+
+if [[ "$(admin -tA -c "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'")" != "1" ]]; then
+    admin -q -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
+fi
+
+# vector has to exist before migration 001 runs against a non-superuser role.
+psql -h 127.0.0.1 -p "$DB_PORT" -U postgres -d "$DB_NAME" -v ON_ERROR_STOP=1 -q \
+    -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+    -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" \
+    -c "GRANT ALL ON SCHEMA public TO ${DB_USER};"
+
+cat > "$DEV_ENV" <<ENV
+# Written by scripts/dev/deploy_dev.sh — the local dev stand, not a secret store.
+# Stage 2 (fill_dev.sh) reads its target from here; stage 3 (switch_env.sh)
+# copies these lines into .env.
+POSTGRES_HOST=127.0.0.1
+POSTGRES_PORT=${DB_PORT}
+POSTGRES_DB=${DB_NAME}
+POSTGRES_USER=${DB_USER}
+POSTGRES_PASSWORD=${DB_PASSWORD}
+ENV
+
+echo "==> migrations"
+MEDKARD_ENV_FILE="$DEV_ENV" bash "$ROOT/migrations/migrate.sh"
+
+echo
+echo "dev stand ready: postgresql://${DB_USER}@127.0.0.1:${DB_PORT}/${DB_NAME}"
+echo "credentials written to .env.dev (.env untouched)"

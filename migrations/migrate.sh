@@ -2,7 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$(dirname "$SCRIPT_DIR")/.env"
+# MEDKARD_ENV_FILE lets the dev stand migrate .env.dev without touching .env —
+# scripts/dev/deploy_dev.sh sets it. Unset, the behaviour is what it always was.
+ENV_FILE="${MEDKARD_ENV_FILE:-$(dirname "$SCRIPT_DIR")/.env}"
 
 usage() {
     cat <<'EOF'
