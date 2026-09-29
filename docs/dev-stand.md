@@ -72,3 +72,6 @@ e2e/run-diagnosis-graph-tests.sh deterministic
 
 Тестам нужна не только база, но и LLM: ключи и модель остаются в `.env` теми же,
 стадия 3 их не трогает.
+
+Логи прогона и как их отдать на другую машину — в `docs/e2e-testing.md`, раздел
+«Run logs». Коротко: `scripts/dev/send_logs.sh <ssh-алиас>`.

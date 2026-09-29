@@ -23,6 +23,12 @@ _card_guid: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 _thread_lock = threading.Lock()
 
+# Repo root, not the process CWD: the trace of one audit belongs next to the
+# other logs of that checkout, and the audit is started from wherever the
+# operator happens to stand — scripts/, e2e/, a dev machine's home directory.
+# GRAPH_TRACE_PATH still overrides it, and an empty value still disables tracing.
+_DEFAULT_TRACE_PATH = Path(__file__).resolve().parents[2] / "logs" / "graphtraces.jsonl"
+
 
 def new_correlation_id() -> str:
     """Return a new correlation id for one card audit."""
@@ -78,7 +84,7 @@ def emit(
     **fields: Any,
 ) -> None:
     """Append one JSON object; tracing must never interrupt the audit itself."""
-    path_value = os.environ.get("GRAPH_TRACE_PATH", "logs/graphtraces.jsonl")
+    path_value = os.environ.get("GRAPH_TRACE_PATH", str(_DEFAULT_TRACE_PATH))
     if not path_value:
         return
 

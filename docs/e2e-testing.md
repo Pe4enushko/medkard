@@ -106,3 +106,24 @@ For running the audit suite, see `e2e/tests/audit/README.md`.
 Route tests namespace every resource with `TAG` and always clean up in `finally`, because they write
 to the same shared Postgres real e2e runs use. `--keep` exists purely for manual debugging against a
 real database — always confirm what it left behind and clean up by hand afterward.
+
+## Run logs, and getting them off the machine
+
+Every run of `e2e/run-diagnosis-graph-tests.sh` saves its whole combined
+stdout/stderr to `logs/e2e-YYYY-MM-DD_HH-MM-SS-PID.log` under the repository
+root. The graph trace of the same run lands in `logs/graphtraces.jsonl`, also
+under the repository root — it is *not* relative to the directory the tests were
+started from, which it used to be.
+
+To hand the logs to someone on another machine:
+
+```bash
+scripts/dev/send_logs.sh                       # 3 newest logs to the remoteclaude alias
+scripts/dev/send_logs.sh myhost --count 1 --traces
+scripts/dev/send_logs.sh myhost --all --dest projects/logs/from-dev
+```
+
+The first positional argument is an ssh host from `~/.ssh/config`, so no
+credentials live in the script. File names already carry a timestamp, so nothing
+is overwritten on the far side. An unreachable alias fails with a message
+instead of waiting on a password prompt.

@@ -70,3 +70,24 @@ def test_async_tasks_keep_correlation_ids_isolated(tmp_path, monkeypatch) -> Non
         "worker.started",
         "worker.completed",
     ]
+
+
+def test_default_path_is_the_repo_logs_dir_not_the_cwd(tmp_path, monkeypatch) -> None:
+    """Трейс уезжал в CWD процесса: у «logs/graphtraces.jsonl» нет корня.
+
+    Аудит запускают откуда угодно — из scripts/, из e2e/, из домашнего каталога
+    на dev-машине, — и трейс каждый раз оказывался в новом месте.
+    """
+    from pathlib import Path
+
+    from audit import graph_trace
+
+    repo_root = Path(graph_trace.__file__).resolve().parents[2]
+    assert graph_trace._DEFAULT_TRACE_PATH == repo_root / "logs" / "graphtraces.jsonl"
+
+    monkeypatch.delenv("GRAPH_TRACE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    with trace_context("correlation-cwd", "card-cwd"):
+        emit("test.cwd_event")
+
+    assert not (tmp_path / "logs").exists()
