@@ -32,8 +32,17 @@ without the defect, where the flag must not appear.  Without such a pair a
 presence-only case proves nothing about a rule that always fires.
 
 `Case.expect` may also name a flag that code raises rather than a rules.json
-rule (НЕЗАПОЛНЕНЫ_ПОЛЯ_ШАБЛОНА, NMU_CODE_CONTRADICTION).  Such a flag never
-reaches the prompt, so stage 1 asks the check itself instead of get_rules.
+rule: НЕЗАПОЛНЕНЫ_ПОЛЯ_ШАБЛОНА and every flag of the deterministic catalogue
+(`src/audit/deterministic/deterministic_rules.json`).  Such a flag never
+reaches the prompt, so stage 1 asks the checks themselves instead of get_rules —
+the catalogue runs there in full, since it touches neither the LLM nor the
+database.
+
+For a catalogue flag stage 2 asserts two things beyond the flag itself: the
+finding carries the complete rule snapshot, and it appears exactly once.  Both
+guard real defects — after the release merge the catalogue's findings arrived
+with an empty snapshot, and NMU_CODE_CONTRADICTION used to be raised by the
+formal validator, so a leftover call there would double the doctor's remark.
 
 Nothing is persisted.  `_audit_visit` calls `_upsert_done_card`, but that
 returns immediately while `self._done_cards is None`, and it is only set by
@@ -68,9 +77,11 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
+from audit.deterministic import DeterministicValidator  # noqa: E402
 from audit.formal_structure.validator import _RULES, FormalValidator, VisitType  # noqa: E402
 from audit.graph_trace import new_correlation_id, trace_context  # noqa: E402
 from audit.pipeline import AuditPipeline  # noqa: E402
+from storage.models.result import SNAPSHOT_FIELDS  # noqa: E402
 
 _OK, _BAD = "  \033[32mok\033[0m    ", "  \033[31mПРОВАЛ\033[0m"
 
@@ -117,9 +128,23 @@ class _Report:
 
 _RULE_FLAGS: set[str] = {rule["flag_code"] for rule in _RULES}
 
+_DETERMINISTIC = DeterministicValidator()
+_DETERMINISTIC_FLAGS: set[str] = {
+    rule["flag_code"] for rule in _DETERMINISTIC._rules  # noqa: SLF001
+}
 
-def _code_flags(validator: FormalValidator, visit: dict[str, Any], types: set[VisitType]) -> set[str]:
-    """Флаги, которые ставит код, а не модель по правилу из rules.json."""
+
+async def _code_flags(
+    validator: FormalValidator,
+    visit: dict[str, Any],
+    types: set[VisitType],
+) -> set[str]:
+    """Флаги, которые ставит код, а не модель по правилу из rules.json.
+
+    Детерминированный каталог считается здесь целиком: он не ходит ни в LLM,
+    ни в БД, поэтому этап 1 остаётся дешёвым и по-прежнему ловит мис-собранную
+    фикстуру до первого токена.
+    """
     produced = set()
     for finding in (
         validator._check_nmu_keyword_contradiction(visit),  # noqa: SLF001
@@ -127,7 +152,25 @@ def _code_flags(validator: FormalValidator, visit: dict[str, Any], types: set[Vi
     ):
         if finding:
             produced.add(finding["flag"])
+    produced |= {finding["flag"] for finding in await _DETERMINISTIC.validate(visit)}
     return produced
+
+
+def _snapshot_gaps(result: Any, flag: str) -> list[str]:
+    """Поля слепка правила, пустые у находок с этим флагом.
+
+    Слепок — это то, что врач увидит рядом с замечанием: код правила, степень,
+    источник, обоснование, эталонный текст. После мёржа release находки
+    детерминированного каталога приезжали с пустым слепком, и юнит этого не
+    поймал: он смотрел на валидатор, а не на путь до `formal.findings`.
+    """
+    return [
+        f"{finding.flag}.{key}"
+        for finding in result.formal.findings
+        if finding.flag == flag
+        for key in SNAPSHOT_FIELDS
+        if not getattr(finding, key, "")
+    ]
 
 
 def _flags(result: Any) -> set[str]:
@@ -221,7 +264,7 @@ async def _stage_one(cases: list[Case], report: _Report) -> None:
         # Флаг ставит код, а не правило из rules.json, — в промпт ему попадать
         # неоткуда. Тогда этап 1 спрашивает у самой проверки, и мис-собранная
         # фикстура падает здесь, до первого токена, ровно как задумано.
-        produced = _code_flags(validator, visit, got_types)
+        produced = await _code_flags(validator, visit, got_types)
         report.check(
             f"[{case.name}] код {'ставит' if case.present else 'не ставит'} {case.expect}",
             (case.expect in produced) is case.present,
@@ -286,6 +329,23 @@ async def _stage_two(cases: list[Case], report: _Report) -> None:
                 (case.expect in got) is case.present,
                 f"набор флагов: {', '.join(sorted(got)) or '—'}\n"
                 f"находки целиком:\n{_describe(result)}",
+            )
+
+        if case.present and case.expect in _DETERMINISTIC_FLAGS:
+            gaps = _snapshot_gaps(result, case.expect)
+            report.check(
+                f"[{case.name}] слепок правила дошёл до находки целиком",
+                not gaps,
+                "пустые поля слепка: " + ", ".join(gaps),
+            )
+            # Два валидатора пишут в один formal_result, и NMU_CODE_CONTRADICTION
+            # раньше ставил формальный. Дубль означал бы, что старое срабатывание
+            # осталось на месте, а врач получил одно замечание дважды.
+            raised = [f for f in result.formal.findings if f.flag == case.expect]
+            report.check(
+                f"[{case.name}] флаг поставлен один раз",
+                len(raised) == 1,
+                f"находок с этим флагом: {len(raised)}",
             )
 
         expected_dx = len(case.visit["Диагнозы"])

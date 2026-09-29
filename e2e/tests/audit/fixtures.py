@@ -66,6 +66,7 @@ def base_visit(
     diagnoses: list[dict[str, Any]],
     gender: str = "Женский",
     visit_date: str = VISIT_DATE,
+    egisz_name: str = "",
 ) -> dict[str, Any]:
     """Assemble a complete visit card.
 
@@ -78,6 +79,11 @@ def base_visit(
 
     `Пациент.AGE` is written as an int under the key the validator actually
     reads — `validator.py` looks at `AGE` only, with no fallback to «Возраст».
+
+    `egisz_name` fills `НаименованиеЕГИСЗ`, the field the deterministic rule
+    `egisz_service_name_matches_804n` compares against the order. It stays out
+    of the row unless asked for: the rule is silent when the field is empty,
+    and an unasked-for value would make every other fixture depend on it.
     """
     return {
         "Прием": {
@@ -89,7 +95,13 @@ def base_visit(
         },
         "Врач": {"SPECIALIZATION": specialty},
         "Пациент": {"CODE": "P-000001", "GENDER": gender, "AGE": age},
-        "Услуги": [{"КодЕГИСЗ": service_code, "Наименование": service_name}],
+        "Услуги": [
+            {
+                "КодЕГИСЗ": service_code,
+                "Наименование": service_name,
+                **({"НаименованиеЕГИСЗ": egisz_name} if egisz_name else {}),
+            }
+        ],
         "ДанныеОсмотра": [
             {"Параметр": param, "Значение": value} for param, value in inspection
         ],
