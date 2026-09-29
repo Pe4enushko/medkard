@@ -70,8 +70,12 @@ if [[ "$SRC_HOST:$SRC_PORT/$SRC_DB" == "$DST_HOST:$DST_PORT/$DST_DB" ]]; then
     exit 1
 fi
 
-src() { PGPASSWORD="$SRC_PASSWORD" psql -h "$SRC_HOST" -p "${SRC_PORT:-5432}" -U "$SRC_USER" -d "$SRC_DB" -v ON_ERROR_STOP=1 "$@"; }
-dst() { PGPASSWORD="$DST_PASSWORD" psql -h "$DST_HOST" -p "${DST_PORT:-5432}" -U "$DST_USER" -d "$DST_DB" -v ON_ERROR_STOP=1 "$@"; }
+# Docker's port proxy accepts a TCP connection before Postgres listens, so a
+# client can wait forever on an established connection. Cap every attempt.
+export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
+
+src() { PGPASSWORD="$SRC_PASSWORD" psql -w -h "$SRC_HOST" -p "${SRC_PORT:-5432}" -U "$SRC_USER" -d "$SRC_DB" -v ON_ERROR_STOP=1 "$@"; }
+dst() { PGPASSWORD="$DST_PASSWORD" psql -w -h "$DST_HOST" -p "${DST_PORT:-5432}" -U "$DST_USER" -d "$DST_DB" -v ON_ERROR_STOP=1 "$@"; }
 
 echo "source: $SRC_USER@$SRC_HOST:${SRC_PORT:-5432}/$SRC_DB  (read only)"
 echo "target: $DST_USER@$DST_HOST:${DST_PORT:-5432}/$DST_DB"

@@ -43,17 +43,43 @@ command -v pg_isready >/dev/null || { echo "ERROR: pg_isready not found (install
 echo "==> starting container"
 MEDKARD_DEV_PORT="$DB_PORT" docker compose -f "$COMPOSE_FILE" up -d
 
-echo "==> waiting for health (up to ${HEALTH_TIMEOUT_SECONDS}s)"
-# What matters is that the server answers on the published port, not what the
-# healthcheck thinks: a container reused from an earlier compose file may carry
-# no healthcheck at all, and then Health.Status is empty forever. pg_isready
-# from the host is the same question asked where the answer is needed.
+# Superuser connection. Auth is trust (loopback only), so no password is needed
+# here; the generated one below matters only to the application.
+#
+# Two flags keep this from hanging, and both were learned the hard way:
+#   -w                  — psql otherwise waits for a password on a container
+#                         whose data directory was initialised under another
+#                         auth method, and waits without printing anything;
+#   PGCONNECT_TIMEOUT   — docker's port proxy accepts the TCP connection before
+#                         Postgres listens, so a client can sit in an
+#                         established connection waiting for a handshake that
+#                         nobody will send.
+export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-5}"
+admin() { psql -w -h 127.0.0.1 -p "$DB_PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"; }
+
+echo "==> waiting for the server to answer (up to ${HEALTH_TIMEOUT_SECONDS}s)"
+# The probe is a real query, not pg_isready: an accepted TCP connection says
+# nothing about a server that can answer, and the healthcheck says nothing about
+# a container reused from an earlier compose file, where it does not exist.
 deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SECONDS ))
-until pg_isready -h 127.0.0.1 -p "$DB_PORT" -U postgres -q 2>/dev/null; do
+until admin -tA -c 'SELECT 1' >/dev/null 2>&1; do
     if (( $(date +%s) > deadline )); then
         state="$(docker inspect -f '{{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' medkard-dev-db 2>/dev/null || echo unknown)"
-        echo "ERROR: no answer on 127.0.0.1:$DB_PORT after ${HEALTH_TIMEOUT_SECONDS}s (container: $state)" >&2
-        echo "--- last 20 log lines ---" >&2
+        cat >&2 <<MSG
+
+ERROR: no usable answer from 127.0.0.1:$DB_PORT after ${HEALTH_TIMEOUT_SECONDS}s
+       (container: $state)
+
+If the container is running, its data directory was most likely initialised
+before POSTGRES_HOST_AUTH_METHOD=trust was in docker-compose.dev.yml — that
+setting only applies when the directory is created, so postgres still wants a
+password nobody has. There is nothing to lose in a fresh stand:
+
+    docker compose -f docker-compose.dev.yml down -v
+    bash scripts/dev/deploy_dev.sh
+
+--- last 20 log lines ---
+MSG
         docker logs --tail 20 medkard-dev-db >&2 2>&1 || true
         exit 1
     fi
@@ -61,26 +87,6 @@ until pg_isready -h 127.0.0.1 -p "$DB_PORT" -U postgres -q 2>/dev/null; do
     sleep 2
 done
 echo " ready"
-
-# Superuser connection. Auth is trust (loopback only), so no password is needed
-# here; the generated one below matters only to the application. `-w` matters:
-# without it psql waits for a password on a container whose volume was
-# initialised under another auth method, and the script just hangs.
-admin() { psql -w -h 127.0.0.1 -p "$DB_PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"; }
-
-if ! admin -tA -c 'SELECT 1' >/dev/null 2>&1; then
-    cat >&2 <<MSG
-ERROR: cannot connect as postgres to 127.0.0.1:$DB_PORT without a password.
-The container is up, so its volume was most likely initialised before
-POSTGRES_HOST_AUTH_METHOD=trust was in docker-compose.dev.yml — the setting only
-applies when the data directory is created.
-
-There is nothing to lose in a fresh stand, so recreate it:
-    docker compose -f docker-compose.dev.yml down -v
-    bash scripts/dev/deploy_dev.sh
-MSG
-    exit 1
-fi
 
 # A password is generated once and then reused: the role already exists on a
 # re-run, and rewriting it would invalidate whatever .env already carries.
