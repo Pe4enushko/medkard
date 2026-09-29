@@ -26,8 +26,26 @@ _thread_lock = threading.Lock()
 # Repo root, not the process CWD: the trace of one audit belongs next to the
 # other logs of that checkout, and the audit is started from wherever the
 # operator happens to stand — scripts/, e2e/, a dev machine's home directory.
-# GRAPH_TRACE_PATH still overrides it, and an empty value still disables tracing.
-_DEFAULT_TRACE_PATH = Path(__file__).resolve().parents[2] / "logs" / "graphtraces.jsonl"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_TRACE_PATH = _REPO_ROOT / "logs" / "graphtraces.jsonl"
+
+
+def _trace_path() -> Path | None:
+    """Where to append, or None when tracing is off.
+
+    GRAPH_TRACE_PATH still decides, and an empty value still disables tracing —
+    but a RELATIVE value is resolved against the repo root rather than the CWD.
+    Otherwise the variable reintroduces the very defect the default cured, and
+    `.env.example` ships exactly such a value (`logs/graphtraces.jsonl`), so
+    every checkout that copied it was affected.
+    """
+    raw = os.environ.get("GRAPH_TRACE_PATH")
+    if raw is None:
+        return _DEFAULT_TRACE_PATH
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else _REPO_ROOT / path
 
 
 def new_correlation_id() -> str:
@@ -84,8 +102,8 @@ def emit(
     **fields: Any,
 ) -> None:
     """Append one JSON object; tracing must never interrupt the audit itself."""
-    path_value = os.environ.get("GRAPH_TRACE_PATH", str(_DEFAULT_TRACE_PATH))
-    if not path_value:
+    path = _trace_path()
+    if path is None:
         return
 
     resolved_correlation_id = correlation_id or _correlation_id.get()
@@ -108,7 +126,6 @@ def emit(
             )
             + "\n"
         ).encode("utf-8")
-        path = Path(path_value)
         path.parent.mkdir(parents=True, exist_ok=True)
         with _thread_lock:
             descriptor = os.open(

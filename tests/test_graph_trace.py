@@ -91,3 +91,30 @@ def test_default_path_is_the_repo_logs_dir_not_the_cwd(tmp_path, monkeypatch) ->
         emit("test.cwd_event")
 
     assert not (tmp_path / "logs").exists()
+
+
+def test_relative_env_path_is_resolved_against_the_repo_root(tmp_path, monkeypatch) -> None:
+    """`.env.example` раздаёт «logs/graphtraces.jsonl» — относительное значение.
+
+    Переменная перебивает значение по умолчанию, поэтому без этого разрешения
+    любой .env, скопированный с примера, возвращал трейс в CWD процесса.
+    """
+    from pathlib import Path
+
+    from audit import graph_trace
+
+    repo_root = Path(graph_trace.__file__).resolve().parents[2]
+    monkeypatch.setenv("GRAPH_TRACE_PATH", "logs/graphtraces.jsonl")
+    assert graph_trace._trace_path() == repo_root / "logs" / "graphtraces.jsonl"
+
+    monkeypatch.setenv("GRAPH_TRACE_PATH", str(tmp_path / "elsewhere.jsonl"))
+    assert graph_trace._trace_path() == tmp_path / "elsewhere.jsonl"
+
+    monkeypatch.setenv("GRAPH_TRACE_PATH", "")
+    assert graph_trace._trace_path() is None
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GRAPH_TRACE_PATH", "logs/graphtraces.jsonl")
+    with trace_context("correlation-relative", "card-relative"):
+        emit("test.relative_event")
+    assert not (tmp_path / "logs").exists()

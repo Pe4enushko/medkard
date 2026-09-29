@@ -21,7 +21,6 @@
 | Tool `retrieve`, `hybrid_search`, докстринг про `create_rag_agent` | `src/LLM/rag_agent.py:12–14, 47–75`, `src/RAG/retrieval/vector_store.py:382–458` | Функции `create_rag_agent` не существует (есть `create_checker_agent`); tool не входит ни в один набор, `hybrid_search` жив только за счёт `tests/test_vector_store*.py` |
 | `validate_visit` (проверка всех правил одним запросом) | `src/LLM/validations.py:96–128` | Заменён атомарным `validate_rule`; вызывается только из `tests/test_validations.py` |
 | `total_tokens += 0` | `src/LLM/client.py:181` | Ничего не делает |
-| `LLM_OBSERVABILITY_PATH` | `.env.example:9` | Модуль `src/LLM/observability.py` и `scripts/summarize-llm-observability.py` удалены в `4166fe6` |
 
 Решение 2026-08-22: до релиза не трогаем — вычистка задевает тесты
 (`test_chinese_detector.py`, `test_validations.py`, `test_vector_store*.py`) и
