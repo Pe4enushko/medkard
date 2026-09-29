@@ -63,8 +63,24 @@ done
 echo " ready"
 
 # Superuser connection. Auth is trust (loopback only), so no password is needed
-# here; the generated one below matters only to the application.
-admin() { psql -h 127.0.0.1 -p "$DB_PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"; }
+# here; the generated one below matters only to the application. `-w` matters:
+# without it psql waits for a password on a container whose volume was
+# initialised under another auth method, and the script just hangs.
+admin() { psql -w -h 127.0.0.1 -p "$DB_PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"; }
+
+if ! admin -tA -c 'SELECT 1' >/dev/null 2>&1; then
+    cat >&2 <<MSG
+ERROR: cannot connect as postgres to 127.0.0.1:$DB_PORT without a password.
+The container is up, so its volume was most likely initialised before
+POSTGRES_HOST_AUTH_METHOD=trust was in docker-compose.dev.yml — the setting only
+applies when the data directory is created.
+
+There is nothing to lose in a fresh stand, so recreate it:
+    docker compose -f docker-compose.dev.yml down -v
+    bash scripts/dev/deploy_dev.sh
+MSG
+    exit 1
+fi
 
 # A password is generated once and then reused: the role already exists on a
 # re-run, and rewriting it would invalidate whatever .env already carries.
@@ -91,7 +107,7 @@ if [[ "$(admin -tA -c "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'")"
 fi
 
 # vector has to exist before migration 001 runs against a non-superuser role.
-psql -h 127.0.0.1 -p "$DB_PORT" -U postgres -d "$DB_NAME" -v ON_ERROR_STOP=1 -q \
+psql -w -h 127.0.0.1 -p "$DB_PORT" -U postgres -d "$DB_NAME" -v ON_ERROR_STOP=1 -q \
     -c "CREATE EXTENSION IF NOT EXISTS vector;" \
     -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" \
     -c "GRANT ALL ON SCHEMA public TO ${DB_USER};"
