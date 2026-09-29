@@ -38,19 +38,29 @@ done
 command -v docker >/dev/null || { echo "ERROR: docker not found" >&2; exit 1; }
 docker compose version >/dev/null 2>&1 || { echo "ERROR: 'docker compose' not available" >&2; exit 1; }
 command -v psql >/dev/null || { echo "ERROR: psql not found (install postgresql-client)" >&2; exit 1; }
+command -v pg_isready >/dev/null || { echo "ERROR: pg_isready not found (install postgresql-client)" >&2; exit 1; }
 
 echo "==> starting container"
 MEDKARD_DEV_PORT="$DB_PORT" docker compose -f "$COMPOSE_FILE" up -d
 
 echo "==> waiting for health (up to ${HEALTH_TIMEOUT_SECONDS}s)"
+# What matters is that the server answers on the published port, not what the
+# healthcheck thinks: a container reused from an earlier compose file may carry
+# no healthcheck at all, and then Health.Status is empty forever. pg_isready
+# from the host is the same question asked where the answer is needed.
 deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SECONDS ))
-until [[ "$(docker inspect -f '{{.State.Health.Status}}' medkard-dev-db 2>/dev/null)" == "healthy" ]]; do
+until pg_isready -h 127.0.0.1 -p "$DB_PORT" -U postgres -q 2>/dev/null; do
     if (( $(date +%s) > deadline )); then
-        echo "ERROR: container did not become healthy; see: docker logs medkard-dev-db" >&2
+        state="$(docker inspect -f '{{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' medkard-dev-db 2>/dev/null || echo unknown)"
+        echo "ERROR: no answer on 127.0.0.1:$DB_PORT after ${HEALTH_TIMEOUT_SECONDS}s (container: $state)" >&2
+        echo "--- last 20 log lines ---" >&2
+        docker logs --tail 20 medkard-dev-db >&2 2>&1 || true
         exit 1
     fi
+    printf '.'
     sleep 2
 done
+echo " ready"
 
 # Superuser connection. Auth is trust (loopback only), so no password is needed
 # here; the generated one below matters only to the application.
