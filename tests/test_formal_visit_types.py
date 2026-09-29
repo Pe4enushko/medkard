@@ -403,7 +403,12 @@ async def test_other_names_the_services_it_could_not_classify(caplog):
     assert "без кода" in text
 
 
-async def test_z_codes_name_the_reason_for_the_visit():
+# Услуга, о которой не может сказать ни код, ни наименование: только на такой
+# карте Z-код и решает вид приёма.
+_SILENT_SERVICE = [{"Наименование": "Осмотр"}]
+
+
+async def test_z_codes_name_the_reason_when_services_say_nothing():
     """274н прил. 4 п. 9.13 делит посещения на «по заболеванию» и «Z00-Z99».
 
     До этого из всего класса Z читался один Z11.1.
@@ -418,8 +423,57 @@ async def test_z_codes_name_the_reason_for_the_visit():
         "Z35.5": VisitType.DISPENSARY,
     }
     for code, expected in cases.items():
-        got = await v.get_visit_types(_visit(diagnoses=[{"КодМКБ": code}]))
+        got = await v.get_visit_types(
+            _visit(diagnoses=[{"КодМКБ": code}], services=_SILENT_SERVICE)
+        )
         assert expected in got, (code, got)
+
+
+async def test_z_code_does_not_add_a_type_over_a_service_verdict():
+    """Услуга сказала «первичный» — Z-код поверх него тип не добавляет.
+
+    Безусловным этот разбор был с 5b5c3f4 до 2026-09-29, и это была регрессия:
+    на приёме педиатра с Z00.1 к PRIMARY добавлялся PROPHYLACTIC, шаблон
+    обязательных полей выбирался профилактический, и 127 карт Алёнки теряли 125
+    замечаний о незаполненных полях. Z-код говорит, зачем пришёл пациент; вид
+    приёма называет услуга.
+    """
+    v = FormalValidator()
+    for code in ("Z00.1", "Z12.4", "Z34.0"):
+        got = await v.get_visit_types(
+            _visit(
+                diagnoses=[{"КодМКБ": code}],
+                services=[{"Наименование": "Приём первичный"}],
+            )
+        )
+        assert got == {VisitType.PRIMARY}, (code, got)
+
+
+async def test_z11_1_does_not_also_match_the_z11_prefix():
+    """У Z11.1 свой вердикт, и запасной разбор не должен добавить ей PROPHYLACTIC.
+
+    Ловушка: Z11.1 лежит под префиксом Z11, который означает обычный скрининг.
+    """
+    got = await FormalValidator().get_visit_types(
+        _visit(diagnoses=[{"КодМКБ": "Z11.1"}], services=_SILENT_SERVICE)
+    )
+    assert got == {VisitType.PROPHYLACTIC_TUBERCULIN}
+
+
+async def test_z11_1_stays_unconditional_over_a_service_verdict():
+    """Исключение — Z11.1: правила 190н критичные, а проба Манту бывает услугой.
+
+    Закодированная как исследование, она дала бы LAB_RESEARCH_INTERVENTION, и
+    условный разбор выключил бы проверку самой туберкулинодиагностики.
+    """
+    got = await FormalValidator().get_visit_types(
+        _visit(
+            diagnoses=[{"КодМКБ": "Z11.1"}],
+            services=[{"КодЕГИСЗ": "A12.26.002", "Наименование": "Проба с туберкулином"}],
+        )
+    )
+    assert VisitType.PROPHYLACTIC_TUBERCULIN in got
+    assert VisitType.LAB_RESEARCH_INTERVENTION in got
 
 
 async def test_tuberculin_screening_is_not_a_general_prophylactic_examination():
@@ -430,8 +484,10 @@ async def test_tuberculin_screening_is_not_a_general_prophylactic_examination():
     got = await FormalValidator().get_visit_types(_visit(diagnoses=[{"КодМКБ": "Z11.1"}]))
     assert VisitType.PROPHYLACTIC_TUBERCULIN in got
     assert VisitType.PROPHYLACTIC not in got
-    # соседи по рубрике — обычный скрининг
-    got = await FormalValidator().get_visit_types(_visit(diagnoses=[{"КодМКБ": "Z11.8"}]))
+    # соседи по рубрике — обычный скрининг, но уже запасным разбором
+    got = await FormalValidator().get_visit_types(
+        _visit(diagnoses=[{"КодМКБ": "Z11.8"}], services=_SILENT_SERVICE)
+    )
     assert VisitType.PROPHYLACTIC in got
     assert VisitType.PROPHYLACTIC_TUBERCULIN not in got
 

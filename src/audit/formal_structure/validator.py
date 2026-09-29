@@ -363,6 +363,38 @@ def classify_icd(code: str) -> VisitType | None:
     return None
 
 
+def classify_icd_exact(code: str) -> VisitType | None:
+    """Только Z11.1 — скрининг на туберкулёз со своим порядком 190н.
+
+    Этот вердикт безусловен и старше ветки: правила 190н критичные, а услуга
+    пробы Манту бывает закодирована как исследование — условный разбор их бы
+    выключил.
+    """
+    return _ICD_EXACT.get(code.strip().upper())
+
+
+def classify_icd_prefix(code: str) -> VisitType | None:
+    """Z00/Z10–Z13, Z34–Z35 — повод обращения, а не вид приёма.
+
+    ПРИМЕНЯЕТСЯ ТОЛЬКО ЗАПАСНЫМ РАЗБОРОМ, когда услуги не дали ни одного вида.
+    Безусловным он был с 5b5c3f4 до 2026-09-29, и это была регрессия: на приёме
+    педиатра с Z00.1 к типу PRIMARY добавлялся PROPHYLACTIC, после чего у Алёнки
+    127 карт теряли 125 замечаний о незаполненных полях (шаблон обязательных
+    полей выбирается по типу визита), а у МДС 148 карт получали правила
+    профосмотра, включая УЗИ и ЭхоКГ. Z-код говорит, ЗАЧЕМ пришёл пациент; вид
+    приёма называет услуга, и её вердикт точнее.
+    """
+    code = code.strip().upper()
+    # Z11.1 лежит под префиксом Z11, а вердикт у него свой и безусловный. В
+    # прежней единой функции это держалось порядком проверок; здесь — явно.
+    if code in _ICD_EXACT:
+        return None
+    for prefix, visit_type in _ICD_PREFIXES:
+        if code.startswith(prefix):
+            return visit_type
+    return None
+
+
 def classify_name(name: str) -> VisitType | None:
     """Тип визита по наименованию услуги, или None если оно молчит.
 
@@ -469,14 +501,22 @@ class FormalValidator:
         """
         result: set[VisitType] = set()
 
-        # ── Z-коды диагнозов добавляют тип независимо от услуг ────────────────
+        # ── Z11.1 добавляет тип независимо от услуг ───────────────────────────
         diagnoses: list = visit.get("Диагнозы") or []
-        for d in diagnoses:
-            if not isinstance(d, dict):
-                continue
-            icd_type = classify_icd(str(d.get("КодМКБ") or ""))
-            if icd_type is not None:
-                result.add(icd_type)
+        icd_codes = [str(d.get("КодМКБ") or "") for d in diagnoses if isinstance(d, dict)]
+        for code in icd_codes:
+            exact = classify_icd_exact(code)
+            if exact is not None:
+                result.add(exact)
+
+        def _add_prefix_types_if_services_were_silent() -> None:
+            """Остальные Z-коды — запасной разбор, см. classify_icd_prefix."""
+            if any(visit_type not in _ICD_EXACT.values() for visit_type in result):
+                return
+            for icd in icd_codes:
+                by_prefix = classify_icd_prefix(icd)
+                if by_prefix is not None:
+                    result.add(by_prefix)
 
         # услуги, не давшие вида приёма: пишутся в лог, когда карта уходит в
         # OTHER. Без них по логу не понять ни почему, ни сколько таких карт.
@@ -485,6 +525,7 @@ class FormalValidator:
         services: list = visit.get("Услуги") or []
         if not services:
             logger.warning("[formal] visit has empty or missing Услуги — defaulting to OTHER")
+            _add_prefix_types_if_services_were_silent()
             result.add(VisitType.OTHER)
             return result
 
@@ -540,6 +581,8 @@ class FormalValidator:
                         (svc.get("Наименование") or "без наименования")[:80],
                     )
                 )
+
+        _add_prefix_types_if_services_were_silent()
 
         if not result:
             logger.warning(

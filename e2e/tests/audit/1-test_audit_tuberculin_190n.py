@@ -36,6 +36,11 @@ from fixtures import base_visit, dx  # noqa: E402
 from harness import Case, VisitType, run_cases  # noqa: E402
 
 SERVICE_CODE = ""
+# У фикстур нет кода услуги намеренно: вид приёма должен выводиться из Z11.1, а
+# не из кода, иначе тест проверял бы не ту ветку классификатора. Тогда правило
+# каталога `service_has_nomenclature_code` срабатывает законно — это не ложное
+# срабатывание, а следствие премисы фикстуры, и оно объявлено спутником.
+_NO_NMU_CODE = frozenset({"УСЛУГА_БЕЗ_КОДА_НОМЕНКЛАТУРЫ"})
 SERVICE_NAME = "Туберкулинодиагностика (внутрикожная проба с туберкулином)"
 SPECIALTY = "Педиатр"
 Z11_1 = dx("Z11.1", "Специальное скрининговое обследование с целью выявления туберкулёза органов дыхания")
@@ -128,18 +133,21 @@ CASES = [
         visit=no_objective_data,
         expect="ТУБЕРКУЛИН_ОТСУТСТВУЮТ_ОБЪЕКТИВНЫЕ_ДАННЫЕ",
         visit_types={VisitType.PROPHYLACTIC_TUBERCULIN},
+        also=_NO_NMU_CODE,
     ),
     Case(
         name="нет заключения по пробе",
         visit=no_conclusion,
         expect="ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ЗАКЛЮЧЕНИЕ",
         visit_types={VisitType.PROPHYLACTIC_TUBERCULIN},
+        also=_NO_NMU_CODE,
     ),
     Case(
         name="патология без осмотра специалиста",
         visit=pathology_without_specialist,
         expect="ТУБЕРКУЛИН_ОТСУТСТВУЕТ_ОСМОТР_СПЕЦИАЛИСТА_ПРИ_ПАТОЛОГИИ",
         visit_types={VisitType.PROPHYLACTIC_TUBERCULIN},
+        also=_NO_NMU_CODE,
     ),
 ]
 

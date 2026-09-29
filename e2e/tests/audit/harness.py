@@ -101,6 +101,12 @@ class Case:
     `only=False` — assert the flag alone, not the full set. Required for cards
     taken from production: they are not sterile, and every unrelated defect in
     them would fail an exact-set assert forever.
+
+    `also` — flags the fixture legitimately produces besides the one under test,
+    because two rules read the same field and both are right. The exact-set
+    assert then expects `{expect} | also`, so strictness is kept and the overlap
+    is documented instead of being hidden behind `only=False`. A false positive
+    never belongs here: it belongs in the rule.
     """
 
     name: str
@@ -109,6 +115,7 @@ class Case:
     visit_types: set[VisitType]
     present: bool = True
     only: bool = True
+    also: frozenset[str] = frozenset()
 
 
 class _Report:
@@ -316,11 +323,17 @@ async def _stage_two(cases: list[Case], report: _Report) -> None:
 
         got = _flags(result)
         if case.only:
+            expected = {case.expect} | set(case.also)
+            label = (
+                f"найден ровно один флаг — {case.expect}"
+                if not case.also
+                else f"найдены ровно {case.expect} и ожидаемые спутники"
+            )
             report.check(
-                f"[{case.name}] найден ровно один флаг — {case.expect}",
-                got == {case.expect},
-                f"лишние: {', '.join(sorted(got - {case.expect})) or '—'}\n"
-                f"не найдено: {', '.join(sorted({case.expect} - got)) or '—'}\n"
+                f"[{case.name}] {label}",
+                got == expected,
+                f"лишние: {', '.join(sorted(got - expected)) or '—'}\n"
+                f"не найдено: {', '.join(sorted(expected - got)) or '—'}\n"
                 f"находки целиком:\n{_describe(result)}",
             )
         else:

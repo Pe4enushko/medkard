@@ -262,8 +262,12 @@ def test_validate_rule_anchors_today_on_the_visit_date() -> None:
     visit_message = client.messages[1]["content"]
     assert visit_message.startswith("## Сегодняшний день")
     assert "20.08.2026" in visit_message
-    # сама запись передаётся следом, без изменений
-    assert json.dumps(visit, ensure_ascii=False, indent=2) in visit_message
+    # сама запись передаётся следом — без служебных полей, см. отдельный тест ниже
+    from LLM.validations import _without_technical_fields
+
+    assert json.dumps(
+        _without_technical_fields(visit), ensure_ascii=False, indent=2
+    ) in visit_message
 
 
 def test_validate_rule_without_a_visit_date_sends_the_bare_record() -> None:
@@ -276,4 +280,40 @@ def test_validate_rule_without_a_visit_date_sends_the_bare_record() -> None:
         )
     )
 
-    assert client.messages[1]["content"] == json.dumps(visit, ensure_ascii=False, indent=2)
+    from LLM.validations import _without_technical_fields
+
+    assert client.messages[1]["content"] == json.dumps(
+        _without_technical_fields(visit), ensure_ascii=False, indent=2
+    )
+
+
+def test_visit_message_hides_technical_fields_from_the_model() -> None:
+    """Служебные поля 1С модели не показываются: врачу их нечем исправить.
+
+    Прогон 2026-09-29: модель объявила заглушкой номер приёма («name» —
+    хвост GUID фикстуры), пустой КодЕГИСЗ и сам GUID. Правила rules.json ни
+    одного из этих полей не проверяют, а коды номенклатуры читает
+    детерминированный каталог — напрямую из карты, не через это сообщение.
+    """
+    from LLM.validations import _visit_message
+
+    visit = {
+        "Прием": {"GUID": "abc", "NUM": "name", "DATE": "03.08.2026",
+                  "Врач_код": "00042", "Врач": "Иванова А. С."},
+        "Пациент": {"CODE": "P-000001", "AGE": 45, "GENDER": "Женский"},
+        "Услуги": [{"Код": "00000001117", "Артикул": "71.01.00", "КодЕГИСЗ": "",
+                    "УИДЕГИСЗ": 7122, "Наименование": "Прием врача-терапевта первичный"}],
+        "ДанныеОсмотра": [{"Параметр": "Жалобы", "Значение": "боль в горле"}],
+        "Диагнозы": [{"КодМКБ": "J06.9", "НаименованиеМКБ": "ОРВИ", "Детализация": ""}],
+    }
+    message = _visit_message(visit)
+
+    for hidden in ("GUID", '"NUM"', "Врач_код", '"CODE"', '"Артикул"', "КодЕГИСЗ", "УИДЕГИСЗ"):
+        assert hidden not in message, hidden
+    for kept in ("DATE", "Иванова А. С.", "AGE", "GENDER", "Наименование",
+                 "Жалобы", "боль в горле", "J06.9", "Детализация"):
+        assert kept in message, kept
+
+    # Карта уходит другим проверкам той же картой: чистим копию, не оригинал.
+    assert visit["Прием"]["GUID"] == "abc"
+    assert visit["Услуги"][0]["КодЕГИСЗ"] == ""

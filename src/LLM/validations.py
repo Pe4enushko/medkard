@@ -65,13 +65,42 @@ class _RuleVerdict(BaseModel):
     issue: str = Field(default="", max_length=500)
 
 
+# Служебные поля: их заполняет обмен с 1С, а не врач, и ни одно правило
+# rules.json их не проверяет. Модель же судит всё, что видит: в прогоне
+# 2026-09-29 она объявила заглушкой номер приёма, пустой КодЕГИСЗ и GUID —
+# замечания, которые врачу нечем исправить. Коды номенклатуры сверяет
+# детерминированный каталог, и карту он читает сам, не через это сообщение.
+_TECHNICAL_BLOCK_FIELDS: dict[str, tuple[str, ...]] = {
+    "Прием": ("GUID", "NUM", "Врач_код"),
+    "Пациент": ("CODE",),
+}
+_TECHNICAL_SERVICE_FIELDS: tuple[str, ...] = ("Код", "Артикул", "КодЕГИСЗ", "УИДЕГИСЗ")
+
+
+def _without_technical_fields(visit: dict[str, Any]) -> dict[str, Any]:
+    """Копия записи без служебных идентификаторов; исходная карта не меняется."""
+    visible = dict(visit)
+    for block, fields in _TECHNICAL_BLOCK_FIELDS.items():
+        inner = visible.get(block)
+        if isinstance(inner, dict):
+            visible[block] = {key: value for key, value in inner.items() if key not in fields}
+    services = visible.get("Услуги")
+    if isinstance(services, list):
+        visible["Услуги"] = [
+            {key: value for key, value in service.items() if key not in _TECHNICAL_SERVICE_FIELDS}
+            if isinstance(service, dict) else service
+            for service in services
+        ]
+    return visible
+
+
 def _visit_message(visit: dict[str, Any]) -> str:
     """Запись для модели: сначала точка отсчёта во времени, потом сама карта.
 
     Дата приёма внутри JSON и так есть, но как одно поле среди прочих она
     моделью за «сегодня» не принимается — см. ``LLM.prompt_context.today_block``.
     """
-    visit_text = json.dumps(visit, ensure_ascii=False, indent=2)
+    visit_text = json.dumps(_without_technical_fields(visit), ensure_ascii=False, indent=2)
     today = today_block(visit_date(visit.get("Прием") or {}))
     return f"{today}\n\n{visit_text}" if today else visit_text
 
