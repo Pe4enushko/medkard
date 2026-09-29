@@ -33,7 +33,13 @@ done
 [[ -f "$DEV_ENV" ]] || { echo "ERROR: .env.dev not found — run scripts/dev/deploy_dev.sh first" >&2; exit 1; }
 [[ -f "$ENV_FILE" ]] || { echo "ERROR: .env not found — copy .env.example first" >&2; exit 1; }
 
-read_dev() { grep -E "^[[:space:]]*$1=" "$DEV_ENV" | head -1 | cut -d= -f2-; }
+read_dev() {  # one awk, no pipeline: see deploy_dev.sh
+    awk -F= -v key="$1" '
+        /^[[:space:]]*#/ { next }
+        { name = $1; gsub(/[[:space:]]/, "", name) }
+        name == key { sub(/^[^=]*=/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit }
+    ' "$DEV_ENV"
+}
 
 DEV_HOST="$(read_dev POSTGRES_HOST)"
 DEV_PORT="$(read_dev POSTGRES_PORT)"

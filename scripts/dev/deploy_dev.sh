@@ -90,10 +90,12 @@ echo " ready"
 
 # A password is generated once and then reused: the role already exists on a
 # re-run, and rewriting it would invalidate whatever .env already carries.
-if [[ -f "$DEV_ENV" ]] && grep -q '^POSTGRES_PASSWORD=' "$DEV_ENV"; then
-    DB_PASSWORD="$(grep '^POSTGRES_PASSWORD=' "$DEV_ENV" | head -1 | cut -d= -f2-)"
-else
-    DB_PASSWORD="$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 24)"
+# `head` closing the pipe early makes the writer exit 141, and under
+# `set -o pipefail` that kills the script without a word — hence awk and python,
+# each a single process reading to its own end.
+DB_PASSWORD="$(awk -F= '$1 == "POSTGRES_PASSWORD" { sub(/^[^=]*=/, ""); print; exit }' "$DEV_ENV" 2>/dev/null || true)"
+if [[ -z "$DB_PASSWORD" ]]; then
+    DB_PASSWORD="$(python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(24)))')"
 fi
 
 echo "==> role and database"
@@ -112,10 +114,13 @@ if [[ "$(admin -tA -c "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'")"
     admin -q -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
 fi
 
-# vector has to exist before migration 001 runs against a non-superuser role.
+# Extensions are created here, as superuser, because migration 001 would run as
+# the application role: "uuid-ossp" is not trusted and CREATE EXTENSION would be
+# refused. GRANT is for PG15+, where public has no CREATE on schema public.
 psql -w -h 127.0.0.1 -p "$DB_PORT" -U postgres -d "$DB_NAME" -v ON_ERROR_STOP=1 -q \
     -c "CREATE EXTENSION IF NOT EXISTS vector;" \
     -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" \
+    -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' \
     -c "GRANT ALL ON SCHEMA public TO ${DB_USER};"
 
 cat > "$DEV_ENV" <<ENV

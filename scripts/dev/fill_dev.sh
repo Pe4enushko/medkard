@@ -43,8 +43,16 @@ case "$DAYS" in
     ''|*[!0-9]*) echo "ERROR: DAYS must be a whole number, got '$DAYS'" >&2; exit 2 ;;
 esac
 
-read_env() {  # $1 = file, $2 = key
-    grep -E "^[[:space:]]*$2=" "$1" | head -1 | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"
+read_env() {  # $1 = file, $2 = key — one awk, no pipeline: see deploy_dev.sh
+    local value
+    value="$(awk -F= -v key="$2" '
+        /^[[:space:]]*#/ { next }
+        { name = $1; gsub(/[[:space:]]/, "", name) }
+        name == key { sub(/^[^=]*=/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit }
+    ' "$1")"
+    value="${value%\"}"; value="${value#\"}"
+    value="${value%\'}"; value="${value#\'}"
+    printf '%s' "$value"
 }
 
 [[ -f "$SRC_ENV" ]] || { echo "ERROR: $SRC_ENV not found — the source database is read from it" >&2; exit 1; }
