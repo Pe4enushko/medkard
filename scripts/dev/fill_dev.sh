@@ -83,7 +83,9 @@ fi
 export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
 
 src() { PGPASSWORD="$SRC_PASSWORD" psql -w -h "$SRC_HOST" -p "${SRC_PORT:-5432}" -U "$SRC_USER" -d "$SRC_DB" -v ON_ERROR_STOP=1 "$@"; }
-dst() { PGPASSWORD="$DST_PASSWORD" psql -w -h "$DST_HOST" -p "${DST_PORT:-5432}" -U "$DST_USER" -d "$DST_DB" -v ON_ERROR_STOP=1 "$@"; }
+# client_min_messages: TRUNCATE ... CASCADE narrates every dependent table, and
+# the cascade is intended here — the notices only bury the row counts.
+dst() { PGPASSWORD="$DST_PASSWORD" PGOPTIONS='-c client_min_messages=warning' psql -w -h "$DST_HOST" -p "${DST_PORT:-5432}" -U "$DST_USER" -d "$DST_DB" -v ON_ERROR_STOP=1 "$@"; }
 
 echo "source: $SRC_USER@$SRC_HOST:${SRC_PORT:-5432}/$SRC_DB  (read only)"
 echo "target: $DST_USER@$DST_HOST:${DST_PORT:-5432}/$DST_DB"
@@ -104,12 +106,52 @@ REFERENCE_TABLES=(
     grls_registry
 )
 
-copy_table() {  # $1 = table, $2 = SELECT statement
-    local table="$1" query="$2" rows
+columns_of() {  # $1 = src|dst, $2 = table — copyable columns in schema order
+    local query="SELECT column_name
+                   FROM information_schema.columns
+                  WHERE table_schema = 'public'
+                    AND table_name = '$2'
+                    AND is_generated = 'NEVER'
+                  ORDER BY ordinal_position"
+    if [[ "$1" == "src" ]]; then src -tA -c "$query"; else dst -tA -c "$query"; fi
+}
+
+# `SELECT *` cannot be used: the source database drifts from migrations/ — on
+# 29.09.2026 its dietary_supplements carried columns the schema does not have,
+# and COPY died with «extra data after last expected column». Copying the
+# intersection survives drift in either direction; a column only the target has
+# gets its default.
+shared_columns() {  # $1 = table — quoted, comma-separated, in target order
+    local table="$1" source_columns target_column list=""
+    source_columns="$(columns_of src "$table")"
+    while IFS= read -r target_column; do
+        [[ -z "$target_column" ]] && continue
+        if grep -qxF -- "$target_column" <<<"$source_columns"; then
+            list+="${list:+, }\"${target_column}\""
+        fi
+    done <<<"$(columns_of dst "$table")"
+    printf '%s' "$list"
+}
+
+copy_table() {  # $1 = table, $2 = WHERE clause or empty
+    local table="$1" where="${2:-}" columns rows shared total
+    columns="$(shared_columns "$table")"
+    if [[ -z "$columns" ]]; then
+        printf '  %-22s %10s\n' "$table" "no shared columns, skipped"
+        return
+    fi
     dst -q -c "TRUNCATE TABLE ${table} CASCADE;"
-    src -q -c "\\copy (${query}) TO STDOUT" | dst -q -c "\\copy ${table} FROM STDIN"
+    src -q -c "\\copy (SELECT ${columns} FROM ${table} ${where}) TO STDOUT" \
+        | dst -q -c "\\copy ${table} (${columns}) FROM STDIN"
     rows="$(dst -tA -c "SELECT count(*) FROM ${table}")"
-    printf '  %-22s %10s rows\n' "$table" "$rows"
+    shared="$(grep -c '"' <<<"${columns//, /$'\n'}" || true)"
+    total="$(grep -c . <<<"$(columns_of dst "$table")" || true)"
+    if [[ "$shared" != "$total" ]]; then
+        printf '  %-22s %10s rows  (%s of %s columns — schemas differ)\n' \
+            "$table" "$rows" "$shared" "$total"
+    else
+        printf '  %-22s %10s rows\n' "$table" "$rows"
+    fi
 }
 
 for table in "${REFERENCE_TABLES[@]}"; do
@@ -117,17 +159,16 @@ for table in "${REFERENCE_TABLES[@]}"; do
         printf '  %-22s %10s\n' "$table" "absent in source, skipped"
         continue
     fi
-    copy_table "$table" "SELECT * FROM ${table}"
+    copy_table "$table"
 done
 
 # Audited cards and the push journal — windowed. COALESCE because an unfinished
 # card has no finished_at, and a card can be re-audited (updated_at moves).
 copy_table done_cards \
-    "SELECT * FROM done_cards WHERE COALESCE(finished_at, updated_at, started_at) >= now() - interval '${DAYS} days'"
+    "WHERE COALESCE(finished_at, updated_at, started_at) >= now() - interval '${DAYS} days'"
 
 if [[ "$(src -tA -c "SELECT to_regclass('public.push_log') IS NOT NULL")" == "t" ]]; then
-    copy_table push_log \
-        "SELECT * FROM push_log WHERE pushed_at >= now() - interval '${DAYS} days'"
+    copy_table push_log "WHERE pushed_at >= now() - interval '${DAYS} days'"
 fi
 
 echo
