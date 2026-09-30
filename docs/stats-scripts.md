@@ -6,10 +6,10 @@
 
 | Скрипт | Отвечает на вопрос |
 |---|---|
-| `scripts/operator/stats-findings.py` | какие флаги выставлены, сколько замечаний и на скольких картах |
-| `scripts/operator/stats-broken.py` | сколько карт упало и на чём именно |
+| `scripts/stats/stats-findings.py` | какие флаги выставлены, сколько замечаний и на скольких картах |
+| `scripts/stats/stats-broken.py` | сколько карт упало и на чём именно |
 
-Общее в `scripts/operator/stats_common.py`: разбор интервала, периоды, запись CSV,
+Общее в `scripts/stats/stats_common.py`: разбор интервала, периоды, запись CSV,
 отправка. Отдельным модулем потому, что сводки сравнивают между собой, и
 интервал обязан считаться в них одинаково.
 
@@ -31,11 +31,11 @@
 ## Замечания
 
 ```bash
-python scripts/operator/stats-findings.py                        # 7 дней, все организации
-python scripts/operator/stats-findings.py --days 1 --org MDS
-python scripts/operator/stats-findings.py --from 24.09.2026 --to 29.09.2026
-python scripts/operator/stats-findings.py --days 30 --detailed --bucket week
-python scripts/operator/stats-findings.py --days 3 --detailed --send remoteclaude
+python scripts/stats/stats-findings.py                        # 7 дней, все организации
+python scripts/stats/stats-findings.py --days 1 --org MDS
+python scripts/stats/stats-findings.py --from 24.09.2026 --to 29.09.2026
+python scripts/stats/stats-findings.py --days 30 --detailed --bucket week
+python scripts/stats/stats-findings.py --days 3 --detailed --send remoteclaude
 ```
 
 В сводке: карт за интервал, сколько из них с замечаниями, замечаний на карту, и
@@ -50,9 +50,9 @@ python scripts/operator/stats-findings.py --days 3 --detailed --send remoteclaud
 ## Сломанные карты
 
 ```bash
-python scripts/operator/stats-broken.py --days 1
-python scripts/operator/stats-broken.py --from 24.09.2026 --to 29.09.2026 --org MDS
-python scripts/operator/stats-broken.py --days 3 --detailed --send remoteclaude
+python scripts/stats/stats-broken.py --days 1
+python scripts/stats/stats-broken.py --from 24.09.2026 --to 29.09.2026 --org MDS
+python scripts/stats/stats-broken.py --days 3 --detailed --send remoteclaude
 ```
 
 Сломанная карта — `broken = TRUE`, текст падения в `stacktrace` (миграция 012).

@@ -13,10 +13,10 @@
 
 Запуск из корня проекта:
 
-    python scripts/operator/stats-broken.py                       # 7 дней
-    python scripts/operator/stats-broken.py --days 1
-    python scripts/operator/stats-broken.py --from 24.09.2026 --to 29.09.2026 --org MDS
-    python scripts/operator/stats-broken.py --days 3 --detailed --send remoteclaude
+    python scripts/stats/stats-broken.py                       # 7 дней
+    python scripts/stats/stats-broken.py --days 1
+    python scripts/stats/stats-broken.py --from 24.09.2026 --to 29.09.2026 --org MDS
+    python scripts/stats/stats-broken.py --days 3 --detailed --send remoteclaude
 
 Опции:
     --days N            интервал назад от сегодня (по умолчанию 7)

@@ -17,15 +17,15 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-OPERATOR = ROOT / "scripts" / "operator"
-sys.path.insert(0, str(OPERATOR))
+STATS = ROOT / "scripts" / "stats"
+sys.path.insert(0, str(STATS))
 
 import stats_common  # noqa: E402
 
 
 def _load(name: str, filename: str):
     """Скрипты названы через дефис, обычным import их не взять."""
-    spec = importlib.util.spec_from_file_location(name, OPERATOR / filename)
+    spec = importlib.util.spec_from_file_location(name, STATS / filename)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)

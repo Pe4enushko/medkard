@@ -46,9 +46,9 @@ python scripts/operator/audit-file.py <path-to-visit-json>
 # Re-audit cards frozen with broken = TRUE (offline: reads card_data from DB)
 python scripts/operator/fix-broken.py ORG|--all [-y] [--dry-run] [--num-batches N]
 
-# Prod stats: findings by flag and broken cards over an interval (docs/operator-stats.md)
-python scripts/operator/stats-findings.py --days 7 [--org MDS] [--detailed --send ALIAS]
-python scripts/operator/stats-broken.py --days 7 [--detailed]
+# Prod stats: findings by flag and broken cards over an interval (docs/stats-scripts.md)
+python scripts/stats/stats-findings.py --days 7 [--org MDS] [--detailed --send ALIAS]
+python scripts/stats/stats-broken.py --days 7 [--detailed]
 
 # Replay today's cached 1C data (for development)
 python scripts/smoke/mock-run-today.py
