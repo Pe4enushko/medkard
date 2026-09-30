@@ -193,6 +193,7 @@ def _inspection_for_report(
     return inspection
 
 
+
 def _build_row(
     visit: dict[str, Any],
     formal: FormalStructureResult,
