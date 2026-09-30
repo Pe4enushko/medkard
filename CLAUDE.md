@@ -50,6 +50,10 @@ python scripts/operator/fix-broken.py ORG|--all [-y] [--dry-run] [--num-batches 
 bash scripts/dev/dev_stand.sh          # deploy → fill → switch .env
 bash scripts/dev/fill_dev.sh 14        # just re-fill, 14 days of cards
 
+# Prod stats: findings by flag and broken cards over an interval (docs/stats-scripts.md)
+python scripts/stats/stats-findings.py --days 7 [--org MDS] [--detailed --send ALIAS]
+python scripts/stats/stats-broken.py --days 7 [--detailed]
+
 # Replay today's cached 1C data (for development)
 python scripts/smoke/mock-run-today.py
 
