@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from stats_common import (  # noqa: E402
     FINDINGS_JSON, VISIT_DATE, add_interval_arguments, bucket_expression,
-    export_path, interval, offer_scp, print_table, write_csv,
+    export_path, interval, offer_scp, print_table, target_database, write_csv,
 )
 
 from RAG.retrieval.vector_store import close_pool  # noqa: E402
@@ -172,7 +172,8 @@ async def main() -> int:
         await close_pool()
 
     scope = args.org or "все организации"
-    print(f"\nЗамечания за {start:%d.%m.%Y}–{end:%d.%m.%Y} ({scope}), "
+    print(f"\nБаза: {target_database()}")
+    print(f"Замечания за {start:%d.%m.%Y}–{end:%d.%m.%Y} ({scope}), "
           f"по времени {'аудита' if args.by == 'audit' else 'приёма'}")
     cards = int(totals.get("cards") or 0)
     if not cards:
