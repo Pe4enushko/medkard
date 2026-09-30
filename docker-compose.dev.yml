@@ -13,6 +13,17 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_DB: postgres
       POSTGRES_HOST_AUTH_METHOD: trust
+    # Соединений нужно больше, чем 100 по умолчанию. Один прогон аудита держит
+    # три независимых пула — asyncpg в vector_store, psycopg в BaseStorage и пул
+    # клинреков, — и это умножается на число одновременно идущих карт. На проде
+    # это уже стоило 127 карт, ушедших в broken с
+    # «asyncpg.exceptions.TooManyConnectionsError: sorry, too many clients
+    # already» (18–26.09.2026); там лимит подняли, стенд не должен наступать на
+    # те же грабли. Переопределяется MEDKARD_DEV_MAX_CONNECTIONS.
+    command:
+      - postgres
+      - -c
+      - max_connections=${MEDKARD_DEV_MAX_CONNECTIONS:-300}
     ports:
       - "127.0.0.1:${MEDKARD_DEV_PORT:-55432}:5432"
     volumes:

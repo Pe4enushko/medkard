@@ -13,6 +13,7 @@ DEV_ENV="$ROOT/.env.dev"
 DB_NAME="${MEDKARD_DEV_DB:-medkard_dev}"
 DB_USER="${MEDKARD_DEV_USER:-medkard_dev}"
 DB_PORT="${MEDKARD_DEV_PORT:-55432}"
+MAX_CONNECTIONS="${MEDKARD_DEV_MAX_CONNECTIONS:-300}"
 HEALTH_TIMEOUT_SECONDS="${MEDKARD_DEV_HEALTH_TIMEOUT:-120}"
 
 usage() {
@@ -41,7 +42,8 @@ command -v psql >/dev/null || { echo "ERROR: psql not found (install postgresql-
 command -v pg_isready >/dev/null || { echo "ERROR: pg_isready not found (install postgresql-client)" >&2; exit 1; }
 
 echo "==> starting container"
-MEDKARD_DEV_PORT="$DB_PORT" docker compose -f "$COMPOSE_FILE" up -d
+MEDKARD_DEV_PORT="$DB_PORT" MEDKARD_DEV_MAX_CONNECTIONS="$MAX_CONNECTIONS" \
+    docker compose -f "$COMPOSE_FILE" up -d
 
 # Superuser connection. Auth is trust (loopback only), so no password is needed
 # here; the generated one below matters only to the application.
@@ -87,6 +89,20 @@ MSG
     sleep 2
 done
 echo " ready"
+
+# Лимит соединений задаётся аргументом сервера, а он применяется только при
+# создании контейнера: у переиспользованного останется прежний. Спрашиваем сам
+# сервер, а не compose-файл, и говорим, что делать, если значение старое.
+effective="$(admin -tA -c 'SHOW max_connections' 2>/dev/null || echo '?')"
+echo "==> max_connections: $effective"
+if [[ "$effective" != "$MAX_CONNECTIONS" && "$effective" != "?" ]]; then
+    cat >&2 <<MSG
+    Контейнер поднят с прежним лимитом ($effective вместо $MAX_CONNECTIONS).
+    Перечитать аргументы сервера можно только пересозданием контейнера; данные
+    в томе при этом остаются:
+        docker compose -f docker-compose.dev.yml up -d --force-recreate
+MSG
+fi
 
 # A password is generated once and then reused: the role already exists on a
 # re-run, and rewriting it would invalidate whatever .env already carries.
