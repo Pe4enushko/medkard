@@ -116,6 +116,8 @@ class Case:
     present: bool = True
     only: bool = True
     also: frozenset[str] = frozenset()
+    issue_contains: tuple[str, ...] = ()
+    issue_excludes: tuple[str, ...] = ()
 
 
 class _Report:
@@ -200,7 +202,7 @@ class _FormalCallWatch(logging.Handler):
     "[formal] LLM returned N finding(s), tokens=T" tally.
     """
 
-    _MARKER = "failed to parse JSON response"
+    _MARKERS = ("failed to parse JSON response", "failed to parse rule verdict")
     _TALLY = "LLM returned"
     _DROPPED = "dropping unrecognised flag"
     _FUZZY = "fuzzy-matched to"
@@ -223,7 +225,7 @@ class _FormalCallWatch(logging.Handler):
             message = record.getMessage()
         except Exception:
             return
-        if self._MARKER in message:
+        if any(marker in message for marker in self._MARKERS):
             self.parse_failed = True
         elif self._DROPPED in message:
             # _enrich_flags silently discards a flag it cannot match to rules.json,
@@ -361,6 +363,22 @@ async def _stage_two(cases: list[Case], report: _Report) -> None:
                 f"находок с этим флагом: {len(raised)}",
             )
 
+        target_issue = " ".join(
+            finding.issue for finding in result.formal.findings if finding.flag == case.expect
+        ).lower()
+        for term in case.issue_contains:
+            report.check(
+                f"[{case.name}] замечание содержит {term!r}",
+                term.lower() in target_issue,
+                target_issue or "(целевого замечания нет)",
+            )
+        for term in case.issue_excludes:
+            report.check(
+                f"[{case.name}] замечание не содержит {term!r}",
+                term.lower() not in target_issue,
+                target_issue,
+            )
+
         expected_dx = len(case.visit["Диагнозы"])
         report.check(
             f"[{case.name}] DiagnosisValidator отработал по всем {expected_dx} диагнозам",
@@ -376,7 +394,7 @@ async def run_cases(title: str, cases: list[Case]) -> int:
     """Run every case through both stages and return a process exit code."""
     report = _Report()
     print(f"\n{title}")
-    print(f"  {len(cases)} фикстур(ы), по одному нарушению в каждой\n")
+    print(f"  {len(cases)} фикстур(ы), с проверками наличия/отсутствия замечаний\n")
 
     print("Этап 1 — разбор фикстур (без LLM)")
     await _stage_one(cases, report)

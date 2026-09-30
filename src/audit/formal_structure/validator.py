@@ -30,6 +30,7 @@ from LLM.validations import validate_rule
 from LLM.visit_classifier import VisitClassifier
 from storage.models.result import SNAPSHOT_FIELDS
 from parsers.json_parser import patient_age as _patient_age
+from parsers.study_abbreviations import is_study_abbreviation
 
 _chinese_detector = ChineseDetector()
 
@@ -103,6 +104,61 @@ def _enrich_flags(findings: list[dict]) -> list[dict]:
         else:
             logger.warning("[formal] dropping unrecognised flag %r (no match within edit distance 3)", flag)
     return result
+
+
+# Правила, у которых предмет замечания — отдельный лекарственный препарат.
+# Только на них имеет смысл сверять предмет с аббревиатурами исследований:
+# у остальных в кавычках стоит не препарат.
+_DRUG_SUBJECT_FLAGS = frozenset({
+    "НЕПОЛНОЕ_НАЗНАЧЕНИЕ_ПРЕПАРАТА",
+    "НАЗНАЧЕНИЕ_ПО_ТОРГОВОМУ_БЕЗ_МНН",
+})
+
+_QUOTED_RE = re.compile(r"'([^']{1,80})'|«([^»]{1,80})»")
+
+
+def _quoted_values(text: str) -> list[str]:
+    return [single or guillemets for single, guillemets in _QUOTED_RE.findall(text)]
+
+
+def _field_labels(visit: dict[str, Any]) -> set[str]:
+    """Подписи полей записи — тем же написанием, каким их цитирует модель."""
+    labels = {str(key).strip().rstrip(":").casefold() for key in visit}
+    for item in visit.get("ДанныеОсмотра") or []:
+        if isinstance(item, dict):
+            labels.add(str(item.get("Параметр", "")).strip().rstrip(":").casefold())
+    return labels
+
+
+def _drop_study_abbreviation_findings(
+    findings: list[dict[str, str]],
+    visit: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Снять замечания о назначении, предмет которых — аббревиатура исследования.
+
+    Модель обязана привести значение поля дословно (п. 9 промпта), поэтому
+    предмет замечания стоит в кавычках. Подписи полей из кавычек вычитаются:
+    «в поле 'Рекомендовано' назначение 'КАК'» — про КАК, а не про поле.
+    Замечание снимается только когда ВСЕ оставшиеся предметы — исследования:
+    там, где рядом назван препарат, врачу есть что исправить.
+    """
+    labels = _field_labels(visit)
+    kept: list[dict[str, str]] = []
+    for finding in findings:
+        if finding["flag"] in _DRUG_SUBJECT_FLAGS:
+            subjects = [
+                value
+                for value in _quoted_values(finding["issue"])
+                if value.strip().rstrip(":").casefold() not in labels
+            ]
+            if subjects and all(is_study_abbreviation(value) for value in subjects):
+                logger.info(
+                    "[formal] dropping %s: subject(s) %s are studies, not drugs",
+                    finding["flag"], subjects,
+                )
+                continue
+        kept.append(finding)
+    return kept
 
 
 class VisitType(Enum):
@@ -796,6 +852,8 @@ class FormalValidator:
             )
             tokens += rule_tokens
         logger.info("[formal] LLM returned %d finding(s), tokens=%d: %s", len(findings), tokens, findings)
+
+        findings = _drop_study_abbreviation_findings(findings, visit)
 
         for i, finding in enumerate(findings):
             if _chinese_detector.check_str(finding["issue"]):

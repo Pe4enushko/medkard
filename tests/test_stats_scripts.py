@@ -17,15 +17,15 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-OPERATOR = ROOT / "scripts" / "operator"
-sys.path.insert(0, str(OPERATOR))
+STATS = ROOT / "scripts" / "stats"
+sys.path.insert(0, str(STATS))
 
 import stats_common  # noqa: E402
 
 
 def _load(name: str, filename: str):
     """Скрипты названы через дефис, обычным import их не взять."""
-    spec = importlib.util.spec_from_file_location(name, OPERATOR / filename)
+    spec = importlib.util.spec_from_file_location(name, STATS / filename)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -146,3 +146,22 @@ def test_broken_reason_is_the_last_line_of_the_stacktrace():
     assert broken._reason(trace) == "FileNotFoundError: resources/274n_record_minimum.json"
     assert broken._reason("") == "— (стектрейс пуст)"
     assert broken._reason(None) == "— (стектрейс пуст)"
+
+
+def test_target_database_is_named_and_a_local_one_is_marked(monkeypatch):
+    """Выгрузка со стенда и с прода выглядят одинаково, если не сказать, откуда.
+
+    Прогон 30.09: 127 сломанных карт из стенда были прочитаны как боевые, и
+    разбор ушёл в сторону — в шапке не было базы.
+    """
+    monkeypatch.setenv("POSTGRES_HOST", "10.22.0.1")
+    monkeypatch.setenv("POSTGRES_PORT", "5432")
+    monkeypatch.setenv("POSTGRES_DB", "medkard_db")
+    monkeypatch.setenv("POSTGRES_USER", "medkard")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "секрет")
+    line = stats_common.target_database()
+    assert line == "medkard@10.22.0.1:5432/medkard_db"
+    assert "секрет" not in line
+
+    monkeypatch.setenv("POSTGRES_HOST", "127.0.0.1")
+    assert "[локальная база — стенд]" in stats_common.target_database()

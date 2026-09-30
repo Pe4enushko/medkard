@@ -34,6 +34,22 @@ VISIT_DATE = "medkard_visit_date(done_cards.card_data -> 'Прием' ->> 'DATE'
 _DATE_FORMATS = ("%d.%m.%Y", "%Y-%m-%d")
 
 
+def target_database() -> str:
+    """Куда скрипт подключился — строкой для шапки отчёта.
+
+    Печатается всегда: выгрузка со стенда и выгрузка с прода выглядят одинаково,
+    и спутать их — значит чинить не ту базу. Пароль сюда не попадает.
+    """
+    import os
+
+    host = os.environ.get("POSTGRES_HOST", "?")
+    port = os.environ.get("POSTGRES_PORT", "5432")
+    name = os.environ.get("POSTGRES_DB", "?")
+    user = os.environ.get("POSTGRES_USER", "?")
+    local = host in ("127.0.0.1", "localhost", "::1")
+    return f"{user}@{host}:{port}/{name}" + ("   [локальная база — стенд]" if local else "")
+
+
 def add_interval_arguments(parser: Any) -> None:
     """--days и --from/--to. Даты в обоих привычных форматах: 1С и ISO."""
     parser.add_argument(

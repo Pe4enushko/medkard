@@ -43,6 +43,7 @@ grep away:
 | `2-`   | diagnosis-graph health: recursion, context overflow, output length, malformed JSON |
 | `3-`   | unfilled template fields — the check that code, not the model, performs |
 | `4-`   | the deterministic rule catalogue — rules the code applies without the model |
+| `5-`   | false-positive regressions: contrast examples for formal rules, isolated and full-pipeline |
 
 A new script joins an existing group by its subject; a genuinely new subject takes the next
 free prefix. Prefixes are never reshuffled — a prefix printed in an old `logs/e2e-*.log` has
