@@ -46,9 +46,15 @@ python scripts/operator/audit-file.py <path-to-visit-json>
 # Re-audit cards frozen with broken = TRUE (offline: reads card_data from DB)
 python scripts/operator/fix-broken.py ORG|--all [-y] [--dry-run] [--num-batches N]
 
+
 # Local dev stand: container + database + data from the source DB (docs/dev-stand.md)
 bash scripts/dev/dev_stand.sh          # deploy → fill → switch .env
 bash scripts/dev/fill_dev.sh 14        # just re-fill, 14 days of cards
+
+# Prod stats: findings by flag and broken cards over an interval (docs/operator-stats.md)
+python scripts/operator/stats-findings.py --days 7 [--org MDS] [--detailed --send ALIAS]
+python scripts/operator/stats-broken.py --days 7 [--detailed]
+
 
 # Replay today's cached 1C data (for development)
 python scripts/smoke/mock-run-today.py
